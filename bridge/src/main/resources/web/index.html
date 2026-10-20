@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ForgeUI Bridge Test</title>
+<style>
+  :root { --bg:#16181d; --panel:#20232a; --line:#333843; --text:#e4e6eb; --muted:#9aa0aa; --accent:#5b9dff; --sel:#ffd24a; --chosen:#4ade80; --bad:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.35 system-ui, sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:#111317; border-bottom:1px solid var(--line); padding:8px 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header .info { color:var(--muted); }
+  #prompt { flex:1; min-width:240px; white-space:pre-wrap; font-weight:600; }
+  button { background:#2b303a; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 12px; cursor:pointer; font:inherit; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#0b1220; font-weight:600; }
+  main { display:grid; grid-template-columns: 1fr 300px; gap:10px; padding:10px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .player { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:10px; }
+  .player.active { border-color:var(--accent); }
+  .player.me { box-shadow: inset 3px 0 0 var(--chosen); }
+  .phead { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px; }
+  .pname { font-weight:700; font-size:15px; cursor:pointer; }
+  .pname.target { color:var(--sel); text-decoration:underline; }
+  .life { font-size:18px; font-weight:800; }
+  .muted { color:var(--muted); }
+  .zone { margin:4px 0; }
+  .zone > .zl { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .cards { display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
+  .card { width:118px; min-height:52px; background:#2a2f39; border:1px solid var(--line); border-radius:6px; padding:4px 5px; cursor:pointer; position:relative; }
+  .card:hover { border-color:var(--accent); }
+  .card .n { font-weight:600; font-size:12px; }
+  .card .c { color:var(--muted); font-size:11px; }
+  .card .pt { position:absolute; right:5px; bottom:3px; font-weight:700; }
+  .card.tapped { opacity:.55; transform: rotate(-4deg); }
+  .card.selectable { border-color:var(--sel); box-shadow:0 0 0 1px var(--sel); }
+  .card.weak { border-style:dashed; }
+  .card.chosen { border-color:var(--chosen); box-shadow:0 0 0 2px var(--chosen); }
+  .card.hidden { background:repeating-linear-gradient(45deg,#262a33,#262a33 6px,#2c313b 6px,#2c313b 12px); cursor:default; }
+  .card.attacking { outline:2px solid var(--bad); }
+  aside .box { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:10px; }
+  aside h3 { margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--muted); letter-spacing:.05em; }
+  #detail { white-space:pre-wrap; min-height:80px; }
+  #log { max-height:300px; overflow:auto; font-size:12px; }
+  #log div { border-bottom:1px solid #2a2e36; padding:2px 0; }
+  .stackitem { padding:4px; border:1px solid var(--line); border-radius:5px; margin-bottom:4px; cursor:pointer; }
+  .stackitem.target { border-color:var(--sel); }
+  .mana button { padding:2px 7px; margin-right:3px; }
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:10; padding:16px; }
+  #modal.open { display:flex; }
+  #dlg { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; width:min(560px,100%); max-height:85vh; overflow:auto; }
+  #dlg h2 { margin:0 0 4px; font-size:16px; }
+  #dlg .msg { white-space:pre-wrap; margin-bottom:10px; }
+  .opt { display:flex; gap:8px; align-items:center; padding:5px 6px; border:1px solid var(--line); border-radius:6px; margin-bottom:4px; cursor:pointer; }
+  .opt.on { border-color:var(--chosen); background:#1f3326; }
+  .opt .ord { min-width:20px; font-weight:800; color:var(--chosen); }
+  .opt input[type=number] { width:70px; margin-left:auto; }
+  .dlgbtns { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; align-items:center; }
+  #status { position:fixed; bottom:8px; left:8px; color:var(--muted); font-size:11px; }
+  .flash { animation: fl .4s; }
+  @keyframes fl { 50% { background:#5a1f1f; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="info" id="turninfo">Connecting…</span>
+  <div id="prompt"></div>
+  <button id="btnOk" class="primary" disabled>OK</button>
+  <button id="btnCancel" disabled>Cancel</button>
+  <button id="btnUndo">Undo</button>
+  <button id="btnConcede">Concede</button>
+</header>
+<main>
+  <section id="players"></section>
+  <aside>
+    <div class="box"><h3>Card</h3><div id="detail" class="muted">Hover a card</div></div>
+    <div class="box"><h3>Stack</h3><div id="stack" class="muted">Empty</div></div>
+    <div class="box"><h3>Log</h3><div id="log"></div></div>
+  </aside>
+</main>
+<div id="modal"><div id="dlg"></div></div>
+<div id="status"></div>
+
+<script>
+let ws, state = null, asks = new Map(), current = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cardIndex = new Map();
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $('status').textContent = 'connected'; ws.send(JSON.stringify({type:'hello'})); };
+  ws.onclose = () => { $('status').textContent = 'disconnected, retrying…'; setTimeout(connect, 1000); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'state') { state = m; (m.asks || []).forEach(a => asks.set(a.id, a)); render(); }
+    else if (m.type === 'ask') { asks.set(m.id, m); showNextAsk(); }
+    else if (m.type === 'askClosed') { asks.delete(m.id); if (current && current.id === m.id) { current = null; closeModal(); } showNextAsk(); }
+    else if (m.type === 'flash') { document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash'); }
+  };
+}
+const send = o => ws.send(JSON.stringify(o));
+const act = (action, id) => send({type:'action', action, id});
+
+$('btnOk').onclick = () => act('ok');
+$('btnCancel').onclick = () => act('cancel');
+$('btnUndo').onclick = () => act('undo');
+$('btnConcede').onclick = () => { if (confirm('Concede?')) act('concede'); };
+document.addEventListener('keydown', e => {
+  if (current) return;
+  if (e.key === ' ' || e.key === 'Enter') { if (!$('btnOk').disabled) { e.preventDefault(); act('ok'); } }
+  if (e.key === 'Escape') { if (!$('btnCancel').disabled) act('cancel'); }
+});
+
+function render() {
+  if (!state || state.loading) return;
+  cardIndex.clear();
+  const g = state.game, p = state.prompt || {};
+  const active = state.players.find(x => x.id === g.activePlayer);
+  $('turninfo').textContent = g.gameOver ? `Game over. Winner: ${g.winner ?? '?'}` : `Turn ${g.turn} · ${g.phase} · ${active ? active.name : ''}${g.mulligan ? ' · mulligan' : ''}`;
+  $('prompt').textContent = p.message || '';
+  $('btnOk').textContent = p.okLabel || 'OK'; $('btnOk').disabled = !p.okEnabled;
+  $('btnCancel').textContent = p.cancelLabel || 'Cancel'; $('btnCancel').disabled = !p.cancelEnabled;
+
+  const selectable = new Set(p.selectable || []);
+  const targets = new Set(p.targets || []);
+  const chosen = new Set(p.chosen || []);
+  const attacking = new Set((state.combat || []).map(c => c.attacker));
+  const blockersOf = new Map((state.combat || []).map(c => [c.attacker, c]));
+
+  const me = state.players.find(x => x.id === state.me);
+  const ordered = me ? [me, ...state.players.filter(x => x !== me)] : state.players;
+  $('players').innerHTML = ordered.map(pl => {
+    const isMe = pl.id === state.me;
+    const counters = Object.entries(pl.counters || {}).map(([k,v]) => `${k} ${v}`).join(', ');
+    const mana = Object.entries(pl.mana || {}).map(([k,v]) => isMe ? `<button data-mana="${k}">${k}×${v}</button>` : `${k}×${v}`).join(' ');
+    const cmd = (pl.commanderDamage || []).map(d => `${esc(d.name)}: ${d.amount}`).join(', ');
+    const zone = (key, label, open) => {
+      const cs = pl.zones[key] || [];
+      if (!cs.length && !open) return '';
+      return `<div class="zone"><div class="zl">${label} (${cs.length})</div><div class="cards">${cs.map(c => cardHtml(c, selectable, chosen, attacking, blockersOf)).join('')}</div></div>`;
+    };
+    return `<div class="player ${pl.id === g.activePlayer ? 'active' : ''} ${isMe ? 'me' : ''}">
+      <div class="phead">
+        <span class="pname ${targets.has('player:'+pl.id) ? 'target' : ''}" data-player="${pl.id}">${esc(pl.name)}${pl.priority ? ' ⏳' : ''}${pl.lost ? ' (lost)' : ''}</span>
+        <span class="life">♥ ${pl.life}</span>
+        <span class="muted">Library ${pl.libraryCount} · Hand ${pl.handCount}${counters ? ' · ' + esc(counters) : ''}</span>
+        ${mana ? `<span class="mana">Pool: ${mana}</span>` : ''}
+        ${cmd ? `<span class="muted">Commander dmg taken: ${cmd}</span>` : ''}
+      </div>
+      ${zone('Command', 'Command zone', false)}
+      ${zone('Battlefield', 'Battlefield', true)}
+      ${zone('Hand', 'Hand', isMe)}
+      ${zone('Graveyard', 'Graveyard', false)}
+      ${zone('Exile', 'Exile', false)}
+    </div>`;
+  }).join('');
+
+  $('stack').innerHTML = (state.stack || []).length ? state.stack.map(s =>
+    `<div class="stackitem ${targets.has('stack:'+s.id) ? 'target' : ''}" data-stack="${s.id}">${esc(s.text)}</div>`).join('') : '<span class="muted">Empty</span>';
+  $('log').innerHTML = (state.log || []).map(l => `<div>${esc(l)}</div>`).join('');
+  showNextAsk();
+}
+
+function cardHtml(c, selectable, chosen, attacking, blockersOf) {
+  if (c.hidden) return `<div class="card hidden"></div>`;
+  cardIndex.set(c.id, c);
+  const cls = ['card'];
+  if (c.tapped) cls.push('tapped');
+  if (selectable.has(c.id)) cls.push('selectable');
+  if (chosen.has('card:'+c.id)) cls.push('chosen');
+  if (attacking.has(c.id)) cls.push('attacking');
+  const pt = c.power !== undefined ? `${c.power}/${c.toughness}` : (c.loyalty ? `◆${c.loyalty}` : '');
+  const counters = Object.entries(c.counters || {}).map(([k,v]) => `${k}:${v}`).join(' ');
+  const atk = blockersOf.get(c.id);
+  return `<div class="${cls.join(' ')}" data-card="${c.id}">
+    <div class="n">${esc(c.name)}${c.commander ? ' ★' : ''}</div>
+    <div class="c">${esc(c.manaCost)}${c.sick && c.power !== undefined ? ' · sick' : ''}</div>
+    ${counters ? `<div class="c">${esc(counters)}</div>` : ''}
+    ${c.damage ? `<div class="c" style="color:var(--bad)">dmg ${c.damage}</div>` : ''}
+    ${atk ? `<div class="c" style="color:var(--bad)">→ ${esc(atk.defender)}${atk.blockers.length ? ' (blocked)' : ''}</div>` : ''}
+    <span class="pt">${pt}</span></div>`;
+}
+
+function showDetail(c) {
+  if (!c) return;
+  $('detail').textContent = `${c.name}  ${c.manaCost || ''}\n${c.typeLine || ''}\n\n${c.text || ''}${c.power !== undefined ? `\n\n${c.power}/${c.toughness}` : ''}`;
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-card],[data-player],[data-stack],[data-mana]');
+  if (!t || t.closest('#dlg')) return;
+  if (t.dataset.card) act('card', +t.dataset.card);
+  else if (t.dataset.player) act('player', +t.dataset.player);
+  else if (t.dataset.stack) act('stack', +t.dataset.stack);
+  else if (t.dataset.mana) act('mana', {W:1,U:2,B:4,R:8,G:16,C:0}[t.dataset.mana]);
+});
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('[data-card],[data-cardid]');
+  if (t) showDetail(cardIndex.get(+(t.dataset.card || t.dataset.cardid)));
+});
+
+// ---------------------------------------------------------------- asks
+function showNextAsk() {
+  if (current && asks.has(current.id)) return;
+  const next = [...asks.values()].sort((a,b) => a.id - b.id)[0];
+  if (!next) { current = null; closeModal(); return; }
+  current = next; openAsk(next);
+}
+function closeModal() { $('modal').classList.remove('open'); }
+function answer(value) {
+  if (!current) return;
+  send({type:'answer', id: current.id, value});
+  asks.delete(current.id); current = null; closeModal(); showNextAsk();
+}
+
+function openAsk(a) {
+  const d = $('dlg');
+  const head = `${a.title ? `<h2>${esc(a.title)}</h2>` : ''}<div class="msg">${esc(a.message)}</div>`;
+  const optLabel = o => `${esc(o.label)}`;
+  const attrs = o => o.cardId !== undefined ? `data-cardid="${o.cardId}"` : '';
+
+  if (a.kind === 'message') {
+    d.innerHTML = head + (a.options ? a.options.map(o => `<div class="opt" ${attrs(o)}>${optLabel(o)}</div>`).join('') : '') +
+      `<div class="dlgbtns"><button class="primary" id="aOk">OK</button></div>`;
+    $('aOk').onclick = () => answer(true);
+  } else if (a.kind === 'input') {
+    d.innerHTML = head + `<input id="aIn" type="${a.numeric ? 'number' : 'text'}" value="${esc(a.initial)}" style="width:100%">
+      <div class="dlgbtns"><button id="aCancel">Cancel</button><button class="primary" id="aOk">OK</button></div>`;
+    $('aOk').onclick = () => answer($('aIn').value);
+    $('aCancel').onclick = () => answer(null);
+  } else if (a.kind === 'choose' || a.kind === 'order') {
+    const ordered = a.kind === 'order';
+    let picked = ordered ? [] : [...(a.selected || [])];
+    if (!ordered && a.max === 1 && a.min === 1 && picked.length === 0) picked = [];
+    const draw = () => {
+      const ok = picked.length >= a.min && picked.length <= a.max;
+      const hint = ordered ? `Click in order. Pick ${a.min === a.max ? a.min : `${a.min}–${a.max}`}${a.min === a.options.length ? ' (all)' : ''}.`
+                           : (a.max === 1 ? (a.min === 0 ? 'Pick one, or none.' : 'Pick one.') : `Pick ${a.min}–${a.max}.`);
+      d.innerHTML = head + `<div class="muted" style="margin-bottom:6px">${hint}</div>` +
+        a.options.map((o,i) => `<div class="opt ${picked.includes(i) ? 'on' : ''}" data-i="${i}" ${attrs(o)}>
+          ${ordered ? `<span class="ord">${picked.includes(i) ? picked.indexOf(i)+1 : ''}</span>` : ''}${optLabel(o)}</div>`).join('') +
+        `<div class="dlgbtns">${ordered ? '<button id="aAll">All in this order</button><button id="aReset">Reset</button>' : ''}
+          <button class="primary" id="aOk" ${ok ? '' : 'disabled'}>OK</button></div>`;
+      d.querySelectorAll('.opt').forEach(el => el.onclick = () => {
+        const i = +el.dataset.i;
+        if (picked.includes(i)) picked = picked.filter(x => x !== i);
+        else if (!ordered && a.max === 1) { picked = [i]; if (a.min === 1) { answer(picked); return; } }
+        else if (picked.length < a.max) picked.push(i);
+        draw();
+      });
+      $('aOk').onclick = () => answer(picked);
+      if (ordered) {
+        $('aReset').onclick = () => { picked = []; draw(); };
+        $('aAll').onclick = () => { a.options.forEach((_, i) => { if (!picked.includes(i) && picked.length < a.max) picked.push(i); }); draw(); };
+      }
+    };
+    draw();
+  } else if (a.kind === 'distribute') {
+    const vals = a.options.map(() => 0);
+    if (vals.length) vals[0] = a.amount;
+    const draw = () => {
+      const sum = vals.reduce((x,y) => x+y, 0);
+      const ok = sum === a.amount && (!a.atLeastOne || vals.every(v => v >= 1));
+      d.innerHTML = head + `<div class="muted">Assigned ${sum} / ${a.amount}</div>` +
+        a.options.map((o,i) => `<div class="opt" ${attrs(o)}>${optLabel(o)}<input type="number" min="0" max="${a.amount}" value="${vals[i]}" data-i="${i}"></div>`).join('') +
+        `<div class="dlgbtns"><button class="primary" id="aOk" ${ok ? '' : 'disabled'}>OK</button></div>`;
+      d.querySelectorAll('input').forEach(el => el.onchange = () => { vals[+el.dataset.i] = Math.max(0, parseInt(el.value) || 0); draw(); });
+      $('aOk').onclick = () => answer(vals);
+    };
+    draw();
+  } else {
+    d.innerHTML = head + `<div class="muted">Unknown prompt kind: ${esc(a.kind)}</div>`;
+  }
+  $('modal').classList.add('open');
+}
+
+connect();
+</script>
+</body>
+</html>
