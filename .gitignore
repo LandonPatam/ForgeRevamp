@@ -1,0 +1,8 @@
+# Upstream Forge checkout (pinned commit recorded in FORGE_COMMIT)
+/forge/
+# Portable tools (Maven)
+/.tools/
+*.log
+node_modules/
+target/
+dist/
