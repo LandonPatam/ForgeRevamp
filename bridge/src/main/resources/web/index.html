@@ -69,6 +69,7 @@
   <button id="btnOk" class="primary" disabled>OK</button>
   <button id="btnCancel" disabled>Cancel</button>
   <button id="btnUndo">Undo</button>
+  <button id="btnDraw" hidden>Take draw</button>
   <button id="btnConcede">Concede</button>
 </header>
 <main>
@@ -87,25 +88,57 @@ let ws, state = null, asks = new Map(), current = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const cardIndex = new Map();
+let requestCounter = 0, actionRevision = null, activeSession = null;
+const pendingRequests = new Map(), answering = new Set();
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => { $('status').textContent = 'connected'; ws.send(JSON.stringify({type:'hello'})); };
-  ws.onclose = () => { $('status').textContent = 'disconnected, retrying…'; setTimeout(connect, 1000); };
+  ws.onclose = () => { state = null; actionRevision = null; pendingRequests.clear(); answering.clear(); $('btnOk').disabled = $('btnCancel').disabled = true; $('status').textContent = 'Disconnected; reconnecting...'; setTimeout(connect, 1000); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.type === 'state') { state = m; (m.asks || []).forEach(a => asks.set(a.id, a)); render(); }
+    if (m.type === 'state') {
+      if (activeSession !== m.sessionId) { current = null; closeModal(); pendingRequests.clear(); answering.clear(); }
+      activeSession = m.sessionId;
+      state = m;
+      if (actionRevision !== m.revision) actionRevision = null;
+      asks = new Map((m.asks || []).map(a => [a.id, a]));
+      if (current && !asks.has(current.id)) { answering.delete(current.id); current = null; closeModal(); }
+      render();
+    }
     else if (m.type === 'ask') { asks.set(m.id, m); showNextAsk(); }
-    else if (m.type === 'askClosed') { asks.delete(m.id); if (current && current.id === m.id) { current = null; closeModal(); } showNextAsk(); }
+    else if (m.type === 'askClosed') { asks.delete(m.id); answering.delete(m.id); if (current && current.id === m.id) { current = null; closeModal(); } showNextAsk(); }
+    else if (m.type === 'error' || m.type === 'ack') {
+      const request = pendingRequests.get(m.requestId); pendingRequests.delete(m.requestId);
+      if (m.type === 'error') {
+        actionRevision = null;
+        if (request?.type === 'answer') answering.delete(request.id);
+        $('status').textContent = `${m.code}: ${m.message}`;
+        if (current) openAsk(current);
+        render();
+      }
+    }
     else if (m.type === 'flash') { document.body.classList.remove('flash'); void document.body.offsetWidth; document.body.classList.add('flash'); }
   };
 }
-const send = o => ws.send(JSON.stringify(o));
+const send = o => {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !state || state.loading) return false;
+  if (o.type === 'action' && actionRevision !== null) return false;
+  if (o.type === 'answer' && answering.has(o.id)) return false;
+  const requestId = String(++requestCounter);
+  const request = {...o, requestId, protocolVersion: state.protocolVersion, sessionId: state.sessionId, revision: state.revision};
+  pendingRequests.set(requestId, request);
+  if (o.type === 'action') actionRevision = state.revision;
+  if (o.type === 'answer') answering.add(o.id);
+  ws.send(JSON.stringify(request));
+  return true;
+};
 const act = (action, id) => send({type:'action', action, id});
 
 $('btnOk').onclick = () => act('ok');
 $('btnCancel').onclick = () => act('cancel');
 $('btnUndo').onclick = () => act('undo');
+$('btnDraw').onclick = () => { if (state?.pendingDraws?.length) act('draw_ack', state.pendingDraws[0]); };
 $('btnConcede').onclick = () => { if (confirm('Concede?')) act('concede'); };
 document.addEventListener('keydown', e => {
   if (current) return;
@@ -122,6 +155,7 @@ function render() {
   $('prompt').textContent = p.message || '';
   $('btnOk').textContent = p.okLabel || 'OK'; $('btnOk').disabled = !p.okEnabled;
   $('btnCancel').textContent = p.cancelLabel || 'Cancel'; $('btnCancel').disabled = !p.cancelEnabled;
+  $('btnDraw').hidden = !(state.pendingDraws || []).length;
 
   const selectable = new Set(p.selectable || []);
   const targets = new Set(p.targets || []);
@@ -137,7 +171,7 @@ function render() {
     const mana = Object.entries(pl.mana || {}).map(([k,v]) => isMe ? `<button data-mana="${k}">${k}×${v}</button>` : `${k}×${v}`).join(' ');
     const cmd = (pl.commanderDamage || []).map(d => `${esc(d.name)}: ${d.amount}`).join(', ');
     const zone = (key, label, open) => {
-      const cs = pl.zones[key] || [];
+      const cs = (pl.zones[key] || []).filter(c => !(isMe && key === 'Hand' && (state.pendingDraws || []).includes(c.id)));
       if (!cs.length && !open) return '';
       return `<div class="zone"><div class="zl">${label} (${cs.length})</div><div class="cards">${cs.map(c => cardHtml(c, selectable, chosen, attacking, blockersOf)).join('')}</div></div>`;
     };
@@ -212,7 +246,7 @@ function closeModal() { $('modal').classList.remove('open'); }
 function answer(value) {
   if (!current) return;
   send({type:'answer', id: current.id, value});
-  asks.delete(current.id); current = null; closeModal(); showNextAsk();
+  // Keep the dialog until askClosed or an authoritative snapshot removes it.
 }
 
 function openAsk(a) {
@@ -265,9 +299,10 @@ function openAsk(a) {
       const ok = sum === a.amount && (!a.atLeastOne || vals.every(v => v >= 1));
       d.innerHTML = head + `<div class="muted">Assigned ${sum} / ${a.amount}</div>` +
         a.options.map((o,i) => `<div class="opt" ${attrs(o)}>${optLabel(o)}<input type="number" min="0" max="${a.amount}" value="${vals[i]}" data-i="${i}"></div>`).join('') +
-        `<div class="dlgbtns"><button class="primary" id="aOk" ${ok ? '' : 'disabled'}>OK</button></div>`;
+        `<div class="dlgbtns">${a.maySkip ? '<button id="aSkip">Skip</button>' : ''}<button class="primary" id="aOk" ${ok ? '' : 'disabled'}>OK</button></div>`;
       d.querySelectorAll('input').forEach(el => el.onchange = () => { vals[+el.dataset.i] = Math.max(0, parseInt(el.value) || 0); draw(); });
       $('aOk').onclick = () => answer(vals);
+      if (a.maySkip) $('aSkip').onclick = () => answer(null);
     };
     draw();
   } else {

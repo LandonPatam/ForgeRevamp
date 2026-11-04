@@ -1,0 +1,11 @@
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1putonstack=Manifold Insights
+p1library=Grizzly Bears;Hill Giant;Centaur Courser;Giant Growth;Unsummon;Divination;Naturalize;Llanowar Elves;Elvish Mystic;Shock;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

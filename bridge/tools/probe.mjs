@@ -3,20 +3,23 @@
 // node probe.mjs action ok|cancel|card <id>|player <id>
 // node probe.mjs answer <askId> <json>
 const [, , kind, a1, a2] = process.argv;
-const ws = new WebSocket('ws://127.0.0.1:7777/ws');
+const ws = new WebSocket(process.env.FORGE_BRIDGE_URL || 'ws://127.0.0.1:7777/ws');
 let state = null;
 const asks = new Map();
 ws.onmessage = e => {
   const m = JSON.parse(e.data);
-  if (m.type === 'state') { state = m; (m.asks || []).forEach(a => asks.set(a.id, a)); }
+  if (m.type === 'state') { state = m; asks.clear(); (m.asks || []).forEach(a => asks.set(a.id, a)); }
   if (m.type === 'ask') asks.set(m.id, m);
   if (m.type === 'askClosed') asks.delete(m.id);
+  if (m.type === 'error') { console.error(`${m.code}: ${m.message}`); process.exit(1); }
 };
 ws.onopen = () => {
   ws.send(JSON.stringify({ type: 'hello' }));
   setTimeout(() => {
-    if (kind === 'action') ws.send(JSON.stringify({ type: 'action', action: a1, id: a2 === undefined ? undefined : +a2 }));
-    if (kind === 'answer') ws.send(JSON.stringify({ type: 'answer', id: +a1, value: JSON.parse(a2) }));
+    if (kind && (!state || state.loading)) { console.error('Bridge is not ready'); process.exit(1); }
+    const context = state ? {requestId: 'probe-1', protocolVersion: state.protocolVersion, sessionId: state.sessionId, revision: state.revision} : {};
+    if (kind === 'action') ws.send(JSON.stringify({ ...context, type: 'action', action: a1, id: a2 === undefined ? undefined : +a2 }));
+    if (kind === 'answer') ws.send(JSON.stringify({ ...context, type: 'answer', id: +a1, value: JSON.parse(a2) }));
     setTimeout(print, kind ? 2500 : 300);
   }, 700);
 };

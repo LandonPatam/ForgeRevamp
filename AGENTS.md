@@ -1,0 +1,108 @@
+# ForgeUI project context
+
+## Project
+
+ForgeUI is a native Godot 4.7.2 Commander frontend using the real Forge engine for card rules, costs, legality, targeting, combat and decisions. The application supports a table of up to four: one local human plus bots and, online, friends running this same build. Its home is a procedural retro computer with a live CRT screen and floppy deck carousel; the editor, settings and battlefield are Godot Controls. Online play is host-authoritative and does not use Forge's netplay protocol, so stock Forge cannot join; see `docs/online-play.md`.
+
+## Stack & architecture
+
+- Godot uses GL Compatibility; do not depend on Forward+-only lighting effects.
+- Entry: `client-godot/scenes/Application.tscn` → `scripts/app/Application.gd`; battlefield: `scenes/Main.tscn` → `scripts/ui/Main.gd`.
+- Java 17 bridge lives in `bridge/src/main/java/forgeui/bridge/`. `LibraryMain` normally serves deck/application requests on local port 7778.
+- `MatchService` owns a separate `BridgeMain` JVM per active match, using a dynamic local port. Only stop processes owned by this application/test.
+- Online: `OnlineLobby` (in `LibraryMain`) holds the online port until PLAY, then hands it and the joined players to `BridgeMain`, which keeps one `Seat` (own `BridgeGuiGame`/controller/snapshots) per human. Only `BridgeServer.exposed` listens beyond loopback, and it never exposes the library or host seat. Empty seats are open automatically; there is no "open" slot type to set.
+- `LibraryClient.gd` handles library request/response JSON over WebSocket; `LiveAdapter.gd` handles the game protocol and normalized snapshots. `MockAdapter.gd` is a test/demo substitute, not rules authority.
+- Game protocol v2 mutations require session/revision/request identity. Reconcile cards by instance ID, replace the outstanding asks set, preserve hidden-card permissions and never replay stale actions.
+- A won game shows a one-button Victory popup, then runs the same zoom-out and FORMAT A: wipe without a confirmation. Right-clicking one of your declared attackers during Declare attackers calls it back (bridge `undeclare`, a right-click on Forge's InputAttack). Face-down permanents show the standard Magic back and their public 2/2; chosen colors (`chosenColors`) show as mana symbols on the card. Returning home parks the same match; its session disk resumes it. Confirmed End Game stops the owned engine independently of presentation, returns home if needed, then silently plays FORMAT A: on the CRT with amber drive activity. No floppy moves: the session disk fades and is consumed, and the deck's disk reappears in the carousel without an ejection. Saved decks are never formatted.
+- `forge/` is vendored upstream source/assets pinned by `FORGE_COMMIT`; prefer frontend/bridge changes over editing upstream. It carries local, uncommitted netplay stability patches recorded in `FORGE_PATCHES.md` (patch: `forge-patches/netplay-fixes.patch`); keep them, record any new upstream edit there, and re-apply them when updating Forge.
+
+## File map
+
+Paths below are relative to `client-godot/scripts/` unless stated otherwise.
+
+- `app/Application.gd` — navigation, shared services, match ownership UI, launch/reveal/resume/end coordination.
+- `app/ComputerMenu.gd` — world/monitor SubViewports, physical input regions, home/editor layout and transition wiring.
+- `app/ComputerWorld.gd` — procedural meshes/materials/lights, inline CRT shader, camera paths, physical keys and insertion/ejection.
+- `app/DeckConsole.gd` — read-only disk/commander/statistics/legal-status dashboard inside the curved screen safe area.
+- `app/DeckCarousel.gd` — fractional carousel motion, looping home/finite editor, selection and transition copies.
+- `app/DeckCartridge.gd`, `CarouselCopy.gd`, `FloppyDisk.gdshader` — cached floppy faces, artwork labels and shared-texture copies.
+- `app/DeckAppearance.gd`, `CardColorSampler.gd` — persistent shell colors and source-artwork eyedropper.
+- `app/LightSwitch.gd`, `MenuFrame.gd`, `MenuAtmosphere.gdshader` — rocker/frame drawing and home background finish; room state/tween belongs to ComputerMenu.
+- `app/DiskNightLighting.gdshader`, `InsertionNightLighting.gdshader` — presentation-only carousel shading and real-light insertion-face blend.
+- `app/StartupScreen.gd`, `StartupGrid.gd`, `StartupSegments.gd` — initial service diagnostic startup and smooth bounded progress.
+- `app/MatchBootLog.gd`, `TerminalMeter.gd`, `LoadingProgress.gd` — inserted-disk log/shared blocks and pre-insertion artwork preparation.
+- `app/MatchSettings.gd`, `MatchRoster.gd`, `MatchPreferences.gd` — player/bot/deck/portrait setup and persistence.
+- `app/OnlineSession.gd` — online lobby state for host and joiner, shared by settings and Application.
+- `app/BundledService.gd` — in an exported build (no `--library-url`) starts the Java `LibraryMain` from `runtime/`, `service/` and `forge-gui/` beside the exe; `--service-port=N` overrides 7778. The service watches `--parent-pid` and exits when the game closes.
+- `app/SessionDisk.gd`, `FormatLog.gd` — parked-match representation and silent FORMAT A: consumption, sharing boot-terminal helpers.
+- `library/DeckCollection.gd`, `CardSearch.gd`, `DeckValidationStatus.gd` — editor drafts, card actions/search, inline validation and scroll retention.
+- `library/LibraryClient.gd`, `LibraryImages.gd` — library API and shared prioritized/bounded artwork downloading/decoding/cache.
+- `ui/Main.gd`, `BattlefieldLayout.gd`, `FieldDivider.gd` — battlefield orchestration, adaptive packing, hand/zone placement and region sizing.
+- `ui/CardView.gd`, `CardFace.gd`, `CardArt.gd`, `card_perspective.gdshader` — card rendering, tap/hover/drag and transforms.
+- `ui/TraitIcons.gd` — SVG trait glyphs rasterized at exact display size; CardView hangs them off the card's bottom-left edge, four per row, and Main lists them under the magnified card. Table power/toughness hangs off the bottom-right, starting past a full trait row so they never overlap.
+- `ui/OpeningHand.gd`, `LibraryPile.gd` — engine-authoritative mulligan/bottom choices and pending-draw gesture.
+- `ui/CoinTossPanel.gd`, `StartingPlayerPanel.gd` — shared Forge starting-toss animation and named waiting state; only the winning seat chooses who starts. The coin begins after table reveal, reuses Forge portraits without HP, and never rolls or submits a decision itself.
+- `ui/PlayerAvatar.gd`, `Portraits.gd`, `ZoneBubble.gd`, `TargetOverlay.gd` — digital HP, Forge portraits, zone icons and combat/target arrows.
+- `ui/TerminalStyle.gd`, `TerminalRail.gd`, `StackActivityFeed.gd`, `StackFeedEntry.gd` — right terminal styling and keyed stack/activity entries.
+- `ui/InteractionPanel.gd`, `SidebarDecision.gd`, `BoardChoice.gd`, `IncomingEffect.gd` — hosted decisions, board choices and relevant opposing-effect previews.
+- `ui/Palette.gd`, `ReadableText.gd`, `SelectionPanel.gd`, `ManaPaymentPanel.gd`, `ManaColorPanel.gd` — popup themes, scrollable rules and card/mana choices.
+- `ui/CardImages.gd`, `RuntimeArtwork.gd` — gameplay artwork resources and runtime/token image loading.
+- Bridge `DeckLibrary.java`, `DeckFiles.java`, `CardArtwork.java` — deck/catalog/save/image operations, encoding-aware reads and card/token image URLs.
+- Bridge `MatchSetup.java`, `BotDecks.java`, `BridgeMain.java` — setup validation, real Forge precons/generation and actual match creation.
+- Bridge `OnlineLobby.java` — online port before the match, joins, deck validation, addresses and UPnP.
+- Bridge `OnlineOpeningHands.java` and the bridge-local `forge/game/mulligan/MulliganService.java` override — concurrent human opening-hand input collection, with keeps, bottom choices and redraws on Forge's game thread. The existing London override also stays ahead of the Forge JARs on the classpath.
+- Bridge `BridgeGuiGame.java`, `GameStateJson.java`, `BridgeProtocol.java`, `StackInteractionPolicy.java` — GUI callbacks, visibility-filtered state, request validation and response policy.
+
+## Design rules
+
+- Preserve gray matte plastic hardware, colorful floppies, teal CRT terminals, purple UI accents and digital HP. Physical PLAY/SETTINGS glyphs are charcoal, not purple/glowing; keys match case plastic.
+- Keys must visibly spring back and render raised before setup or camera/disk movement. Keep existing press consumption/cancel semantics.
+- Keep the continuous drive slot fitted to the inserted disk with equal side clearance and centered between SETTINGS and the flat fascia's right edge. Its feed axis moves with the slot; height, throat depth and width stay fixed. Align the pinhole/activity dot with the slot centerline in the right margin. Disks finish rotating clear of the fascia before feeding straight; the recessed flap clears the shared disk representation for PLAY, resume, FORMAT and ejection. The former right-hand eject cap and pocket are removed.
+- Dark home is the same room at night: real teal CRT spill, subtle cool rim and quiet background. Drive effects from the existing darkness tween; preserve original daylight rendering and zero night-light energy at daylight.
+- Carousel faces are 2D cached textures. Night shading must remain presentation-only; never alter raw faces, sampled shell colors or insertion textures. Avoid per-frame face repainting.
+- Home speckles scroll out/fade with the room; editor stays clear. Home carousel loops; editor is finite with a final blank + floppy. Keep shared disk continuity and cold-load responsiveness.
+- Monitor shows the selected disk plus a FIND> search bar (home typing, Backspace, Escape clears; click focuses) that narrows the carousel by deck/commander name; disks still select decks. Search clears on entering the editor and is never persisted. Keep text inside rounded glass safe bounds. Preserve CRT effects and their fullscreen fade; settings uses fixed-size depth-tested glass.
+- Boot starts at drive contact, with real deck/player data and readiness gates. No intermediate inserting screen, timer-only completion or hidden required-prompt deadlock.
+- Artwork warms in the background from Play onward. The child's combined printing manifest includes every actual deck, including generated bots, without shuffled order or hidden-zone assignments. Match creation never waits for artwork or an image acknowledgment. Prioritize public/visible cards, commanders and cheap early plays; keep lookup/download/decode work bounded, share the gameplay cache, and retry failures quietly. A cached printing of the same card/face can appear while its exact printing warms; never substitute a front for a back or disclose hidden faces.
+- Use Forge's avatar atlas, not AI-generated preset portraits. HP segments are teal; active-turn light is purple. Starting-player chooser shows portrait/name without HP.
+- Every seat sees the same Forge starting-toss result and knows who is choosing the starting player. Show a coin for two players, a three-sided prism die for three, and a four-sided tetrahedral die for four; dice use player initials (number repeated initials) in stable engine-ID order. Play the short animation on the visible table, preserve the winner's real choice, and keep nonwinning seats informed without confirmation clicks. Snapshot updates must not replay it; completed sessions cancel it and later-turn reconnects skip it.
+- Do not render the battlefield hand before Forge accepts Keep and required bottom-card choices. Each zone menu expands from its icon on its owner's board.
+- Online table loading uses shared `tableReady`, so one seat's opening acknowledgment never gates another device. Human Keep/Mulligan inputs appear together; each seat's `openingHandComplete` closes its opening overlay after its real Keep/bottom decisions, without waiting for that seat's first turn. Host stop sends a terminal `sessionEnded` before socket teardown; joined apps clear credentials and return home automatically, including parked/loading sessions. Brief disconnects retry; an unavailable host times out after 180 seconds.
+- Joining clients persist reconnect credentials and public session-disk metadata in `user://online-session.cfg`. A restarted app offers a Rejoin online game disk and reconnects to the same host-held seat/match from a fresh snapshot, never replaying pending actions or storing hands. Host recovery is unsupported; the host must remain running and holds absent seats for five minutes. Leave, confirmed in-game Quit, completion, host end and failed reconnect clear persisted credentials. Forget session clears an unconnected disk locally.
+- Table settings (top of the rail) slides the hand and library and sets how much of each shows; `Main.gd` saves it to `user://table-layout.cfg` for every game and clamps both to the table.
+- Keep the left mana/phase groups aligned with breathing room. Required rail controls belong in shared scrolling layout, never overlapping headers/buttons.
+- Reduce routine stack clicks only when no legal response exists. Preserve legal response windows and required payment/target/selection decisions; never bypass Forge resolution.
+- In solo bot games, checked phase stops pause on every player's turn even without a legal response; defaults are M1, DA, DB and M2. Phase buttons show configured stops, never transient action availability.
+- Bind online prompt buttons and selections to the seat's current Forge input; input removal/replacement invalidates them immediately. Online default empty-stack priority after attacker/blocker declarations auto-passes without a legal action; explicit stops still pause, and declaration inputs always remain required.
+- Each online human presses their own PLAY key to ready up; the host launches only when all seated humans are ready. Deck, host configuration and roster changes invalidate readiness. Bots and empty seats need no confirmation. Default empty-stack phase stops belong to the active player; nonactive seats without legal actions auto-pass, while legal responses and explicit phase stops remain available.
+- Decisions that pick from the board (targets, card selection, mana payment, attackers, blockers) sit in the right rail, never over the board; the stack stays visible beside them when it holds anything.
+- Show source-card context for decisions; preserve optional no-target choices, image aspect ratios/rounded corners and continuous scrollable rules.
+- Card popups show large card faces without repeating their printed rules alongside them. Keep actual decision instructions and ability-specific context readable.
+- Matching opponent battlefield permanents can group with a quantity badge, preserving each instance ID. On the human board, grouping requires the explicit Clean up board action (it only stacks identical permanents and moves nothing else) or dropping a permanent onto an identical one; new plays and manual placements never auto-join a previous pile. Stack/Tax badges are white tiles with black text drawn at native resolution. Tapping turns a card and offsets it slightly downward inside its pile so the card behind stays clickable, without moving the pile anchor or its neighbors; other different visible game states, combatants and attachment hosts stay separate.
+- Right-dragging an untapped pile moves all of it (a plain right-click still inspects); it keeps that spot through tapping until Clean up board. Hand cards never group or show quantity badges. Dragging one battlefield card out of a pile splits that instance, immediately recalculates both counts and preserves the manual separation across snapshots; zone changes clear the split.
+- Dropping battlefield equipment on a controlled creature requests Forge's legal equip ability and that target. Spend floating mana first; incomplete payments offer battlefield sources and Cancel. Preserve real response windows and engine resolution.
+- Forge's bundled Commander precons are listed as read-only `precon:` decks after saved decks; edits save as a new custom copy, never overwrite or delete them. The ALL/CUSTOM/PRECONS header filter is shared by home and editor. Carousel floppies build faces lazily when first visible.
+- Artwork changes retain editor scroll. Validation is inline; cached image requests need stale-response guards. Saved decks preserve exact quantities/printings and accented names.
+
+## Working rules
+
+- Windows and Mac share https://github.com/LandonPatam/ForgeRevamp and one `main` branch; use short-lived feature/fix branches, not permanent platform branches. See `docs/development-workflow.md`. The initial Windows baseline still needs Mac reconciliation and validation. Preserve the old Mac checkout while importing its unique changes.
+- At task start inspect Git status, branch and commit. Coordinate one writer at a time on a shared feature branch; use separate branches for concurrent tasks. Handoffs reference a pushed branch/commit, checks and remaining issues instead of asking another agent to recreate code. Commit/push when authorized by the task; do not auto-switch dirty worktrees or force-push shared history.
+- Don't scan the whole codebase. Start from this map and open only task-relevant files; ask if unsure where something lives.
+- Ask before large refactors or renaming files. Keep diffs focused on the request.
+- Preserve existing modified/untracked work. Do not reset/clean the tree or delete user decks/caches as a routine fix.
+- Run relevant checks and inspect captures for visual changes. Java checks are unnecessary for frontend-only changes.
+- Bash launch on Windows: `bash ./client-godot/tools/run.sh`; add `-Decks` or `-Mock` as needed.
+- UI checks: `node client-godot/tools/app-check.mjs --render` (or `--editor-preview`), `node client-godot/tools/library-check.mjs --render`, and `.\client-godot\tools\run.ps1 -Capture`.
+- Automated playtest as the human seat across precons: `node bridge/tools/playtest.mjs` (see `docs/playtest.md`).
+- Online checks: `node bridge/tools/online-check.mjs` (real lobby, seats and hidden information; contacts no router).
+- Windows build: `.\client-godot\tools\package.ps1` (add `-SkipBuild` if the bridge is already built) writes `dist/ForgeUI/` and `dist/ForgeUI-windows.zip`; needs the Godot 4.7.2 export templates (`client-godot/export_presets.cfg`) and JDK 17. It bundles a jlink runtime and Forge `res/` without `adventure/`. Installed builds keep logs/startup status in Godot's `user://service`. Keep `tests/` in the export (`Main.gd` preloads it) and list non-resource files such as JSON in the preset's include filter. To check a package, run app-check with `FORGE_EXPORTED_EXE=dist/ForgeUI/ForgeUI.exe`; release builds print almost no script errors, so a broken script just hangs.
+- Java checks: `.\bridge\tools\test.ps1`. If incremental Maven classes are stale, use the direct javac commands in CLAUDE_HANDOFF.txt. Restart services after Java changes.
+- Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`.
+- HANDOFF.md is historical and may contain superseded details. Prefer current source, this file and NOTES.md.
+
+## Session notes
+
+- At the start of a task, read `NOTES.md`.
+- When the user says "wrap up", rewrite `NOTES.md` with Current state (3–5 bullets), Known issues and Next steps. Keep it under about 40 lines; delete finished items instead of retaining history.
+- If a decision changes architecture or design rules, update `AGENTS.md` too.

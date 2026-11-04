@@ -1,0 +1,1664 @@
+{
+  "byKey": {
+    "c:Abzan Falconer|2X2|1": "res://assets/cards/20b9f2ba17bf28824b52.jpg",
+    "c:Arcane Sanctum|40K|1": "res://assets/cards/9da4fe69a300eb7cb809.jpg",
+    "c:Ash Barrens|TMC|1": "res://assets/cards/5e7bafbe3463e363daea.jpg",
+    "c:Astral Cornucopia|CM2|1": "res://assets/cards/778c081a7d76d6a1e99f.jpg",
+    "c:Azorius Chancery|CM2|1": "res://assets/cards/41ab42a4b85a5b4013ad.jpg",
+    "c:Brave the Sands|KTK|1": "res://assets/cards/fdbd5f2ba31ee7d00c02.jpg",
+    "c:Cauldron of Souls|PLIST|1": "res://assets/cards/c4b4745dd133effcc265.jpg",
+    "c:Champion of Lambholt|SLD|1": "res://assets/cards/251e2eab8dfa1d9fe236.jpg",
+    "c:Citadel Siege|C21|1": "res://assets/cards/5e98266299ba44d24fca.jpg",
+    "c:Command Tower|ELD|1": "res://assets/cards/9e2663e0a0a3dfcb2322.jpg",
+    "c:Commander's Sphere|LTC|1": "res://assets/cards/3de24f0cdf06f0abb8ce.jpg",
+    "c:Corpsejack Menace|PIP|1": "res://assets/cards/fa6a3ac9ed73f8391b6e.jpg",
+    "c:Crystalline Crawler|PLIST|1": "res://assets/cards/dc6d54dc6534a259a1c4.jpg",
+    "c:Darksteel Ingot|SLD|1": "res://assets/cards/6b6d3225e3c93345da29.jpg",
+    "c:Darkwater Catacombs|WHO|1": "res://assets/cards/7913e73a10843f7752cc.jpg",
+    "c:Dreadship Reef|PLIST|1": "res://assets/cards/af0dc59ca92e2961f1de.jpg",
+    "c:Duelist's Heritage|TLE|1": "res://assets/cards/372bd434bcac04e4fbe3.jpg",
+    "c:Duneblast|CM2|1": "res://assets/cards/e90f34f30e4f458385c8.jpg",
+    "c:Enduring Scalelord|CM2|1": "res://assets/cards/574d16347659576744d6.jpg",
+    "c:Evolving Wilds|TMC|1": "res://assets/cards/0e999d1905e17cc2651e.jpg",
+    "c:Exotic Orchard|MSC|2": "res://assets/cards/50090fd23f091a8def23.jpg",
+    "c:Fathom Mage|FIC|1": "res://assets/cards/cbb50bd7caaa5317099a.jpg",
+    "c:Fellwar Stone|SLD|3": "res://assets/cards/508f645e8b123cbf30fc.jpg",
+    "c:Festercreep|PLIST|1": "res://assets/cards/331f391154db0d20493c.jpg",
+    "c:Forest|SOS|1": "res://assets/cards/21938c613dabf83be1db.jpg",
+    "c:Golgari Rot Farm|TDC|1": "res://assets/cards/a33ea1e51321362af711.jpg",
+    "c:Golgari Signet|AA1|1": "res://assets/cards/047d9cf17ee6e808f416.jpg",
+    "c:Grip of Phyresis|C16|1": "res://assets/cards/efd5a79f835a874ba038.jpg",
+    "c:Ikra Shidiqi, the Usurper|PLIST|1": "res://assets/cards/12477f44d9c8c7553c03.jpg",
+    "c:Inspiring Call|40K|1": "res://assets/cards/aafc8abcf70014f0ca3f.jpg",
+    "c:Ishai, Ojutai Dragonspeaker|BLC|1": "res://assets/cards/99e6871ddbba7866d995.jpg",
+    "c:Island|SOS|1": "res://assets/cards/b2488a145ad77f005d6e.jpg",
+    "c:Languish|LTC|1": "res://assets/cards/a1b2b5bbde450103f029.jpg",
+    "c:Master Biomancer|CLU|1": "res://assets/cards/184f610b9a4a8b4c716e.jpg",
+    "c:Maze of Ith|DMR|3": "res://assets/cards/dded5e26bbf0dfdc29de.jpg",
+    "c:Mirrorweave|CM2|1": "res://assets/cards/fc77e91688fa3816e75e.jpg",
+    "c:Mortify|ACR|1": "res://assets/cards/1f6b472906fe6522147e.jpg",
+    "c:Murmuring Bosk|PLIST|1": "res://assets/cards/d9be3ac5b0a2211b6896.jpg",
+    "c:Opal Palace|40K|1": "res://assets/cards/7ed97c43eb3207fd4cda.jpg",
+    "c:Opulent Palace|TDM|1": "res://assets/cards/b2e7b79a0d8a38fba285.jpg",
+    "c:Orzhov Advokist|CMR|1": "res://assets/cards/b403980a8768e83b4e7e.jpg",
+    "c:Orzhov Signet|MM3|1": "res://assets/cards/f40486f5fd266e6896e5.jpg",
+    "c:Plains|SOS|1": "res://assets/cards/db3e5b20a7d6212eb05f.jpg",
+    "c:Reyhan, Last of the Abzan|PRM|1": "res://assets/cards/a78017afa57f48dd0e60.jpg",
+    "c:Sandsteppe Citadel|LTC|1": "res://assets/cards/fbe1be68066ff2caf247.jpg",
+    "c:Scavenging Ooze|FDN|1": "res://assets/cards/c4be789f049cd117d6f9.jpg",
+    "c:Seaside Citadel|FIC|1": "res://assets/cards/4bf6228638b55ed1a81b.jpg",
+    "c:Simic Ascendancy|LCC|1": "res://assets/cards/6dd1d6607a2eac6627ce.jpg",
+    "c:Sol Ring|SLD|20": "res://assets/cards/06ecbb0403e273a1450d.jpg",
+    "c:Sol Ring|SLD|27": "res://assets/cards/9d2198ccbbd10d1f866d.jpg",
+    "c:Solidarity of Heroes|CM2|1": "res://assets/cards/25741a032bc06ef9829a.jpg",
+    "c:Sublime Exhalation|CMM|1": "res://assets/cards/2606b68421828679750c.jpg",
+    "c:Sungrass Prairie|PIP|2": "res://assets/cards/072a2fb284aa5a0a90e4.jpg",
+    "c:Swamp|SOS|1": "res://assets/cards/133a44eb0b0265d52894.jpg",
+    "c:Swamp|SOS|2": "res://assets/cards/8d68e9128e5d8a349d39.jpg",
+    "c:Swamp|SOS|3": "res://assets/cards/c90b1d57ea1d8917dc9c.jpg",
+    "c:Temple of the False God|PIP|1": "res://assets/cards/3fb473e2a67516ece81f.jpg",
+    "c:Temple of the False God|PIP|2": "res://assets/cards/2946ef9de475be940f97.jpg",
+    "c:Terramorphic Expanse|CM2|1": "res://assets/cards/078756f129e30c0de7d4.jpg",
+    "c:Tezzeret's Gambit|STA|1": "res://assets/cards/a63cc6d9e225b961b9d8.jpg",
+    "c:Tuskguard Captain|KTK|1": "res://assets/cards/f732518a86d18e4daef4.jpg",
+    "c:Underground River|FRC|1": "res://assets/cards/691c65568953638334e9.jpg",
+    "c:Vorel of the Hull Clade|NCC|1": "res://assets/cards/b1c13f83399e9e44df5c.jpg",
+    "c:Winding Constrictor|PIP|1": "res://assets/cards/6b21d4b3f40b562e6531.jpg",
+    "c:Atraxa, Praetors' Voice|PF26|1": "res://assets/cards/5b2b112796efed204563.jpg",
+    "c:Abomination, World Ravager|MSC|1": "res://assets/cards/130a85c23441ca8dd9db.jpg",
+    "c:Abomination, World Ravager|MSC|2": "res://assets/cards/353eb1de18c9fad1a315.jpg",
+    "c:Age of Ultron|MSC|1": "res://assets/cards/4d5adc5d6d9cd146d05f.jpg",
+    "c:Arcane Signet|MSC|4": "res://assets/cards/9a62b55c00e25d45ddcf.jpg",
+    "c:Archnemesis|MSC|2": "res://assets/cards/73f7c5e36e03686fd719.jpg",
+    "c:Baron Strucker, HYDRA Overlord|MSH|2": "res://assets/cards/d1aa6dd4f9af8e68488a.jpg",
+    "c:Batroc the Leaper|MSC|1": "res://assets/cards/295f07dbee0e290c0852.jpg",
+    "c:Batroc the Leaper|MSC|2": "res://assets/cards/4fa9f65a2f3450d57f22.jpg",
+    "c:Bedevil|MSC|1": "res://assets/cards/6e15cb084a7efd948b4e.jpg",
+    "c:Bedevil|MSC|2": "res://assets/cards/692e2bbd0f29b92696a2.jpg",
+    "c:Black Market Connections|ACR|2": "res://assets/cards/2945991b3ce1f29e8cd0.jpg",
+    "c:Blasphemous Act|MSC|1": "res://assets/cards/ea5b58bcf9fdace4de13.jpg",
+    "c:Blasphemous Act|MSC|2": "res://assets/cards/e8a80f042fc3e8deab8e.jpg",
+    "c:Canyon Slough|MSC|1": "res://assets/cards/4bdb91bf7bbb84965d0e.jpg",
+    "c:Canyon Slough|MSC|2": "res://assets/cards/da48014511ec3ee0d5d9.jpg",
+    "c:Chameleon, Master of Disguise|MSC|1": "res://assets/cards/b25addc55837272318c8.jpg",
+    "c:Chaos Warp|MSC|2": "res://assets/cards/ecb21bf79f0a9b7b282b.jpg",
+    "c:Choked Estuary|MSC|1": "res://assets/cards/c2eaae4e9e191b5a80bc.jpg",
+    "c:Choked Estuary|MSC|2": "res://assets/cards/012a7c74726b4b6ba5b4.jpg",
+    "c:Coastal Peak|MSC|1": "res://assets/cards/fa7d4afbf087b804da66.jpg",
+    "c:Coastal Peak|MSC|2": "res://assets/cards/e88e3de2ac2dd31374df.jpg",
+    "c:Command Tower|MSC|3": "res://assets/cards/7e63e13c59eeae709638.jpg",
+    "c:Containment Construct|MSC|1": "res://assets/cards/7baccf6a2aa3383123b9.jpg",
+    "c:Crumbling Necropolis|MSC|1": "res://assets/cards/04eba2cb2db53977458f.jpg",
+    "c:Currency Converter|MSC|2": "res://assets/cards/a44bb83993ef9d0bf26a.jpg",
+    "c:Damocles Base, Sword of Kang|MSC|1": "res://assets/cards/54f178f4dc7659bf2556.jpg",
+    "c:Damocles Base, Sword of Kang|MSC|2": "res://assets/cards/4f4013b8e482f0f70cf4.jpg",
+    "c:Doom's Time Platform|MSC|1": "res://assets/cards/36df82215499af97a01b.jpg",
+    "c:Doom's Time Platform|MSC|2": "res://assets/cards/f80ec97f97363a2693ce.jpg",
+    "c:Dragonskull Summit|MSC|1": "res://assets/cards/bcac3ff501bd4a61e0b6.jpg",
+    "c:Dragonskull Summit|MSC|2": "res://assets/cards/81e5f9450f3b7fd78d51.jpg",
+    "c:Drowned Catacomb|MSC|2": "res://assets/cards/996a74888a438032b874.jpg",
+    "c:Endless Ranks of HYDRA|MSC|1": "res://assets/cards/ffa790dadbd09a8d3f02.jpg",
+    "c:Endless Ranks of HYDRA|MSC|2": "res://assets/cards/c0996a76805b60886956.jpg",
+    "c:Extract Power|MSC|2": "res://assets/cards/17550bea68971eaf3389.jpg",
+    "c:Fetid Pools|MSC|1": "res://assets/cards/c90df50b05af04b7cb6b.jpg",
+    "c:Fetid Pools|MSC|2": "res://assets/cards/3edf129844bf0c15820c.jpg",
+    "c:Foreboding Ruins|MSC|1": "res://assets/cards/64870e4cc5b1df29d66b.jpg",
+    "c:Foreboding Ruins|MSC|2": "res://assets/cards/85ea46652f5c9aac5b1d.jpg",
+    "c:Frostboil Snarl|MSC|1": "res://assets/cards/db8eb1263de550f628cd.jpg",
+    "c:Frostboil Snarl|MSC|2": "res://assets/cards/5dfa2498d86292169993.jpg",
+    "c:Glorious Purpose|MSC|2": "res://assets/cards/e2d2b834d796ba86e58c.jpg",
+    "c:Helmut Zemo, Mastermind|MSC|1": "res://assets/cards/e9090d262fb9a2ad6e12.jpg",
+    "c:Helmut Zemo, Mastermind|MSC|2": "res://assets/cards/627791be54d048188e85.jpg",
+    "c:Iron Monger, Sadistic Tycoon|MSC|1": "res://assets/cards/0e6d05e855b68a4733c5.jpg",
+    "c:Iron Monger, Sadistic Tycoon|MSC|2": "res://assets/cards/a14910e9920a2c38cb0a.jpg",
+    "c:Kang Dynasty|MSC|1": "res://assets/cards/616de93941d146d9b113.jpg",
+    "c:Kang Prime|MSC|1": "res://assets/cards/b8c043ca032c97248f0d.jpg",
+    "c:Kang Prime|MSC|2": "res://assets/cards/02d3592480ef2b24397f.jpg",
+    "c:Kang, Temporal Tyrant|MSH|1": "res://assets/cards/4da06f54fa7b07684f34.jpg",
+    "c:Kang, Temporal Tyrant|MSH|2": "res://assets/cards/5e9804e3ae581279b9ea.jpg",
+    "c:Killmonger, Ruthless Usurper|MSC|1": "res://assets/cards/87621d9220d01f67238b.jpg",
+    "c:Killmonger, Ruthless Usurper|MSC|2": "res://assets/cards/481bda1f1020180a4db1.jpg",
+    "c:Kindred Dominance|MSC|2": "res://assets/cards/92d1c01b9d69a2c828c9.jpg",
+    "c:Klaw, Master of Sound|MSC|1": "res://assets/cards/204117904eb21dd31672.jpg",
+    "c:Klaw, Master of Sound|MSC|2": "res://assets/cards/b030c15b9a9bb44624c4.jpg",
+    "c:Lady Loki, Agent of Chaos|MSC|1": "res://assets/cards/ed49ae7151986523272d.jpg",
+    "c:Lady Loki, Agent of Chaos|MSC|2": "res://assets/cards/b99df19234c62aabd44f.jpg",
+    "c:Lethal Scheme|MSC|2": "res://assets/cards/1b3843775aa2aa40e005.jpg",
+    "c:Living Laser|MSC|1": "res://assets/cards/a33505c69eb73e520830.jpg",
+    "c:Living Laser|MSC|2": "res://assets/cards/db68bb5f6c72132f0829.jpg",
+    "c:Loki's Scepter|MSC|1": "res://assets/cards/e877ce0c1418a7bc863b.jpg",
+    "c:Loki's Scepter|MSC|2": "res://assets/cards/4ed48bc35a6715a4b215.jpg",
+    "c:Loki, the Deceiver|MSC|1": "res://assets/cards/8aa0e274ae874c4977e8.jpg",
+    "c:Loki, the Deceiver|MSC|2": "res://assets/cards/02e61e584756ef1efc0b.jpg",
+    "c:Luxury Suite|MSC|1": "res://assets/cards/d420de8db89450e8cb24.jpg",
+    "c:Luxury Suite|MSC|2": "res://assets/cards/3ef53ee4588bce243c31.jpg",
+    "c:Madame Hydra|MSH|1": "res://assets/cards/8bc18690497b6bc9d89c.jpg",
+    "c:Madame Hydra|MSH|2": "res://assets/cards/77c438ee74fae03b3ba4.jpg",
+    "c:Molecule Man|MSC|1": "res://assets/cards/0594782fb2b57c0c6e7d.jpg",
+    "c:Molecule Man|MSC|2": "res://assets/cards/245888b81ebeb87f8801.jpg",
+    "c:Moonstone, Harsh Mistress|MSH|1": "res://assets/cards/68515ea76a0ae4e4c5a7.jpg",
+    "c:Moonstone, Harsh Mistress|MSH|2": "res://assets/cards/4bef4c6ec963c40a38b8.jpg",
+    "c:Mountain|MSH|1": "res://assets/cards/bc9b68776990f3bfca78.jpg",
+    "c:Mountain|MSH|2": "res://assets/cards/c9a85a62c3ff43c74607.jpg",
+    "c:Mountain|MSH|3": "res://assets/cards/db2db1b3df42ef97256a.jpg",
+    "c:Mountain|MSH|4": "res://assets/cards/0c4c2d3e63edd4b79a9a.jpg",
+    "c:Mountain|MSH|5": "res://assets/cards/cd0b5cb65b09952f95de.jpg",
+    "c:Mountain|MSH|6": "res://assets/cards/199b4b5ad41a439498cf.jpg",
+    "c:Mountain|SLD|20": "res://assets/cards/37232fbf2d73b3adf099.jpg",
+    "c:Mountain|SLD|45": "res://assets/cards/e438dcf2c563601aa3d4.jpg",
+    "c:Mountain|SLD|47": "res://assets/cards/d4ad854e256ebac11bee.jpg",
+    "c:Mountain|SLD|48": "res://assets/cards/b0c61e85d4d8ad184cc1.jpg",
+    "c:Mountain|SLD|49": "res://assets/cards/e8059b4019f950e49fc6.jpg",
+    "c:Mountain|SLD|50": "res://assets/cards/c2bbbaafb10068936abc.jpg",
+    "c:Mountain|SLD|51": "res://assets/cards/fc31b0398a94bb75500b.jpg",
+    "c:Night's Whisper|MSC|1": "res://assets/cards/0138207ed5dee010c6cf.jpg",
+    "c:Patchwork Banner|MSC|1": "res://assets/cards/449826e3aaab9cc78adf.jpg",
+    "c:Path of Ancestry|MSC|1": "res://assets/cards/abaea246a144f1c15731.jpg",
+    "c:Progenitor's Icon|MSC|2": "res://assets/cards/27f8484d87c088b53e45.jpg",
+    "c:Propaganda|MSC|1": "res://assets/cards/ca5d46138a51771884a9.jpg",
+    "c:Prowler, Clawed Thief|SPM|1": "res://assets/cards/034f6ace0a36f3aa7a72.jpg",
+    "c:Puppet Master, String Puller|MSC|1": "res://assets/cards/f6d1e361ee104982e37e.jpg",
+    "c:Puppet Master, String Puller|MSC|2": "res://assets/cards/ccfe219e474046400024.jpg",
+    "c:Red Ghost, Intangible Genius|MSC|1": "res://assets/cards/9037d0425927eae642f0.jpg",
+    "c:Red Ghost, Intangible Genius|MSC|2": "res://assets/cards/75e0feea29ce066aa341.jpg",
+    "c:Scavenger Grounds|MSC|2": "res://assets/cards/171f6b203a44105225f4.jpg",
+    "c:Scorched Geyser|MSC|2": "res://assets/cards/664b8acf18af215f3dbc.jpg",
+    "c:Secluded Courtyard|LTC|1": "res://assets/cards/dd5b1e77458d55e67a83.jpg",
+    "c:Skullclamp|MSC|2": "res://assets/cards/cb80e8a3eb73557189bf.jpg",
+    "c:Smoldering Marsh|MSC|2": "res://assets/cards/379bfd902f4dba3aa7fe.jpg",
+    "c:Sol Ring|MSC|3": "res://assets/cards/583f8a7256fe96da4d25.jpg",
+    "c:Spark Double|MSC|2": "res://assets/cards/0b5c8494518e72d7f968.jpg",
+    "c:Stilt-Man, Towering Terror|MSC|1": "res://assets/cards/6186f9b8200d68ad1d08.jpg",
+    "c:Stilt-Man, Towering Terror|MSC|2": "res://assets/cards/9f894a87373b7f92405b.jpg",
+    "c:Sulfur Falls|MSC|2": "res://assets/cards/efe2055e0711e852d6d3.jpg",
+    "c:Sunken Hollow|MSC|1": "res://assets/cards/e616ec8ccd31f9b73648.jpg",
+    "c:Sunken Hollow|MSC|2": "res://assets/cards/a52db3abdd988572477c.jpg",
+    "c:Superior Foes of Spider-Man|SPM|1": "res://assets/cards/9efe338526019008e5d7.jpg",
+    "c:Swamp|MSH|1": "res://assets/cards/98c43e42922fb2e63099.jpg",
+    "c:Swamp|MSH|2": "res://assets/cards/93414504bb7cc8f1661d.jpg",
+    "c:Swamp|MSH|3": "res://assets/cards/8dd749b01347b85adc35.jpg",
+    "c:Swamp|MSH|4": "res://assets/cards/7411d30a844cda77d6b1.jpg",
+    "c:Swamp|MSH|5": "res://assets/cards/965b73b7a0e3ce9132ae.jpg",
+    "c:Swamp|MSH|6": "res://assets/cards/71ff9383c8a65bef1c62.jpg",
+    "c:Swiftfoot Boots|MSC|1": "res://assets/cards/677e1ba03c0370a8c7af.jpg",
+    "c:Syphon Mind|MSC|1": "res://assets/cards/6c8e3a9800d4d3cf29cd.jpg",
+    "c:Talisman of Dominance|MSC|1": "res://assets/cards/38e4fd84b799e7c09bdd.jpg",
+    "c:Talisman of Indulgence|MSC|1": "res://assets/cards/9ab17ef0f0d8999d1667.jpg",
+    "c:Terminate|MSC|1": "res://assets/cards/e45f6207992a820f5f7b.jpg",
+    "c:Terramorphic Expanse|MSC|2": "res://assets/cards/477f985c52d49655c2bb.jpg",
+    "c:The Frightful Four|MSC|1": "res://assets/cards/6cd1fe1cbca919a9223e.jpg",
+    "c:The Frightful Four|MSC|2": "res://assets/cards/280cc251eda62650e6a5.jpg",
+    "c:The Squadron Sinister|MSC|1": "res://assets/cards/c01a7446131a336e8116.jpg",
+    "c:The Squadron Sinister|MSC|2": "res://assets/cards/cc1ac8d661d1be9696b0.jpg",
+    "c:Titan of Littjara|MSC|2": "res://assets/cards/f91655c8a1d6d0c6210d.jpg",
+    "c:Titania, Proud Pummeler|MSC|1": "res://assets/cards/c07d4550160b84b8273f.jpg",
+    "c:Titania, Proud Pummeler|MSC|2": "res://assets/cards/55dbe82e15f21e2e1b55.jpg",
+    "c:Tombstone, Career Criminal|MSC|1": "res://assets/cards/7975daa18c244d2d3d1c.jpg",
+    "c:Tombstone, Career Criminal|MSC|2": "res://assets/cards/4e608ea740017ec3bd2a.jpg",
+    "c:Toxic Deluge|MSC|1": "res://assets/cards/ccfafcccc0e2a5447ffe.jpg",
+    "c:Toxic Deluge|MSC|2": "res://assets/cards/ec9d97fa487fe8e266f3.jpg",
+    "c:Tri-Sentinel, Act of Vengeance|MSC|1": "res://assets/cards/3a3a35b5f374c43fdeeb.jpg",
+    "c:Tri-Sentinel, Act of Vengeance|MSC|2": "res://assets/cards/a0f49c02e13bc0a23ee3.jpg",
+    "c:Typhoid Mary, Fractured|MSC|1": "res://assets/cards/1a21ef6b8974d4287e98.jpg",
+    "c:Typhoid Mary, Fractured|MSC|2": "res://assets/cards/ef9df35a5c1ec34f1d9c.jpg",
+    "c:Ultron, Unlimited|MSC|1": "res://assets/cards/1f3a5470cf55f48fb6f8.jpg",
+    "c:Ultron, Unlimited|MSC|2": "res://assets/cards/bdc1149ac45f95febc56.jpg",
+    "c:Unclaimed Territory|MSC|1": "res://assets/cards/7a09c4483f59f6a19e04.jpg",
+    "c:Vandalblast|MSC|1": "res://assets/cards/4f79d1a9fbca01a4dbef.jpg",
+    "c:Villainous Hideout|MSH|2": "res://assets/cards/2e6d8fc5c18937f2cf75.jpg",
+    "c:Withering Torment|MSC|1": "res://assets/cards/4d39e3331b60e627cd8e.jpg",
+    "c:Doctor Doom, King of Latveria|MSC|1": "res://assets/cards/1284d75d2b1aeec0753d.jpg",
+    "c:Doctor Doom, King of Latveria|MSC|2": "res://assets/cards/063cff4aa5355d2aa9c8.jpg"
+  },
+  "byName": {
+    "Abzan Falconer": "res://assets/cards/20b9f2ba17bf28824b52.jpg",
+    "Arcane Sanctum": "res://assets/cards/9da4fe69a300eb7cb809.jpg",
+    "Ash Barrens": "res://assets/cards/5e7bafbe3463e363daea.jpg",
+    "Astral Cornucopia": "res://assets/cards/778c081a7d76d6a1e99f.jpg",
+    "Azorius Chancery": "res://assets/cards/41ab42a4b85a5b4013ad.jpg",
+    "Brave the Sands": "res://assets/cards/fdbd5f2ba31ee7d00c02.jpg",
+    "Bred for the Hunt": "res://assets/cards/f7a5612ad96cfd7d2d73.jpg",
+    "Cathars' Crusade": "res://assets/cards/ca4ddd459a05e2503290.jpg",
+    "Cauldron of Souls": "res://assets/cards/c4b4745dd133effcc265.jpg",
+    "Champion of Lambholt": "res://assets/cards/251e2eab8dfa1d9fe236.jpg",
+    "Champion of Kotoko": "res://assets/cards/251e2eab8dfa1d9fe236.jpg",
+    "Citadel Siege": "res://assets/cards/5e98266299ba44d24fca.jpg",
+    "Command Tower": "res://assets/cards/9e2663e0a0a3dfcb2322.jpg",
+    "Commander's Sphere": "res://assets/cards/3de24f0cdf06f0abb8ce.jpg",
+    "Corpsejack Menace": "res://assets/cards/fa6a3ac9ed73f8391b6e.jpg",
+    "Crystalline Crawler": "res://assets/cards/dc6d54dc6534a259a1c4.jpg",
+    "Custodi Soulbinders": "res://assets/cards/745bba7648a4b8fbd456.jpg",
+    "Darksteel Ingot": "res://assets/cards/6b6d3225e3c93345da29.jpg",
+    "Darkwater Catacombs": "res://assets/cards/7913e73a10843f7752cc.jpg",
+    "Deepglow Skate": "res://assets/cards/c32b4cbb4434f07c70f3.jpg",
+    "Disdainful Stroke": "res://assets/cards/5fdaf799799ec9c3d622.jpg",
+    "Dreadship Reef": "res://assets/cards/af0dc59ca92e2961f1de.jpg",
+    "Duelist's Heritage": "res://assets/cards/372bd434bcac04e4fbe3.jpg",
+    "Duneblast": "res://assets/cards/e90f34f30e4f458385c8.jpg",
+    "Elite Scaleguard": "res://assets/cards/b6fd372fedcda840a781.jpg",
+    "Enduring Scalelord": "res://assets/cards/574d16347659576744d6.jpg",
+    "Evolution Sage": "res://assets/cards/789c164baea328e3e0fd.jpg",
+    "Evolving Wilds": "res://assets/cards/0e999d1905e17cc2651e.jpg",
+    "Exotic Orchard": "res://assets/cards/50090fd23f091a8def23.jpg",
+    "Fathom Mage": "res://assets/cards/cbb50bd7caaa5317099a.jpg",
+    "Fellwar Stone": "res://assets/cards/508f645e8b123cbf30fc.jpg",
+    "Erebor Heirloom": "res://assets/cards/508f645e8b123cbf30fc.jpg",
+    "Festercreep": "res://assets/cards/331f391154db0d20493c.jpg",
+    "Forest": "res://assets/cards/21938c613dabf83be1db.jpg",
+    "Forgotten Ancient": "res://assets/cards/837cef2ee1d6053746a8.jpg",
+    "Ghave, Guru of Spores": "res://assets/cards/4f485d029e11dd065d7d.jpg",
+    "Golgari Rot Farm": "res://assets/cards/a33ea1e51321362af711.jpg",
+    "Golgari Signet": "res://assets/cards/047d9cf17ee6e808f416.jpg",
+    "Grip of Phyresis": "res://assets/cards/efd5a79f835a874ba038.jpg",
+    "Hardened Scales": "res://assets/cards/8ef23b99c95f645ce25f.jpg",
+    "Ikra Shidiqi, the Usurper": "res://assets/cards/12477f44d9c8c7553c03.jpg",
+    "Inspiring Call": "res://assets/cards/aafc8abcf70014f0ca3f.jpg",
+    "Ishai, Ojutai Dragonspeaker": "res://assets/cards/99e6871ddbba7866d995.jpg",
+    "Island": "res://assets/cards/b2488a145ad77f005d6e.jpg",
+    "Juniper Order Ranger": "res://assets/cards/c04fcbaa3270b5a4db96.jpg",
+    "Kalonian Hydra": "res://assets/cards/87c6a62cf756bce5b433.jpg",
+    "Languish": "res://assets/cards/a1b2b5bbde450103f029.jpg",
+    "Manifold Insights": "res://assets/cards/34929ea4c82139d9b939.jpg",
+    "Master Biomancer": "res://assets/cards/184f610b9a4a8b4c716e.jpg",
+    "Maze of Ith": "res://assets/cards/dded5e26bbf0dfdc29de.jpg",
+    "Merciless Eviction": "res://assets/cards/cb486587d268c66ce2b1.jpg",
+    "Migratory Route": "res://assets/cards/bf4bec4f8fdba5f4d49f.jpg",
+    "Mirrorweave": "res://assets/cards/fc77e91688fa3816e75e.jpg",
+    "Mortify": "res://assets/cards/1f6b472906fe6522147e.jpg",
+    "Murmuring Bosk": "res://assets/cards/d9be3ac5b0a2211b6896.jpg",
+    "Opal Palace": "res://assets/cards/7ed97c43eb3207fd4cda.jpg",
+    "Opulent Palace": "res://assets/cards/b2e7b79a0d8a38fba285.jpg",
+    "Orzhov Advokist": "res://assets/cards/b403980a8768e83b4e7e.jpg",
+    "Orzhov Signet": "res://assets/cards/f40486f5fd266e6896e5.jpg",
+    "Plains": "res://assets/cards/db3e5b20a7d6212eb05f.jpg",
+    "Putrefy": "res://assets/cards/19c6dddbe35b1d6ef562.jpg",
+    "Reyhan, Last of the Abzan": "res://assets/cards/a78017afa57f48dd0e60.jpg",
+    "Sandsteppe Citadel": "res://assets/cards/fbe1be68066ff2caf247.jpg",
+    "Scavenging Ooze": "res://assets/cards/c4be789f049cd117d6f9.jpg",
+    "Seaside Citadel": "res://assets/cards/4bf6228638b55ed1a81b.jpg",
+    "Simic Ascendancy": "res://assets/cards/6dd1d6607a2eac6627ce.jpg",
+    "Simic Signet": "res://assets/cards/4d22dced45425570289f.jpg",
+    "Sol Ring": "res://assets/cards/06ecbb0403e273a1450d.jpg",
+    "Solidarity of Heroes": "res://assets/cards/25741a032bc06ef9829a.jpg",
+    "Spitting Image": "res://assets/cards/c4d2b5575b7b97054259.jpg",
+    "Sublime Exhalation": "res://assets/cards/2606b68421828679750c.jpg",
+    "Sungrass Prairie": "res://assets/cards/072a2fb284aa5a0a90e4.jpg",
+    "Swamp": "res://assets/cards/133a44eb0b0265d52894.jpg",
+    "Swords to Plowshares": "res://assets/cards/f6dbe198ff3fdc021f47.jpg",
+    "Sylvan Reclamation": "res://assets/cards/81ca2650a27ecd10263d.jpg",
+    "Temple of the False God": "res://assets/cards/3fb473e2a67516ece81f.jpg",
+    "Terramorphic Expanse": "res://assets/cards/078756f129e30c0de7d4.jpg",
+    "Tezzeret's Gambit": "res://assets/cards/a63cc6d9e225b961b9d8.jpg",
+    "Thrummingbird": "res://assets/cards/303dc63f0610e7c9853b.jpg",
+    "Tuskguard Captain": "res://assets/cards/f732518a86d18e4daef4.jpg",
+    "Underground River": "res://assets/cards/691c65568953638334e9.jpg",
+    "Vorel of the Hull Clade": "res://assets/cards/b1c13f83399e9e44df5c.jpg",
+    "Vulturous Zombie": "res://assets/cards/87f9733190482a52d5da.jpg",
+    "Winding Constrictor": "res://assets/cards/6b21d4b3f40b562e6531.jpg",
+    "Atraxa, Praetors' Voice": "res://assets/cards/5b2b112796efed204563.jpg",
+    "Abomination, World Ravager": "res://assets/cards/130a85c23441ca8dd9db.jpg",
+    "Age of Ultron": "res://assets/cards/4d5adc5d6d9cd146d05f.jpg",
+    "Arcane Signet": "res://assets/cards/9a62b55c00e25d45ddcf.jpg",
+    "Archnemesis": "res://assets/cards/73f7c5e36e03686fd719.jpg",
+    "Baron Strucker, HYDRA Overlord": "res://assets/cards/d1aa6dd4f9af8e68488a.jpg",
+    "Batroc the Leaper": "res://assets/cards/295f07dbee0e290c0852.jpg",
+    "Bedevil": "res://assets/cards/6e15cb084a7efd948b4e.jpg",
+    "Black Market Connections": "res://assets/cards/2945991b3ce1f29e8cd0.jpg",
+    "Blasphemous Act": "res://assets/cards/ea5b58bcf9fdace4de13.jpg",
+    "Canyon Slough": "res://assets/cards/4bdb91bf7bbb84965d0e.jpg",
+    "Chameleon, Master of Disguise": "res://assets/cards/b25addc55837272318c8.jpg",
+    "Chaos Warp": "res://assets/cards/ecb21bf79f0a9b7b282b.jpg",
+    "Choked Estuary": "res://assets/cards/c2eaae4e9e191b5a80bc.jpg",
+    "Coastal Peak": "res://assets/cards/fa7d4afbf087b804da66.jpg",
+    "Containment Construct": "res://assets/cards/7baccf6a2aa3383123b9.jpg",
+    "Awesome Android": "res://assets/cards/7baccf6a2aa3383123b9.jpg",
+    "Crumbling Necropolis": "res://assets/cards/04eba2cb2db53977458f.jpg",
+    "Currency Converter": "res://assets/cards/a44bb83993ef9d0bf26a.jpg",
+    "Damocles Base, Sword of Kang": "res://assets/cards/54f178f4dc7659bf2556.jpg",
+    "Doom's Time Platform": "res://assets/cards/36df82215499af97a01b.jpg",
+    "Dragonskull Summit": "res://assets/cards/bcac3ff501bd4a61e0b6.jpg",
+    "Drowned Catacomb": "res://assets/cards/996a74888a438032b874.jpg",
+    "Endless Ranks of HYDRA": "res://assets/cards/ffa790dadbd09a8d3f02.jpg",
+    "Extract Power": "res://assets/cards/17550bea68971eaf3389.jpg",
+    "Fetid Pools": "res://assets/cards/c90df50b05af04b7cb6b.jpg",
+    "Foreboding Ruins": "res://assets/cards/64870e4cc5b1df29d66b.jpg",
+    "Frostboil Snarl": "res://assets/cards/db8eb1263de550f628cd.jpg",
+    "Glorious Purpose": "res://assets/cards/e2d2b834d796ba86e58c.jpg",
+    "Helmut Zemo, Mastermind": "res://assets/cards/e9090d262fb9a2ad6e12.jpg",
+    "Iron Monger, Sadistic Tycoon": "res://assets/cards/0e6d05e855b68a4733c5.jpg",
+    "Kang Dynasty": "res://assets/cards/616de93941d146d9b113.jpg",
+    "Kang Prime": "res://assets/cards/b8c043ca032c97248f0d.jpg",
+    "Kang, Temporal Tyrant": "res://assets/cards/4da06f54fa7b07684f34.jpg",
+    "Killmonger, Ruthless Usurper": "res://assets/cards/87621d9220d01f67238b.jpg",
+    "Kindred Dominance": "res://assets/cards/92d1c01b9d69a2c828c9.jpg",
+    "Klaw, Master of Sound": "res://assets/cards/204117904eb21dd31672.jpg",
+    "Lady Loki, Agent of Chaos": "res://assets/cards/ed49ae7151986523272d.jpg",
+    "Lethal Scheme": "res://assets/cards/1b3843775aa2aa40e005.jpg",
+    "Living Laser": "res://assets/cards/a33505c69eb73e520830.jpg",
+    "Loki's Scepter": "res://assets/cards/e877ce0c1418a7bc863b.jpg",
+    "Loki, the Deceiver": "res://assets/cards/8aa0e274ae874c4977e8.jpg",
+    "Luxury Suite": "res://assets/cards/d420de8db89450e8cb24.jpg",
+    "Madame Hydra": "res://assets/cards/8bc18690497b6bc9d89c.jpg",
+    "Molecule Man": "res://assets/cards/0594782fb2b57c0c6e7d.jpg",
+    "Moonstone, Harsh Mistress": "res://assets/cards/68515ea76a0ae4e4c5a7.jpg",
+    "Mountain": "res://assets/cards/bc9b68776990f3bfca78.jpg",
+    "Night's Whisper": "res://assets/cards/0138207ed5dee010c6cf.jpg",
+    "Patchwork Banner": "res://assets/cards/449826e3aaab9cc78adf.jpg",
+    "Path of Ancestry": "res://assets/cards/abaea246a144f1c15731.jpg",
+    "Progenitor's Icon": "res://assets/cards/27f8484d87c088b53e45.jpg",
+    "Propaganda": "res://assets/cards/ca5d46138a51771884a9.jpg",
+    "Prowler, Clawed Thief": "res://assets/cards/034f6ace0a36f3aa7a72.jpg",
+    "Puppet Master, String Puller": "res://assets/cards/f6d1e361ee104982e37e.jpg",
+    "Red Ghost, Intangible Genius": "res://assets/cards/9037d0425927eae642f0.jpg",
+    "Scavenger Grounds": "res://assets/cards/171f6b203a44105225f4.jpg",
+    "Scorched Geyser": "res://assets/cards/664b8acf18af215f3dbc.jpg",
+    "Secluded Courtyard": "res://assets/cards/dd5b1e77458d55e67a83.jpg",
+    "Skullclamp": "res://assets/cards/cb80e8a3eb73557189bf.jpg",
+    "Smoldering Marsh": "res://assets/cards/379bfd902f4dba3aa7fe.jpg",
+    "Spark Double": "res://assets/cards/0b5c8494518e72d7f968.jpg",
+    "Loki's Double": "res://assets/cards/0b5c8494518e72d7f968.jpg",
+    "Stilt-Man, Towering Terror": "res://assets/cards/6186f9b8200d68ad1d08.jpg",
+    "Sulfur Falls": "res://assets/cards/efe2055e0711e852d6d3.jpg",
+    "Sunken Hollow": "res://assets/cards/e616ec8ccd31f9b73648.jpg",
+    "Superior Foes of Spider-Man": "res://assets/cards/9efe338526019008e5d7.jpg",
+    "Swiftfoot Boots": "res://assets/cards/677e1ba03c0370a8c7af.jpg",
+    "Syphon Mind": "res://assets/cards/6c8e3a9800d4d3cf29cd.jpg",
+    "Talisman of Dominance": "res://assets/cards/38e4fd84b799e7c09bdd.jpg",
+    "Talisman of Indulgence": "res://assets/cards/9ab17ef0f0d8999d1667.jpg",
+    "Terminate": "res://assets/cards/e45f6207992a820f5f7b.jpg",
+    "The Frightful Four": "res://assets/cards/6cd1fe1cbca919a9223e.jpg",
+    "The Squadron Sinister": "res://assets/cards/c01a7446131a336e8116.jpg",
+    "Titan of Littjara": "res://assets/cards/4cb87a11f7a84441c718.jpg",
+    "Lady Loki's Manifestation": "res://assets/cards/4cb87a11f7a84441c718.jpg",
+    "Titania, Proud Pummeler": "res://assets/cards/c07d4550160b84b8273f.jpg",
+    "Tombstone, Career Criminal": "res://assets/cards/7975daa18c244d2d3d1c.jpg",
+    "Toxic Deluge": "res://assets/cards/ccfafcccc0e2a5447ffe.jpg",
+    "Tri-Sentinel, Act of Vengeance": "res://assets/cards/3a3a35b5f374c43fdeeb.jpg",
+    "Typhoid Mary, Fractured": "res://assets/cards/1a21ef6b8974d4287e98.jpg",
+    "Ultron, Unlimited": "res://assets/cards/1f3a5470cf55f48fb6f8.jpg",
+    "Unclaimed Territory": "res://assets/cards/7a09c4483f59f6a19e04.jpg",
+    "Vandalblast": "res://assets/cards/4f79d1a9fbca01a4dbef.jpg",
+    "Villainous Hideout": "res://assets/cards/2e6d8fc5c18937f2cf75.jpg",
+    "Withering Torment": "res://assets/cards/4d39e3331b60e627cd8e.jpg",
+    "Doctor Doom, King of Latveria": "res://assets/cards/1284d75d2b1aeec0753d.jpg"
+  },
+  "decks": {
+    "Atraxa": [
+      {
+        "name": "Abzan Falconer",
+        "set": "MIC",
+        "collector": "77"
+      },
+      {
+        "name": "Arcane Sanctum",
+        "set": "40K",
+        "collector": "264"
+      },
+      {
+        "name": "Ash Barrens",
+        "set": "TMC",
+        "collector": "60"
+      },
+      {
+        "name": "Astral Cornucopia",
+        "set": "CM2",
+        "collector": "172"
+      },
+      {
+        "name": "Azorius Chancery",
+        "set": "CM2",
+        "collector": "236"
+      },
+      {
+        "name": "Brave the Sands",
+        "set": "KTK",
+        "collector": "5"
+      },
+      {
+        "name": "Bred for the Hunt",
+        "set": "40K",
+        "collector": "222"
+      },
+      {
+        "name": "Cathars' Crusade",
+        "set": "INR",
+        "collector": "483"
+      },
+      {
+        "name": "Cauldron of Souls",
+        "set": "PLST",
+        "collector": "CM2-180"
+      },
+      {
+        "name": "Champion of Lambholt",
+        "set": "SLD",
+        "collector": "2245"
+      },
+      {
+        "name": "Citadel Siege",
+        "set": "C21",
+        "collector": "85"
+      },
+      {
+        "name": "Command Tower",
+        "set": "ELD",
+        "collector": "333"
+      },
+      {
+        "name": "Commander's Sphere",
+        "set": "LTC",
+        "collector": "276"
+      },
+      {
+        "name": "Corpsejack Menace",
+        "set": "PIP",
+        "collector": "214"
+      },
+      {
+        "name": "Crystalline Crawler",
+        "set": "PLST",
+        "collector": "C16-54"
+      },
+      {
+        "name": "Custodi Soulbinders",
+        "set": "CM2",
+        "collector": "23"
+      },
+      {
+        "name": "Darksteel Ingot",
+        "set": "SLD",
+        "collector": "204"
+      },
+      {
+        "name": "Darkwater Catacombs",
+        "set": "WHO",
+        "collector": "269"
+      },
+      {
+        "name": "Deepglow Skate",
+        "set": "SLD",
+        "collector": "2362"
+      },
+      {
+        "name": "Disdainful Stroke",
+        "set": "SOA",
+        "collector": "17"
+      },
+      {
+        "name": "Dreadship Reef",
+        "set": "PLST",
+        "collector": "CM2-247"
+      },
+      {
+        "name": "Duelist's Heritage",
+        "set": "TLE",
+        "collector": "153"
+      },
+      {
+        "name": "Duneblast",
+        "set": "CM2",
+        "collector": "154"
+      },
+      {
+        "name": "Elite Scaleguard",
+        "set": "CM2",
+        "collector": "27"
+      },
+      {
+        "name": "Enduring Scalelord",
+        "set": "CM2",
+        "collector": "155"
+      },
+      {
+        "name": "Evolution Sage",
+        "set": "ZNC",
+        "collector": "65"
+      },
+      {
+        "name": "Evolving Wilds",
+        "set": "TMC",
+        "collector": "65"
+      },
+      {
+        "name": "Exotic Orchard",
+        "set": "MSC",
+        "collector": "470"
+      },
+      {
+        "name": "Fathom Mage",
+        "set": "CMR",
+        "collector": "445"
+      },
+      {
+        "name": "Fellwar Stone",
+        "set": "SLD",
+        "collector": "2557"
+      },
+      {
+        "name": "Festercreep",
+        "set": "PLST",
+        "collector": "CM2-63"
+      },
+      {
+        "name": "Forest",
+        "set": "SOS",
+        "collector": "271"
+      },
+      {
+        "name": "Forgotten Ancient",
+        "set": "FIC",
+        "collector": "304"
+      },
+      {
+        "name": "Ghave, Guru of Spores",
+        "set": "SLD",
+        "collector": "1137"
+      },
+      {
+        "name": "Golgari Rot Farm",
+        "set": "TDC",
+        "collector": "368"
+      },
+      {
+        "name": "Golgari Signet",
+        "set": "CMA",
+        "collector": "218"
+      },
+      {
+        "name": "Grip of Phyresis",
+        "set": "C16",
+        "collector": "9"
+      },
+      {
+        "name": "Hardened Scales",
+        "set": "PIP",
+        "collector": "200"
+      },
+      {
+        "name": "Ikra Shidiqi, the Usurper",
+        "set": "PLST",
+        "collector": "CM2-11"
+      },
+      {
+        "name": "Inspiring Call",
+        "set": "40K",
+        "collector": "217"
+      },
+      {
+        "name": "Ishai, Ojutai Dragonspeaker",
+        "set": "BLC",
+        "collector": "89"
+      },
+      {
+        "name": "Island",
+        "set": "SOS",
+        "collector": "268"
+      },
+      {
+        "name": "Juniper Order Ranger",
+        "set": "CM2",
+        "collector": "158"
+      },
+      {
+        "name": "Kalonian Hydra",
+        "set": "BLC",
+        "collector": "226"
+      },
+      {
+        "name": "Languish",
+        "set": "LTC",
+        "collector": "202"
+      },
+      {
+        "name": "Manifold Insights",
+        "set": "CM2",
+        "collector": "44"
+      },
+      {
+        "name": "Master Biomancer",
+        "set": "CLU",
+        "collector": "200"
+      },
+      {
+        "name": "Maze of Ith",
+        "set": "DMR",
+        "collector": "456"
+      },
+      {
+        "name": "Merciless Eviction",
+        "set": "CM2",
+        "collector": "160"
+      },
+      {
+        "name": "Migratory Route",
+        "set": "SCD",
+        "collector": "237"
+      },
+      {
+        "name": "Mirrorweave",
+        "set": "CM2",
+        "collector": "162"
+      },
+      {
+        "name": "Mortify",
+        "set": "ACR",
+        "collector": "96"
+      },
+      {
+        "name": "Murmuring Bosk",
+        "set": "PLST",
+        "collector": "DMC-220"
+      },
+      {
+        "name": "Opal Palace",
+        "set": "40K",
+        "collector": "286"
+      },
+      {
+        "name": "Opulent Palace",
+        "set": "TDM",
+        "collector": "264"
+      },
+      {
+        "name": "Orzhov Advokist",
+        "set": "CMR",
+        "collector": "35"
+      },
+      {
+        "name": "Orzhov Signet",
+        "set": "MM3",
+        "collector": "224"
+      },
+      {
+        "name": "Plains",
+        "set": "SOS",
+        "collector": "267"
+      },
+      {
+        "name": "Putrefy",
+        "set": "SLD",
+        "collector": "2299"
+      },
+      {
+        "name": "Reyhan, Last of the Abzan",
+        "set": "PRM",
+        "collector": "86170"
+      },
+      {
+        "name": "Sandsteppe Citadel",
+        "set": "LTC",
+        "collector": "327"
+      },
+      {
+        "name": "Scavenging Ooze",
+        "set": "FDN",
+        "collector": "232"
+      },
+      {
+        "name": "Seaside Citadel",
+        "set": "FIC",
+        "collector": "420"
+      },
+      {
+        "name": "Simic Ascendancy",
+        "set": "LCC",
+        "collector": "288"
+      },
+      {
+        "name": "Simic Signet",
+        "set": "C21",
+        "collector": "262"
+      },
+      {
+        "name": "Sol Ring",
+        "set": "SLD",
+        "collector": "1988"
+      },
+      {
+        "name": "Solidarity of Heroes",
+        "set": "CM2",
+        "collector": "144"
+      },
+      {
+        "name": "Spitting Image",
+        "set": "CMR",
+        "collector": "453"
+      },
+      {
+        "name": "Sublime Exhalation",
+        "set": "CMM",
+        "collector": "60"
+      },
+      {
+        "name": "Sungrass Prairie",
+        "set": "PIP",
+        "collector": "513"
+      },
+      {
+        "name": "Swamp",
+        "set": "SOS",
+        "collector": "269"
+      },
+      {
+        "name": "Swords to Plowshares",
+        "set": "FDC",
+        "collector": "53"
+      },
+      {
+        "name": "Sylvan Reclamation",
+        "set": "ZNC",
+        "collector": "104"
+      },
+      {
+        "name": "Temple of the False God",
+        "set": "PIP",
+        "collector": "311"
+      },
+      {
+        "name": "Terramorphic Expanse",
+        "set": "CM2",
+        "collector": "273"
+      },
+      {
+        "name": "Tezzeret's Gambit",
+        "set": "STA",
+        "collector": "21"
+      },
+      {
+        "name": "Thrummingbird",
+        "set": "ONE",
+        "collector": "288"
+      },
+      {
+        "name": "Tuskguard Captain",
+        "set": "CM2",
+        "collector": "147"
+      },
+      {
+        "name": "Underground River",
+        "set": "FRC",
+        "collector": "87"
+      },
+      {
+        "name": "Vorel of the Hull Clade",
+        "set": "NCC",
+        "collector": "357"
+      },
+      {
+        "name": "Vulturous Zombie",
+        "set": "CM2",
+        "collector": "170"
+      },
+      {
+        "name": "Winding Constrictor",
+        "set": "PIP",
+        "collector": "223"
+      },
+      {
+        "name": "Atraxa, Praetors' Voice",
+        "set": "PF26",
+        "collector": "10"
+      }
+    ],
+    "AtraxaV2": [
+      {
+        "name": "Abzan Falconer",
+        "set": "MIC",
+        "collector": "77"
+      },
+      {
+        "name": "Arcane Sanctum",
+        "set": "40K",
+        "collector": "264"
+      },
+      {
+        "name": "Ash Barrens",
+        "set": "TMC",
+        "collector": "60"
+      },
+      {
+        "name": "Astral Cornucopia",
+        "set": "CM2",
+        "collector": "172"
+      },
+      {
+        "name": "Azorius Chancery",
+        "set": "CM2",
+        "collector": "236"
+      },
+      {
+        "name": "Brave the Sands",
+        "set": "KTK",
+        "collector": "5"
+      },
+      {
+        "name": "Bred for the Hunt",
+        "set": "40K",
+        "collector": "222"
+      },
+      {
+        "name": "Cathars' Crusade",
+        "set": "INR",
+        "collector": "483"
+      },
+      {
+        "name": "Cauldron of Souls",
+        "set": "PLST",
+        "collector": "CM2-180"
+      },
+      {
+        "name": "Champion of Lambholt",
+        "set": "SLD",
+        "collector": "2245"
+      },
+      {
+        "name": "Citadel Siege",
+        "set": "C21",
+        "collector": "85"
+      },
+      {
+        "name": "Command Tower",
+        "set": "ELD",
+        "collector": "333"
+      },
+      {
+        "name": "Commander's Sphere",
+        "set": "LTC",
+        "collector": "276"
+      },
+      {
+        "name": "Corpsejack Menace",
+        "set": "PIP",
+        "collector": "214"
+      },
+      {
+        "name": "Crystalline Crawler",
+        "set": "PLST",
+        "collector": "C16-54"
+      },
+      {
+        "name": "Custodi Soulbinders",
+        "set": "CM2",
+        "collector": "23"
+      },
+      {
+        "name": "Darksteel Ingot",
+        "set": "SLD",
+        "collector": "204"
+      },
+      {
+        "name": "Darkwater Catacombs",
+        "set": "WHO",
+        "collector": "269"
+      },
+      {
+        "name": "Deepglow Skate",
+        "set": "SLD",
+        "collector": "2362"
+      },
+      {
+        "name": "Disdainful Stroke",
+        "set": "SOA",
+        "collector": "17"
+      },
+      {
+        "name": "Dreadship Reef",
+        "set": "PLST",
+        "collector": "CM2-247"
+      },
+      {
+        "name": "Duelist's Heritage",
+        "set": "TLE",
+        "collector": "153"
+      },
+      {
+        "name": "Duneblast",
+        "set": "CM2",
+        "collector": "154"
+      },
+      {
+        "name": "Elite Scaleguard",
+        "set": "CM2",
+        "collector": "27"
+      },
+      {
+        "name": "Enduring Scalelord",
+        "set": "CM2",
+        "collector": "155"
+      },
+      {
+        "name": "Evolution Sage",
+        "set": "ZNC",
+        "collector": "65"
+      },
+      {
+        "name": "Evolving Wilds",
+        "set": "TMC",
+        "collector": "65"
+      },
+      {
+        "name": "Exotic Orchard",
+        "set": "MSC",
+        "collector": "470"
+      },
+      {
+        "name": "Fathom Mage",
+        "set": "CMR",
+        "collector": "445"
+      },
+      {
+        "name": "Fellwar Stone",
+        "set": "SLD",
+        "collector": "2557"
+      },
+      {
+        "name": "Festercreep",
+        "set": "PLST",
+        "collector": "CM2-63"
+      },
+      {
+        "name": "Forest",
+        "set": "SOS",
+        "collector": "271"
+      },
+      {
+        "name": "Forgotten Ancient",
+        "set": "FIC",
+        "collector": "304"
+      },
+      {
+        "name": "Ghave, Guru of Spores",
+        "set": "SLD",
+        "collector": "1137"
+      },
+      {
+        "name": "Golgari Rot Farm",
+        "set": "TDC",
+        "collector": "368"
+      },
+      {
+        "name": "Golgari Signet",
+        "set": "CMA",
+        "collector": "218"
+      },
+      {
+        "name": "Grip of Phyresis",
+        "set": "C16",
+        "collector": "9"
+      },
+      {
+        "name": "Hardened Scales",
+        "set": "PIP",
+        "collector": "200"
+      },
+      {
+        "name": "Ikra Shidiqi, the Usurper",
+        "set": "PLST",
+        "collector": "CM2-11"
+      },
+      {
+        "name": "Inspiring Call",
+        "set": "40K",
+        "collector": "217"
+      },
+      {
+        "name": "Ishai, Ojutai Dragonspeaker",
+        "set": "BLC",
+        "collector": "89"
+      },
+      {
+        "name": "Island",
+        "set": "SOS",
+        "collector": "268"
+      },
+      {
+        "name": "Juniper Order Ranger",
+        "set": "CM2",
+        "collector": "158"
+      },
+      {
+        "name": "Kalonian Hydra",
+        "set": "BLC",
+        "collector": "226"
+      },
+      {
+        "name": "Languish",
+        "set": "LTC",
+        "collector": "202"
+      },
+      {
+        "name": "Manifold Insights",
+        "set": "CM2",
+        "collector": "44"
+      },
+      {
+        "name": "Master Biomancer",
+        "set": "CLU",
+        "collector": "200"
+      },
+      {
+        "name": "Maze of Ith",
+        "set": "DMR",
+        "collector": "456"
+      },
+      {
+        "name": "Merciless Eviction",
+        "set": "CM2",
+        "collector": "160"
+      },
+      {
+        "name": "Migratory Route",
+        "set": "SCD",
+        "collector": "237"
+      },
+      {
+        "name": "Mirrorweave",
+        "set": "CM2",
+        "collector": "162"
+      },
+      {
+        "name": "Mortify",
+        "set": "ACR",
+        "collector": "96"
+      },
+      {
+        "name": "Murmuring Bosk",
+        "set": "PLST",
+        "collector": "DMC-220"
+      },
+      {
+        "name": "Opal Palace",
+        "set": "40K",
+        "collector": "286"
+      },
+      {
+        "name": "Opulent Palace",
+        "set": "TDM",
+        "collector": "264"
+      },
+      {
+        "name": "Orzhov Advokist",
+        "set": "CMR",
+        "collector": "35"
+      },
+      {
+        "name": "Orzhov Signet",
+        "set": "MM3",
+        "collector": "224"
+      },
+      {
+        "name": "Plains",
+        "set": "SOS",
+        "collector": "267"
+      },
+      {
+        "name": "Putrefy",
+        "set": "SLD",
+        "collector": "2299"
+      },
+      {
+        "name": "Reyhan, Last of the Abzan",
+        "set": "PRM",
+        "collector": "86170"
+      },
+      {
+        "name": "Sandsteppe Citadel",
+        "set": "LTC",
+        "collector": "327"
+      },
+      {
+        "name": "Scavenging Ooze",
+        "set": "FDN",
+        "collector": "232"
+      },
+      {
+        "name": "Seaside Citadel",
+        "set": "FIC",
+        "collector": "420"
+      },
+      {
+        "name": "Simic Ascendancy",
+        "set": "LCC",
+        "collector": "288"
+      },
+      {
+        "name": "Simic Signet",
+        "set": "C21",
+        "collector": "262"
+      },
+      {
+        "name": "Sol Ring",
+        "set": "SLD",
+        "collector": "1988"
+      },
+      {
+        "name": "Solidarity of Heroes",
+        "set": "CM2",
+        "collector": "144"
+      },
+      {
+        "name": "Spitting Image",
+        "set": "CMR",
+        "collector": "453"
+      },
+      {
+        "name": "Sublime Exhalation",
+        "set": "CMM",
+        "collector": "60"
+      },
+      {
+        "name": "Sungrass Prairie",
+        "set": "PIP",
+        "collector": "513"
+      },
+      {
+        "name": "Swamp",
+        "set": "SOS",
+        "collector": "269"
+      },
+      {
+        "name": "Swords to Plowshares",
+        "set": "FDC",
+        "collector": "53"
+      },
+      {
+        "name": "Sylvan Reclamation",
+        "set": "ZNC",
+        "collector": "104"
+      },
+      {
+        "name": "Temple of the False God",
+        "set": "PIP",
+        "collector": "311"
+      },
+      {
+        "name": "Terramorphic Expanse",
+        "set": "CM2",
+        "collector": "273"
+      },
+      {
+        "name": "Tezzeret's Gambit",
+        "set": "STA",
+        "collector": "21"
+      },
+      {
+        "name": "Thrummingbird",
+        "set": "ONE",
+        "collector": "288"
+      },
+      {
+        "name": "Tuskguard Captain",
+        "set": "CM2",
+        "collector": "147"
+      },
+      {
+        "name": "Underground River",
+        "set": "FRC",
+        "collector": "87"
+      },
+      {
+        "name": "Vorel of the Hull Clade",
+        "set": "NCC",
+        "collector": "357"
+      },
+      {
+        "name": "Vulturous Zombie",
+        "set": "CM2",
+        "collector": "170"
+      },
+      {
+        "name": "Winding Constrictor",
+        "set": "PIP",
+        "collector": "223"
+      },
+      {
+        "name": "Atraxa, Praetors' Voice",
+        "set": "PF26",
+        "collector": "10"
+      }
+    ],
+    "Doom Commander": [
+      {
+        "name": "Abomination, World Ravager",
+        "set": "MSC",
+        "collector": "355"
+      },
+      {
+        "name": "Age of Ultron",
+        "set": "MSC",
+        "collector": "41"
+      },
+      {
+        "name": "Arcane Signet",
+        "set": "MSC",
+        "collector": "194"
+      },
+      {
+        "name": "Archnemesis",
+        "set": "MSC",
+        "collector": "391"
+      },
+      {
+        "name": "Baron Strucker, HYDRA Overlord",
+        "set": "MSH",
+        "collector": "315"
+      },
+      {
+        "name": "Batroc the Leaper",
+        "set": "MSC",
+        "collector": "357"
+      },
+      {
+        "name": "Bedevil",
+        "set": "MSC",
+        "collector": "393"
+      },
+      {
+        "name": "Black Market Connections",
+        "set": "PLST",
+        "collector": "LCC-181"
+      },
+      {
+        "name": "Blasphemous Act",
+        "set": "MSC",
+        "collector": "358"
+      },
+      {
+        "name": "Canyon Slough",
+        "set": "MSC",
+        "collector": "463"
+      },
+      {
+        "name": "Chameleon, Master of Disguise",
+        "set": "MSC",
+        "collector": "148"
+      },
+      {
+        "name": "Chaos Warp",
+        "set": "MSC",
+        "collector": "359"
+      },
+      {
+        "name": "Choked Estuary",
+        "set": "MSC",
+        "collector": "464"
+      },
+      {
+        "name": "Coastal Peak",
+        "set": "MSC",
+        "collector": "467"
+      },
+      {
+        "name": "Command Tower",
+        "set": "MSC",
+        "collector": "235"
+      },
+      {
+        "name": "Containment Construct",
+        "set": "MSC",
+        "collector": "284"
+      },
+      {
+        "name": "Crumbling Necropolis",
+        "set": "MSC",
+        "collector": "237"
+      },
+      {
+        "name": "Currency Converter",
+        "set": "MSC",
+        "collector": "430"
+      },
+      {
+        "name": "Damocles Base, Sword of Kang",
+        "set": "MSC",
+        "collector": "347"
+      },
+      {
+        "name": "Doom's Time Platform",
+        "set": "MSC",
+        "collector": "431"
+      },
+      {
+        "name": "Dragonskull Summit",
+        "set": "MSC",
+        "collector": "468"
+      },
+      {
+        "name": "Drowned Catacomb",
+        "set": "MSC",
+        "collector": "469"
+      },
+      {
+        "name": "Endless Ranks of HYDRA",
+        "set": "MSC",
+        "collector": "348"
+      },
+      {
+        "name": "Exotic Orchard",
+        "set": "MSC",
+        "collector": "470"
+      },
+      {
+        "name": "Extract Power",
+        "set": "MSC",
+        "collector": "328"
+      },
+      {
+        "name": "Fetid Pools",
+        "set": "MSC",
+        "collector": "472"
+      },
+      {
+        "name": "Foreboding Ruins",
+        "set": "MSC",
+        "collector": "473"
+      },
+      {
+        "name": "Frostboil Snarl",
+        "set": "MSC",
+        "collector": "475"
+      },
+      {
+        "name": "Glorious Purpose",
+        "set": "MSC",
+        "collector": "330"
+      },
+      {
+        "name": "Helmut Zemo, Mastermind",
+        "set": "MSC",
+        "collector": "331"
+      },
+      {
+        "name": "Iron Monger, Sadistic Tycoon",
+        "set": "MSC",
+        "collector": "350"
+      },
+      {
+        "name": "Kang Dynasty",
+        "set": "MSC",
+        "collector": "35"
+      },
+      {
+        "name": "Kang Prime",
+        "set": "MSC",
+        "collector": "406"
+      },
+      {
+        "name": "Kang, Temporal Tyrant",
+        "set": "MSH",
+        "collector": "450"
+      },
+      {
+        "name": "Killmonger, Ruthless Usurper",
+        "set": "MSC",
+        "collector": "364"
+      },
+      {
+        "name": "Kindred Dominance",
+        "set": "MSC",
+        "collector": "351"
+      },
+      {
+        "name": "Klaw, Master of Sound",
+        "set": "MSC",
+        "collector": "352"
+      },
+      {
+        "name": "Lady Loki, Agent of Chaos",
+        "set": "MSC",
+        "collector": "365"
+      },
+      {
+        "name": "Lethal Scheme",
+        "set": "MSC",
+        "collector": "353"
+      },
+      {
+        "name": "Living Laser",
+        "set": "MSC",
+        "collector": "366"
+      },
+      {
+        "name": "Loki's Scepter",
+        "set": "MSC",
+        "collector": "367"
+      },
+      {
+        "name": "Loki, the Deceiver",
+        "set": "MSC",
+        "collector": "407"
+      },
+      {
+        "name": "Luxury Suite",
+        "set": "MSC",
+        "collector": "482"
+      },
+      {
+        "name": "Madame Hydra",
+        "set": "MSH",
+        "collector": "318"
+      },
+      {
+        "name": "Molecule Man",
+        "set": "MSC",
+        "collector": "292"
+      },
+      {
+        "name": "Moonstone, Harsh Mistress",
+        "set": "MSH",
+        "collector": "447"
+      },
+      {
+        "name": "Mountain",
+        "set": "MSH",
+        "collector": "283"
+      },
+      {
+        "name": "Mountain",
+        "set": "SLD",
+        "collector": "1953"
+      },
+      {
+        "name": "Night's Whisper",
+        "set": "MSC",
+        "collector": "158"
+      },
+      {
+        "name": "Patchwork Banner",
+        "set": "MSC",
+        "collector": "207"
+      },
+      {
+        "name": "Path of Ancestry",
+        "set": "MSC",
+        "collector": "254"
+      },
+      {
+        "name": "Progenitor's Icon",
+        "set": "MSC",
+        "collector": "449"
+      },
+      {
+        "name": "Propaganda",
+        "set": "MSC",
+        "collector": "151"
+      },
+      {
+        "name": "Prowler, Clawed Thief",
+        "set": "SPM",
+        "collector": "138"
+      },
+      {
+        "name": "Puppet Master, String Puller",
+        "set": "MSC",
+        "collector": "370"
+      },
+      {
+        "name": "Red Ghost, Intangible Genius",
+        "set": "MSC",
+        "collector": "413"
+      },
+      {
+        "name": "Scavenger Grounds",
+        "set": "MSC",
+        "collector": "491"
+      },
+      {
+        "name": "Scorched Geyser",
+        "set": "MSC",
+        "collector": "492"
+      },
+      {
+        "name": "Secluded Courtyard",
+        "set": "LTC",
+        "collector": "330"
+      },
+      {
+        "name": "Skullclamp",
+        "set": "MSC",
+        "collector": "451"
+      },
+      {
+        "name": "Smoldering Marsh",
+        "set": "MSC",
+        "collector": "493"
+      },
+      {
+        "name": "Sol Ring",
+        "set": "MSC",
+        "collector": "213"
+      },
+      {
+        "name": "Spark Double",
+        "set": "MSC",
+        "collector": "337"
+      },
+      {
+        "name": "Stilt-Man, Towering Terror",
+        "set": "MSC",
+        "collector": "373"
+      },
+      {
+        "name": "Sulfur Falls",
+        "set": "MSC",
+        "collector": "496"
+      },
+      {
+        "name": "Sunken Hollow",
+        "set": "MSC",
+        "collector": "498"
+      },
+      {
+        "name": "Superior Foes of Spider-Man",
+        "set": "SPM",
+        "collector": "96"
+      },
+      {
+        "name": "Swamp",
+        "set": "MSH",
+        "collector": "438"
+      },
+      {
+        "name": "Swiftfoot Boots",
+        "set": "MSC",
+        "collector": "216"
+      },
+      {
+        "name": "Syphon Mind",
+        "set": "MSC",
+        "collector": "159"
+      },
+      {
+        "name": "Talisman of Dominance",
+        "set": "MSC",
+        "collector": "219"
+      },
+      {
+        "name": "Talisman of Indulgence",
+        "set": "MSC",
+        "collector": "220"
+      },
+      {
+        "name": "Terminate",
+        "set": "MSC",
+        "collector": "189"
+      },
+      {
+        "name": "Terramorphic Expanse",
+        "set": "MSC",
+        "collector": "828"
+      },
+      {
+        "name": "The Frightful Four",
+        "set": "MSC",
+        "collector": "349"
+      },
+      {
+        "name": "The Squadron Sinister",
+        "set": "MSC",
+        "collector": "417"
+      },
+      {
+        "name": "Titan of Littjara",
+        "set": "MSC",
+        "collector": "335"
+      },
+      {
+        "name": "Titania, Proud Pummeler",
+        "set": "MSC",
+        "collector": "374"
+      },
+      {
+        "name": "Tombstone, Career Criminal",
+        "set": "MSC",
+        "collector": "577"
+      },
+      {
+        "name": "Toxic Deluge",
+        "set": "MSC",
+        "collector": "354"
+      },
+      {
+        "name": "Tri-Sentinel, Act of Vengeance",
+        "set": "MSC",
+        "collector": "456"
+      },
+      {
+        "name": "Typhoid Mary, Fractured",
+        "set": "MSC",
+        "collector": "421"
+      },
+      {
+        "name": "Ultron, Unlimited",
+        "set": "MSC",
+        "collector": "422"
+      },
+      {
+        "name": "Unclaimed Territory",
+        "set": "MSC",
+        "collector": "275"
+      },
+      {
+        "name": "Vandalblast",
+        "set": "MSC",
+        "collector": "168"
+      },
+      {
+        "name": "Villainous Hideout",
+        "set": "MSH",
+        "collector": "454"
+      },
+      {
+        "name": "Withering Torment",
+        "set": "MSC",
+        "collector": "162"
+      },
+      {
+        "name": "Doctor Doom, King of Latveria",
+        "set": "MSC",
+        "collector": "6"
+      }
+    ]
+  },
+  "source": "Existing local Forge card-image cache; artwork copyright Wizards of the Coast and respective licensors."
+}

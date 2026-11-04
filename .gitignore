@@ -6,3 +6,23 @@
 node_modules/
 target/
 dist/
+# Godot import cache and local verification captures
+/client-godot/.godot/
+/client-godot/artifacts/
+# Local backups, verification output and packaged handoffs
+/artifacts/
+/backups/
+/bridge/tools/playtest-reports/
+/ForgeUI-*.zip
+# Machine/editor state and credentials
+/.vscode/
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+.env
+.env.*
+!.env.example
+.godot/
+.m2/
+export_credentials.cfg

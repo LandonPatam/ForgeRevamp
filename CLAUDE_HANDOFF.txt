@@ -1,0 +1,583 @@
+FORGEUI - ARCHITECTURE AND DEVELOPMENT HANDOFF FOR CLAUDE
+Updated: October 26, 2026
+Workspace: D:\ForgeUI
+
+This is a guide to the current implementation, not a request to make new changes.
+Read the relevant source before editing. HANDOFF.md contains detailed chronological
+development notes; older entries describe superseded designs. This document gives
+the current structure and the intended behavior.
+
+
+1. WHAT THIS PROJECT IS
+=======================
+
+ForgeUI is a custom interface for Magic: The Gathering Commander, using the real
+Forge engine for card rules, legality, targeting, costs, combat and game decisions.
+The main implemented application supports one human and one to three AI opponents.
+
+The frontend is a native Godot application, not a website. Its home screen is a
+procedural 3D retro computer. The computer screen displays real Godot UI through a
+SubViewport texture. The editor, settings and battlefield use Godot 2D Controls.
+
+The design combines physical gray plastic hardware and colorful floppy disks with
+teal CRT terminals, purple UI accents, digital HP displays and real card artwork.
+
+Online play with stock Forge is a project ambition. The local JSON bridge is NOT
+an implemented remote multiplayer server. Do not advertise complete online support.
+
+
+2. TOP-LEVEL REPOSITORY MAP
+============================
+
+client-godot/
+  project.godot             Godot configuration and application entry point.
+  scenes/Application.tscn   Starts scripts/app/Application.gd.
+  scenes/Main.tscn          Battlefield scene, driven by scripts/ui/Main.gd.
+  scripts/app/             Home computer, navigation, startup, settings, animations.
+  scripts/ui/              Battlefield, cards, popups, hand, stack and player HUDs.
+  scripts/library/         Deck editor, library API client and artwork loading.
+  scripts/bridge/          Live and mock game-state adapters.
+  assets/                  Images/fonts/Forge avatar assets used by the frontend.
+  tests/                   Godot regression and integration checks.
+  tools/                   Windows/Bash launchers and Node integration runners.
+  artifacts/               Generated screenshots, test fixtures and process logs.
+
+bridge/
+  src/main/java/forgeui/bridge/   Custom Java engine/library bridge.
+  src/main/java/forge/           Inspect existing compatibility helpers as needed.
+  src/test/java/                 Java regression checks.
+  src/main/resources/web/        Older browser diagnostic client, not the main UI.
+  target/classes/                Compiled custom bridge classes.
+  target/lib/                    Forge and other runtime dependencies.
+  tools/                         Build, protocol and live smoke checks.
+  pom.xml                        Java 17 target; Forge 2.0.16-SNAPSHOT dependency.
+
+forge/                     Vendored upstream Forge source/assets. Avoid editing it
+                           for ordinary frontend or bridge changes.
+FORGE_COMMIT               Pinned upstream revision:
+                           84f4983c1ce872932cf9a26a8bd54ca00056aae9
+.tools/                    Local Godot and Maven installations.
+docs/                      Focused architecture/behavior/protocol documentation.
+HANDOFF.md                 Detailed development history and recent fixes.
+CLAUDE_HANDOFF.txt         This guide.
+
+Important: much of this working tree contains existing modified/untracked work.
+Do not reset, clean, overwrite or discard it to obtain a clean checkout.
+
+
+3. RUNTIME ARCHITECTURE AND OWNERSHIP
+=====================================
+
+  Godot Application.gd
+       |
+       +-- LibraryClient.gd -- local WebSocket --> Java LibraryMain
+       |                                          |
+       |                                          +-- DeckLibrary
+       |                                          +-- BotDecks
+       |                                          +-- MatchService
+       |                                                |
+       |                                                +-- owned child JVM
+       |                                                    running BridgeMain
+       |
+       +-- Main.gd -- LiveAdapter.gd -- WebSocket --> BridgeMain / BridgeGuiGame
+                                                        |
+                                                        +-- Forge rules engine
+
+The library/application service normally listens on port 7778. Each match runs
+in its own separately owned child Java process on a dynamically allocated port.
+Direct standalone bridge examples often use port 7777 instead.
+
+Application.gd owns navigation, library services, shared image loading, match
+preferences, the active game scene, transition viewports and parked sessions.
+MatchService owns only its application-created match process. Launch identities,
+owners and session IDs prevent duplicate starts or stopping an unrelated match.
+Child processes watch their parent to avoid leaving orphan engines behind.
+
+Returning to the main menu parks the existing match; it does not restart it.
+Ending a game is a separate confirmed action. Quitting cleans up owned processes.
+
+
+4. HOME SCREEN: HOW THE COMPUTER IS MADE
+========================================
+
+Main files in client-godot/scripts/app/:
+
+Application.gd
+  Application-level state and navigation. Coordinates Home, Deck Editor, match
+  settings, launch, image preparation, game reveal, resume/end and confirmations.
+
+ComputerMenu.gd
+  Connects the 3D world and 2D UI. Owns the world SubViewport, monitor SubViewport,
+  carousel, outside header controls and physical-key hit regions. Coordinates
+  phases such as key feedback, insertion, loading, materialization and zoom.
+
+ComputerWorld.gd
+  Builds the computer procedurally from meshes, contours, lofts and materials.
+  Case, screen reveal, gasket, drive, buttons, disk and lighting are real geometry.
+  No external computer model or single background image supplies the computer.
+  Also implements camera motion, insertion/ejection, glass and key animations.
+  The CRT shader is assembled in this script; do not look only for shader files.
+  The drive uses one continuous slot, 45-degree rounded draft, straight
+  shaded throat and recessed flap; there is no eject cap or right-hand pocket. Disk rotation completes
+  clear of the fascia before straight feeding on the unchanged Z axis. Its flap
+  clears the shared physical disk for insertion/ejection. See docs/drive-geometry.md.
+  Slot and feed are centered together between SETTINGS and the flat right fascia
+  edge; fitted slot width and key positions remain unchanged. The activity dot
+  aligns with the slot centerline in the right-hand margin.
+
+Night lighting (dark mode only)
+  ComputerWorld reduces ambient/key/fill and uses #72dfcf monitor spill at energy
+  2.8 plus one shadow-free #879cbe rear rim at 0.18. A lit night floor and modest
+  CRT emission follow the existing darkness tween. MenuAtmosphere provides a quiet
+  radial room background. DiskNightLighting.gdshader shades only displayed carousel
+  faces/copies; InsertionNightLighting.gdshader blends the raw face into real light
+  as it approaches the drive. Light mode restores original materials and zero new
+  light energies; cached floppy faces remain unmodified. See docs/night-lighting.md
+  for values, verification and before/after screenshots.
+
+DeckConsole.gd
+  Read-only main monitor dashboard. Shows disk, commander, format/player count,
+  color identity, average nonland mana value, ASCII mana curve, type counts,
+  legality and total-card meter. The floppy carousel is the only deck selector.
+  Stats use actual Main and Commander sections. Multitype cards count in each
+  applicable category. No persistent win/loss record is currently implemented.
+
+The monitor is a curved, subdivided mesh displaying a 1024 x 744 UI texture.
+Content stays within a 64-pixel horizontal and 48-pixel vertical safe inset to
+avoid the rounded glass edges. Long text is bounded. Glass adds restrained
+phosphor glow, scanlines, corner shading and a reflection. Fullscreen transitions
+fade those treatments rather than applying them to the final gameplay UI.
+
+There are different camera paths for startup pullback, game zoom and settings.
+Settings uses a fixed-size, depth-tested physical screen throughout its zoom.
+Do not reuse expanding game-screen behavior blindly for settings: that previously
+stretched the screen across the bezel and broke the monitor illusion.
+
+PLAY and SETTINGS are physical molded keys in recessed wells, aligned with the
+drive slot. They share the case's matte gray plastic. Glyphs are charcoal; there
+is NO purple keycap/icon glow. A tiny teal PLAY dot lights briefly when pressed.
+Transparent native Buttons provide input over the projected physical meshes.
+
+Current press behavior:
+  - Native mouse-down starts a 60ms downstroke, with shading and real depth travel.
+  - A held key stays down until release/cancel.
+  - Release springs outward over 100ms, with no extra dwell or initial inward dip.
+  - Both actions await the release and one raised rendered frame before settings
+    construction, artwork work or camera/disk motion.
+  - The wait follows tween replacement on mouse-up. Do not replay a native press
+    when the application handler runs, or start settings zoom before release.
+  - Busy play_press/preparing_images states must survive background deck refresh.
+
+
+5. FLOPPY CAROUSEL, APPEARANCE AND HOME/EDITOR TRANSITION
+========================================================
+
+DeckCarousel.gd
+  Owns floating disk selection, fractional cursor, animation, mouse drag, wheel,
+  trackpad and keyboard navigation. Home loops where appropriate; editor is finite.
+
+DeckCartridge.gd + FloppyDisk.gdshader
+  Draw the floppy shell, shutter and inset exact-printing deck-art label. The disk
+  face is rendered into a texture, shared with its 3D insertion representation.
+
+DeckAppearance.gd + CardColorSampler.gd
+  Store shell preferences and implement color picking from the actual card image.
+  Sampling uses source pixels, not screen lighting. Cosmetic changes do not dirty
+  or rewrite the deck. Defaults are stable per deck, not recalculated from art.
+
+CarouselCopy.gd
+  Supports temporary shared-texture edge copies during carousel mode transitions.
+
+MenuAtmosphere.gdshader + MenuFrame.gd + LightSwitch.gd
+  Home background speckles/finish, outside frame and light/dark room switch.
+  Speckles belong to the home room: they scroll out and fade away in the editor.
+
+Clicking Deck Editor scrolls the existing room up over about 0.65 seconds until
+the same carousel is at the top. It does not replace the carousel with another
+selector. Common disks remain continuous while wrapped edges fade/slide away.
+The final editor disk is a blank floppy with a plus symbol to create/import.
+
+Avoid rebuilding/repainting every disk when metadata arrives. Existing fixes
+preserve fractional carousel motion, ignore unchanged covers and decode artwork
+in bounded workers. Cold deck selection should remain responsive.
+
+
+6. STARTUP, MATCH LOADING AND GAME REVEAL
+=========================================
+
+StartupScreen.gd / StartupGrid.gd / StartupSegments.gd
+  Initial full-window FORGECHECK terminal. Uses actual library startup milestones,
+  with bounded smooth progress estimates during long stages. Time alone cannot
+  authorize 100%. The completed terminal pulls back onto the physical PC screen.
+  Older StartupEye assets remain but do not define the current startup design.
+
+LoadingProgress.gd
+  Still used for pre-insertion artwork preparation and its cancel/retry flow.
+
+MatchBootLog.gd / TerminalMeter.gd
+  The inserted-disk uppercase boot terminal and block meter shared with DeckConsole.
+
+Launch sequence:
+  1. Release PLAY completely and render its raised state.
+  2. Prepare the selected deck's card images; missing art can block/cancel/retry.
+  3. Lift, rotate and align the actual selected disk with the drive.
+  4. ComputerWorld.disk_entering fires when the disk reaches the drive mouth.
+     Start the boot log here, while the disk slides in. Keep the deck console
+     during its approach. There is no intermediate INSERTING DECK screen.
+  5. Print disk, commander, card count, rules engine, player seats/names and the
+     final readiness line, with typed characters, dots and a delayed OK.
+     Drive LED activity follows printed chunks and OK events.
+  6. Real service/snapshot readiness gates completion. Progress stays below 100%
+     until those gates finish. A connected empty/locked snapshot is insufficient.
+  7. A brief teal flash and READY. ENTERING TABLE... hold precede the reveal.
+  8. The actual game is temporarily rendered into the monitor. Its grid materializes
+     at the stationary home camera, then the camera zooms into that same scene.
+  9. Reparent the game into the normal full-window UI and fade in its foreground.
+
+Forge may pause during initialization for a warning requiring player input.
+Do not wait indefinitely behind the boot screen for that hidden prompt. The log
+uses AWAITING PLAYER INPUT and opens the table to allow the response. Ordinary
+startup can show SHUFFLING LIBRARIES: Forge prepares/shuffles zones before its
+starting-player choice. The UI never answers that choice simply to finish loading.
+
+Transition preview masks foreground cards, portraits, hand, rail and decisions;
+it does not destroy their state. Restore required choices after fullscreen handoff.
+
+SessionDisk.gd represents a parked match, not a saved deck. Resuming inserts that
+disk and restores the same scene/process/pending decisions. Resume boot wording
+is CONNECTING LIVE ENGINE / RESTORING TABLE, not a claim to reshuffle the game.
+
+FormatLog.gd shares MatchBootLog typing/delayed OK/activity and TerminalMeter.
+Confirmed End Game stops the owned engine independently of the visual, returns
+home through the normal parked-session flow if needed, then inserts and silently
+formats only the session disk. Its label is struck out through a local shader
+uniform, the drive flickers amber, and SESSION ERASED holds before the console
+returns. The disk stays consumed; saved deck disks are untouched. Reset restores
+materials/activity/inputs. The old erosion effect and its audio are removed.
+
+
+7. MATCH SETTINGS
+==================
+
+MatchSettings.gd + MatchRoster.gd build the monitor's teal DOS/CRT roster view.
+MatchPreferences.gd persists names, bot choices and portraits. Supporting portrait
+and scanline shaders live under the Godot shader/assets structure; inspect imports.
+
+Roster features:
+  - One human and one to three bots; do not imply six-player engine support.
+  - Editable names and portraits.
+  - Saved/mirrored decks, Forge Commander precons, Forge-generated decks around a
+    selected commander, or a fully random Forge-generated Commander deck.
+  - Searchable precon/commander lists, validation and persistent selections.
+  - Save/Cancel, F2 add, Delete remove, row navigation and F10 save shortcuts.
+
+BotDecks.java sources real Forge lists and generator APIs. MatchSetup.java validates
+profiles/deck IDs; BridgeMain applies those profiles and creates the actual decks.
+Do not replace random generation with a random selection from the user's library.
+
+Portraits.gd uses Forge's real 126-avatar atlas, assets/forge-avatars.png and its
+JSON cell map. Custom imported portraits are supported. Do not restore the earlier
+AI-generated portraits. Starting-player selection shows portrait/name without HP.
+
+
+8. DECK EDITOR
+===============
+
+scripts/library/DeckCollection.gd is the main editor. Most controls are constructed
+in code. It uses the shared application API/images/carousel and keeps a local draft,
+dirty state, undo/redo history and request generations.
+
+Supporting files:
+  LibraryClient.gd         Request/response WebSocket client for the deck service.
+  LibraryCard.gd           Editor card tiles and artwork/context interactions.
+  CardSearch.gd            Search UI used when adding cards.
+  DeckValidationStatus.gd  Inline validation button/status/reasons.
+
+The editor lists deck cards below the selected floppy, commanders first. Right-click
+provides removal, copying, artwork and section/commander actions. Add Cards is a
+compact search popup with an obvious close/back path. A slider controls columns.
+
+Counts/average mana and validation live in the toolbar beside Add Cards. Unchecked
+or invalid decks show yellow Validate with an in-button loading state. Valid decks
+show a green Legal indicator. Validation failures appear inline, not in a popup.
+
+Changing artwork preserves the card-list scroll offset after the layout settles.
+Stale request/render generations must not restore an old scroll position into a
+different deck. Alternative-art lists are cached; prioritize visible printings and
+prefetch only a small next-page window.
+
+DeckLibrary.java handles listing, opening, catalog/printing search, import/export,
+validation, save/delete and image lookup. Forge remains the card database and native
+deck serializer. Keep exact printing identities and section quantities intact.
+
+DeckFiles.java is important: saved decks can be UTF-8, UTF-8 BOM, Windows-1252 or
+BOM-marked UTF-16. Decode UTF-8 strictly before the legacy fallback. Permissive UTF-8
+previously replaced accented names with U+FFFD, breaking real card/image resolution.
+Both library and match/saved-bot file loading use this helper. Reading does not
+rewrite user files. SauronV2 was verified with Troll of Khazad-dum, Grishnakh,
+Grima and Lord of the Nazgul preserving their actual accented spellings.
+
+
+9. GAME TABLE AND CARD INTERACTIONS
+====================================
+
+scripts/ui/Main.gd is the large battlefield controller. It constructs most of the
+layout and reconciles snapshots, card instances, hand gestures, mana, phase stops,
+HUDs, zone browsers, required decisions and the terminal rail. Read surrounding
+functions before changing one part; layout, drag and snapshot state are connected.
+
+Current arrangement:
+  - Opponents occupy the upper board in separate player regions.
+  - Local battlefield is below, with lands/permanents arranged into adaptive rows.
+  - Local mana and phase controls occupy the reserved lane at the left.
+  - The local hand fan and library pile sit near the bottom.
+  - Digital player HUDs show portrait, name and seven-segment HP.
+  - Command, Graveyard and Exile bubbles sit at each board's upper right.
+  - The right rail is a teal terminal with purple accents and activity/decisions.
+
+BattlefieldLayout.gd packs cards and adapts opponent card sizes to available room.
+FieldDivider.gd supports field adjustments. TableBackdrop.gd draws the board grid.
+Main's current HAND_CARD_SIZE and TABLE_CARD_SIZE are about 200 x 280.56; many older
+notes mention earlier sizes. Consult the constants, not historical screenshots.
+
+CardView.gd owns card interaction, transforms, press/hold/drag, tap rotation and
+hover. CardFace.gd and CardArt.gd render faces/art; card_perspective.gdshader provides
+the presentation transform. Card images are not HTML elements. Card surfaces use
+SubViewports/textures; avoid repainting unchanged faces every frame.
+
+CardViews are keyed by card instance ID. Two copies of the same named card are
+different instances. Cosmetic positioning does not move an engine card between
+zones. Only an accepted Forge action/snapshot does that.
+
+Hand behavior:
+  - Ordered local fan with drag reordering, insertion gaps and large-hand paging.
+  - Small hover lift, smooth return and a larger separate inspection preview.
+  - LibraryPile.gd supports the manual draw gesture for draws Forge already made.
+  - Do not execute a second draw when acknowledging pendingDraws.
+  - OpeningHand.gd handles Keep/Mulligan/London bottom choices.
+  - Battlefield hand creation is gated until hand_confirmed after Forge accepts
+    the final hand. No cards should fly into the bottom hand before that, including
+    while View Battlefield is selected or a bottom-card response is pending.
+  - Reconnect/resume of an established game does not demand a new opening hand.
+
+Local control lane:
+  - 88px reserved width, 64px visual group width, 12px outer margin.
+  - 18px break between mana and phases; matching item spacing; at most 0.9 scale.
+  - Phase group keeps natural height instead of stretching to fill dead space.
+  - ManaCounter.gd draws icons/counts itself. Its native Button.text is deliberately
+    empty; tooltip/accessibility state exposes the count without duplicate text.
+
+PlayerAvatar.gd draws the digital scoreboard: teal HP segments, purple active-turn
+light. Portrait/target selection and engine life values remain authoritative.
+
+ZoneBubble.gd draws each board's zone icons. Main's zone browser expands from the
+clicked icon, inside that owner's visible board, following scroll/resize. Local
+zone cards retain permitted drag/cast behavior; opponent cards are read-only.
+Empty zones show compact NO CARDS. Do not send every opponent's zone menu back to
+the local player's section, which was the previous behavior.
+
+TargetOverlay.gd draws combat/target arrows. Preserve the blocked-attacker state
+after a blocker is sacrificed: disappearance of a blocker does not imply trample
+or prove that damage will hit the defending player.
+
+
+10. RIGHT TERMINAL, POPUPS AND STACK PHILOSOPHY
+================================================
+
+TerminalRail.gd / TerminalStyle.gd
+  Shared right-rail terminal frame, colors, typography, buttons and scrollbars.
+StackActivityFeed.gd / StackFeedEntry.gd
+  Keyed CAST/TRIGGER/ACTIVATE activity entries, source/targets and current-item cue.
+StackAttention.gd
+  Required-decision attention/pulse behavior.
+IncomingEffect.gd
+  Review of relevant opposing spells/effects, source artwork and target previews.
+InteractionPanel.gd / SidebarDecision.gd / BoardChoice.gd
+  Native combat/recipient/board-target choices hosted in the shared decision area.
+
+Required decisions use a shared scrolling rail area below the turn header. Never
+absolutely position Skip Attacking or a choice panel over the header/other controls.
+Buttons at the bottom of the rail use the same terminal styling.
+
+Palette.gd provides shared UI/popup themes. SelectionPanel.gd, ManaPaymentPanel.gd,
+ManaColorPanel.gd, AbilityOption.gd, ManaOption.gd and related controls handle card,
+mana and ability choices. ReadableText.gd shows continuously scrollable rules,
+normalizing excessive blank spacing; old Previous Text / Next Text paging is gone.
+
+Show the source card/rules when a choice needs context. Keep card aspect ratios
+and rounded corners. Mana choices use compact squircle boundaries and side-by-side
+symbols; avoid redundant Add / punctuation and already-paid tap-cost descriptions.
+Optional targeting must retain a real no-target choice when Forge allows it.
+
+USER'S PRIORITY/STACK PREFERENCE:
+Preserve Forge rules, but reduce clicks for routine events. Pause for a legal
+instant-speed response; the user explicitly wants that window if one exists.
+Routine casts with no legal response can pass priority automatically through the
+normal protocol. Do not delete the engine stack, force resolution or silently
+answer targeting/payment/required choices. StackInteractionPolicy.java and
+LiveAdapter.gd cooperate on this behavior. Match a specific stack instance ID and
+current synchronized prompt, not just a card name or stale historical event.
+
+
+11. BACKEND AND PROTOCOL RESPONSIBILITIES
+=========================================
+
+Java files under bridge/src/main/java/forgeui/bridge/:
+  LibraryMain.java          Initializes Forge and serves library/application API.
+  DeckLibrary.java          Deck/catalog/artwork operations and draft validation.
+  DeckFiles.java            Encoding-aware native saved-deck reading.
+  MatchService.java         Owns launch/status/stop of the application's match JVM.
+  MatchSetup.java           Validates player profiles and bot deck selections.
+  BotDecks.java             Real Forge precon lists and commander generation.
+  BridgeMain.java           Starts a game and accepts game protocol requests.
+  BridgeGuiGame.java        Implements Forge GUI callbacks, prompts and permissions.
+  GameStateJson.java        Visibility-filtered snapshots of actual engine state.
+  BridgeProtocol.java       Action/answer validation and protocol requirements.
+  StackInteractionPolicy.java  Routine stack/response policy.
+  TargetedEffectHistory.java   Retained public targeted-effect notices.
+  CardArtwork.java          Card/token image URL resolution through Forge mappings.
+  HeadlessGuiBase.java      Connects Forge's GUI abstractions to this headless host.
+  StartupStatus.java        Startup milestones shared with the launcher/client.
+
+LiveAdapter.gd translates bridge snapshots into the UI's local seat/phase schema,
+sends user intents, handles synchronization/acks/reconnects and authorized auto-pass.
+MockAdapter.gd supplies a standalone demo/test state. StateAdapter.gd defines the
+shared interface. Mock behavior is not proof that Forge permits the same action.
+
+The game protocol is version 2. Mutations/answers carry sessionId, revision and a
+unique requestId. Reconcile full snapshots and replace the entire outstanding asks
+set. Do not merge stale asks, replay clicks after reconnect, mix player/card/stack
+IDs, expose hidden card faces or bypass pending-decision/payment gates.
+
+Undo/return-to-hand is capability-based. Honor availableActions and the bridge's
+Forge checkpoint/undo permission. A drag gesture is not permission to alter zones,
+refund mana or undo after information has been revealed.
+
+Read docs/protocol.md before changing messages. The old diagnostic browser page
+and probe are separate clients and may also need updates after a protocol change.
+
+
+12. IMAGE LOADING, CACHES AND PERSISTED DATA
+============================================
+
+LibraryImages.gd shares artwork across editor/carousel/gameplay. It uses up to four
+HTTP transfers with a global 150ms interval between request starts. Visible artwork
+has priority. Bounded workers decode/cache images; upload at most one completed
+texture per frame to avoid cold-scroll stalls. Preserve request-generation guards,
+failure handling, exact printing keys and shared cache reuse.
+
+CardImages.gd holds game-facing image resources. RuntimeArtwork.gd handles runtime
+artwork such as tokens; backend CardArtwork.java resolves Forge token editions and
+collector numbers. Do not assume a token uses a normal card download URL.
+
+PaperCard.getImageKey(false) is a c: protocol image key. getCardImageKey() is a local
+filename such as SET/Name1.full; passing that filename to CardArtwork.urls is wrong.
+
+Paths:
+  %APPDATA%\Forge\decks\commander    Normal Windows saved Commander library.
+  Godot user://library-art/         Frontend artwork cache.
+  Godot user://                    Match profiles, appearance and other local prefs.
+  client-godot/artifacts/           Screenshots, isolated test decks and logs.
+  client-godot/artifacts/app-sessions/   Owned match engine logs.
+
+Godot user:// is not the project folder. Launch/check tools can need access to
+Godot user-data logs/cache as well as the workspace. Never delete a user's real
+deck library or kill every Java process while cleaning up a test.
+
+
+13. HOW TO RUN AND VERIFY
+==========================
+
+This workspace is Windows. The Bash launcher is specifically for Git Bash or
+Anaconda Bash and delegates to PowerShell; it is not a tested Linux launcher.
+The local executable is Godot 4.7.2 with the GL Compatibility renderer.
+
+From D:\ForgeUI in Bash:
+  bash ./client-godot/tools/run.sh
+  bash ./client-godot/tools/run.sh -Decks
+  bash ./client-godot/tools/run.sh -Mock
+
+From PowerShell:
+  .\bridge\tools\test.ps1
+  .\client-godot\tools\run.ps1
+
+Useful launch switches:
+  -Decks                Start in the deck editor.
+  -Mock                 Standalone mock battlefield.
+  -Live -Deck "Sauron"   Direct live match using installed Forge decks.
+  -Connect -Port 7777   Attach to an already running local game bridge.
+
+Main checks, from the repository root:
+  .\bridge\tools\test.ps1
+  .\client-godot\tools\run.ps1 -Capture
+  node client-godot/tools/app-check.mjs --render
+  node client-godot/tools/app-check.mjs --render --editor-preview
+  node client-godot/tools/library-check.mjs --render
+  node client-godot/tools/live-check.mjs
+
+The Java harness is explicitly invoked by test.ps1; plain Maven test discovery is
+not equivalent. Last Java baseline: 223 regression checks. Real encoding checks
+also passed for the user's unchanged SauronV2 file and four accented card names.
+
+The rendered application suite launches isolated services/decks and actual 2/3/4-
+player games, checks settings, key feedback, boot/reveal, opening hands, parked
+session resume/end and owned-process cleanup. The visual suite covers battlefield
+layout, card gestures, popups, owner-zone menus and supported capture sizes.
+
+Relevant tests include ApplicationIntegration.gd, OpeningHandChecks.gd,
+ZoneBrowserChecks.gd, BattlefieldLayoutChecks.gd and MatchBootLogChecks.gd.
+Artifacts are generated under client-godot/artifacts/; inspect screenshots, not
+only PASS output, for visual work. Test real 1280x800 and 1600x1000 layouts, and
+check wide aspect ratios when altering monitor projection/camera logic.
+
+run.ps1 -Check uses a 900-frame smoke limit which has sometimes expired before the
+larger suite finishes. If that is the only issue, run the extended headless check:
+  & .\.tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path client-godot --quit-after 3600 -- --smoke
+
+Incremental Maven output has occasionally been stale. If source changes appear
+absent, compile bridge sources directly before retesting (PowerShell):
+  $bridgeSources = @(Get-ChildItem -LiteralPath bridge/src/main/java -Filter *.java -Recurse | ForEach-Object { $_.FullName })
+  javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/classes @bridgeSources
+  javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/test-classes bridge/src/test/java/forgeui/bridge/BridgeChecks.java
+  java -cp 'bridge/target/test-classes;bridge/target/classes;bridge/target/lib/*' forgeui.bridge.BridgeChecks
+
+Restart the client/library service after Java or cached deck-description changes.
+Do not assume a previously running Java process loaded newly compiled classes.
+
+
+14. WHERE TO START FOR A CHANGE
+================================
+
+Computer shape/material/physical buttons/camera -> app/ComputerWorld.gd
+Home layout, monitor viewports, transition wiring -> app/ComputerMenu.gd
+Navigation, launch sequencing, match ownership UI -> app/Application.gd
+Read-only monitor information -> app/DeckConsole.gd
+Inserted-disk loading -> app/MatchBootLog.gd + backend readiness wiring
+Carousel scrolling/cold-motion problems -> app/DeckCarousel.gd + LibraryImages.gd
+Deck editor/card menus/scroll retention -> library/DeckCollection.gd
+Bot setup/portrait picker -> app/MatchSettings.gd, MatchRoster.gd, MatchPreferences.gd
+Battlefield/hand/zone placement -> ui/Main.gd + BattlefieldLayout.gd
+Card transforms, dragging, tap/hover -> ui/CardView.gd
+Opening hand timing -> ui/OpeningHand.gd + Main's hand-release gate
+HP and portraits -> ui/PlayerAvatar.gd + Portraits.gd
+Right rail appearance -> ui/TerminalStyle.gd + TerminalRail.gd
+Stack entries -> ui/StackActivityFeed.gd + StackFeedEntry.gd
+Required decision overlap -> shared sidebar decision layout in Main.gd
+Popup text spacing/rules scrolling -> ui/ReadableText.gd + Palette.gd
+Rules/action legality/undo/priority -> bridge Java + LiveAdapter.gd
+Accented deck names -> bridge/DeckFiles.java, not a font substitution workaround
+Missing token art -> RuntimeArtwork.gd + bridge/CardArtwork.java
+
+Focused documents:
+  docs/computer-menu.md
+  docs/main-menu.md
+  docs/deck-collection.md
+  docs/live-session-disk.md
+  docs/protocol.md
+  docs/gameplay-interaction-fixes.md
+
+Preserve the established behavior while improving it. Prefer local, reviewable
+changes and tests that exercise actual interactions. Keep Forge authoritative;
+keep physical hardware timing, required user choices and process cleanup intact.
+
+END OF HANDOFF

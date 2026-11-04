@@ -1,0 +1,28 @@
+; ForgeUI visual prototype. No Forge process or external assets required.
+config_version=5
+
+[application]
+config/name="ForgeUI — Commander prototype"
+run/main_scene="res://scenes/Application.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+
+[autoload]
+WindowPlacement="*res://scripts/app/WindowPlacement.gd"
+
+[display]
+window/size/viewport_width=2560
+window/size/viewport_height=1440
+window/size/window_width_override=2560
+window/size/window_height_override=1440
+window/size/min_width=1280
+window/size/min_height=720
+window/stretch/mode="disabled"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.032, 0.052, 0.065, 1)
+textures/default_filters/use_nearest_mipmap_filter=false
+
+[debug]
+gdscript/warnings/untyped_declaration=0

@@ -29,29 +29,48 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * Local HTTP + WebSocket server. Serves the bundled test page from {@code /web} on the classpath and
- * carries JSON messages on {@code /ws}. Binds to loopback only.
+ * carries JSON messages on {@code /ws}. Binds to loopback only, unless built with {@link #exposed}: that form
+ * listens on every interface for online players, serves no files and refuses browsers. Its callers authenticate.
  */
 final class BridgeServer {
     private final int port;
+    private final boolean exposed;
     private final ChannelGroup clients = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-    private final Consumer<String> onMessage;
-    private final Runnable onConnect;
+    private final BiConsumer<Channel, String> onMessage;
+    private final Consumer<Channel> onConnect;
+    private final Consumer<Channel> onDisconnect;
+    private Channel listener;
     private EventLoopGroup boss;
     private EventLoopGroup workers;
 
-    BridgeServer(int port, Consumer<String> onMessage, Runnable onConnect) {
+    BridgeServer(int port, BiConsumer<Channel, String> onMessage, Consumer<Channel> onConnect) {
+        this(port, false, onMessage, onConnect, channel -> {});
+    }
+
+    BridgeServer(int port, BiConsumer<Channel, String> onMessage, Consumer<Channel> onConnect, Consumer<Channel> onDisconnect) {
+        this(port, false, onMessage, onConnect, onDisconnect);
+    }
+
+    private BridgeServer(int port, boolean exposed, BiConsumer<Channel, String> onMessage, Consumer<Channel> onConnect, Consumer<Channel> onDisconnect) {
         this.port = port;
+        this.exposed = exposed;
         this.onMessage = onMessage;
         this.onConnect = onConnect;
+        this.onDisconnect = onDisconnect;
+    }
+
+    static BridgeServer exposed(int port, BiConsumer<Channel, String> onMessage, Consumer<Channel> onConnect, Consumer<Channel> onDisconnect) {
+        return new BridgeServer(port, true, onMessage, onConnect, onDisconnect);
     }
 
     void start() throws InterruptedException {
         boss = new NioEventLoopGroup(1);
         workers = new NioEventLoopGroup(2);
-        new ServerBootstrap()
+        listener = new ServerBootstrap()
                 .group(boss, workers)
                 .channel(NioServerSocketChannel.class)
                 .childHandler(new ChannelInitializer<SocketChannel>() {
@@ -59,12 +78,22 @@ final class BridgeServer {
                     protected void initChannel(SocketChannel ch) {
                         ch.pipeline().addLast(new HttpServerCodec());
                         ch.pipeline().addLast(new HttpObjectAggregator(1 << 20));
+                        ch.pipeline().addLast(new OriginHandler());
                         ch.pipeline().addLast(new WebSocketServerProtocolHandler("/ws", null, true, 1 << 22));
-                        ch.pipeline().addLast(new StaticHandler());
+                        ch.pipeline().addLast(new StaticHandler(!exposed));
                         ch.pipeline().addLast(new SocketHandler());
                     }
                 })
-                .bind(new InetSocketAddress("127.0.0.1", port)).sync();
+                .bind(exposed ? new InetSocketAddress(port) : new InetSocketAddress("127.0.0.1", port)).sync().channel();
+    }
+
+    int localPort() { return ((InetSocketAddress) listener.localAddress()).getPort(); }
+
+    void close() {
+        if (listener != null) listener.close().syncUninterruptibly();
+        clients.close().awaitUninterruptibly();
+        if (workers != null) workers.shutdownGracefully(0, 2, java.util.concurrent.TimeUnit.SECONDS).syncUninterruptibly();
+        if (boss != null) boss.shutdownGracefully(0, 2, java.util.concurrent.TimeUnit.SECONDS).syncUninterruptibly();
     }
 
     void broadcast(String json) {
@@ -80,9 +109,15 @@ final class BridgeServer {
         public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
             if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
                 clients.add(ctx.channel());
-                onConnect.run();
+                onConnect.accept(ctx.channel());
             }
             super.userEventTriggered(ctx, evt);
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            onDisconnect.accept(ctx.channel());
+            super.channelInactive(ctx);
         }
 
         @Override
@@ -93,14 +128,34 @@ final class BridgeServer {
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
             try {
-                onMessage.accept(frame.text());
+                onMessage.accept(ctx.channel(), frame.text());
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
     }
 
+    /** Native clients omit Origin; browser clients must come from our local test page. */
+    private final class OriginHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+        @Override protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
+            String origin = req.headers().get(HttpHeaderNames.ORIGIN);
+            if (req.uri().split("\\?")[0].equals("/ws") && origin != null
+                    && (exposed || (!origin.equals("http://127.0.0.1:" + localPort())
+                    && !origin.equals("http://localhost:" + localPort())))) {
+                FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.FORBIDDEN);
+                response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+                ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+                return;
+            }
+            ctx.fireChannelRead(req.retain());
+        }
+    }
+
     private static final class StaticHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+        private final boolean serveFiles;
+
+        StaticHandler(boolean serveFiles) { this.serveFiles = serveFiles; }
+
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) throws IOException {
             String path = req.uri().split("\\?")[0];
@@ -108,7 +163,7 @@ final class BridgeServer {
                 path = "/index.html";
             }
             byte[] body = null;
-            if (!path.contains("..")) {
+            if (serveFiles && !path.contains("..")) {
                 try (InputStream in = BridgeServer.class.getResourceAsStream("/web" + path)) {
                     if (in != null) {
                         body = in.readAllBytes();

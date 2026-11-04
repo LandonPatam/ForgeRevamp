@@ -1,0 +1,4 @@
+# Use consistent source line endings on Windows and macOS.
+* text=auto eol=lf
+# Preserve upstream patch bytes, including context line endings.
+*.patch -text

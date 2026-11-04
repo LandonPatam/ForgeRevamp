@@ -1,0 +1,1863 @@
+diff --git a/forge-gui-desktop/src/test/java/forge/gamemodes/net/NetplayResilienceTest.java b/forge-gui-desktop/src/test/java/forge/gamemodes/net/NetplayResilienceTest.java
+new file mode 100644
+index 00000000..7b37283e
+--- /dev/null
++++ b/forge-gui-desktop/src/test/java/forge/gamemodes/net/NetplayResilienceTest.java
+@@ -0,0 +1,150 @@
++package forge.gamemodes.net;
++
++import forge.gamemodes.net.event.IdentifiableNetEvent;
++import forge.gamemodes.net.event.NetEvent;
++import forge.gamemodes.net.event.SeatLostEvent;
++import forge.gui.interfaces.IGuiGame;
++import forge.net.TestUtils;
++import io.netty.handler.codec.serialization.ClassResolvers;
++import org.testng.annotations.BeforeClass;
++import org.testng.annotations.Test;
++
++import java.io.ByteArrayInputStream;
++import java.io.ByteArrayOutputStream;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.TimeUnit;
++import java.util.function.Function;
++
++import static org.testng.Assert.assertEquals;
++import static org.testng.Assert.assertFalse;
++import static org.testng.Assert.assertNotNull;
++import static org.testng.Assert.assertNull;
++import static org.testng.Assert.assertSame;
++import static org.testng.Assert.assertTrue;
++
++/**
++ * ForgeUI netplay fixes: a disconnect never answers a pending question. The question
++ * waits for the reconnect resync and is asked again, or takes a safe default once the
++ * player is abandoned (AI takeover, server stop).
++ */
++public class NetplayResilienceTest {
++
++    /** Answers each question from a script; a script step may act on the GUI first (e.g. pause it). */
++    static final class ScriptedRemote implements IRemote {
++        final List<Function<Integer, Object>> script = Collections.synchronizedList(new ArrayList<>());
++        final List<Long> askedAtMs = Collections.synchronizedList(new ArrayList<>());
++
++        @Override public void send(final NetEvent event) { }
++
++        @Override
++        public Object sendAndWait(final IdentifiableNetEvent event) {
++            askedAtMs.add(System.currentTimeMillis());
++            final int index = askedAtMs.size() - 1;
++            return script.get(Math.min(index, script.size() - 1)).apply(index);
++        }
++    }
++
++    @BeforeClass
++    public void init() {
++        TestUtils.ensureFModelInitialized();
++    }
++
++    @Test
++    public void replyPoolKeepsDisconnectDistinctFromNull() {
++        final ReplyPool pool = new ReplyPool();
++        pool.initialize(1);
++        pool.abortForDisconnect();
++        assertSame(pool.get(1), ReplyPool.DISCONNECTED);
++
++        pool.initialize(2);
++        pool.cancelAll();
++        assertNull(pool.get(2), "AFK cancel still answers null (a pass)");
++    }
++
++    @Test(timeOut = 5000)
++    public void timedReplyWaitGivesUp() {
++        final ReplyPool pool = new ReplyPool();
++        pool.initialize(7);
++        final long start = System.currentTimeMillis();
++        assertNull(pool.get(7, 100));
++        assertTrue(System.currentTimeMillis() - start < 2000);
++    }
++
++    @Test(timeOut = 10000)
++    public void questionDroppedByDisconnectIsAskedAgainAfterResync() throws Exception {
++        final ScriptedRemote remote = new ScriptedRemote();
++        final ProtocolGuiGame gui = new ProtocolGuiGame(remote);
++        // First ask: the connection drops (the server pauses this GUI, then releases the wait).
++        remote.script.add(i -> { gui.pause(); return ReplyPool.DISCONNECTED; });
++        // Second ask, after the reconnect: the player answers "no", against the default of "yes".
++        remote.script.add(i -> Boolean.FALSE);
++
++        final CompletableFuture<Boolean> answer = CompletableFuture.supplyAsync(
++                () -> gui.showConfirmDialog("Keep?", "Test", "Yes", "No", true));
++        Thread.sleep(400);
++        assertFalse(answer.isDone(), "A disconnected player's question must wait, not take the default");
++        assertEquals(remote.askedAtMs.size(), 1);
++
++        gui.resume();
++        Thread.sleep(300);
++        assertFalse(answer.isDone(), "The question must wait for the resync, not just the resume");
++        final long resynced = System.currentTimeMillis();
++        gui.notifyResynced();
++
++        assertEquals(answer.get(5, TimeUnit.SECONDS), Boolean.FALSE, "The reconnected player's real answer is used");
++        assertEquals(remote.askedAtMs.size(), 2);
++        assertTrue(remote.askedAtMs.get(1) >= resynced, "Asked again only after the resync");
++    }
++
++    @Test(timeOut = 10000)
++    public void abandonedQuestionsTakeSafeDefaults() throws Exception {
++        final ScriptedRemote remote = new ScriptedRemote();
++        final ProtocolGuiGame gui = new ProtocolGuiGame(remote);
++        remote.script.add(i -> { gui.pause(); return ReplyPool.DISCONNECTED; });
++
++        // Ordering used to crash the game thread: IGuiGame.order(...).ordered() on a null result.
++        final List<String> source = List.of("a", "b", "c");
++        final CompletableFuture<List<String>> ordered = CompletableFuture.supplyAsync(
++                () -> ((IGuiGame) gui).order("Order", "Top", source, null));
++        Thread.sleep(300);
++        assertFalse(ordered.isDone());
++        gui.abandon();
++        assertEquals(ordered.get(5, TimeUnit.SECONDS), source, "AI takeover keeps the given order");
++
++        // Once abandoned, further questions answer at once with defaults, never null.
++        assertEquals(gui.getChoices("Pick", 2, 2, List.of(1, 2, 3), null, null), List.of(1, 2));
++        assertEquals(gui.getChoices("Pick", 0, 1, List.of(1, 2, 3), null, null), List.of());
++        assertEquals(gui.manipulateCardList("Arrange", List.of(), List.of(), true, true, false), List.of());
++        assertTrue(gui.showConfirmDialog("Q", "T", "Y", "N", true));
++
++        final Map<Object, Integer> targets = new LinkedHashMap<>();
++        targets.put("first", 5);
++        targets.put("second", 5);
++        targets.put("third", 5);
++        final Map<Object, Integer> split = gui.assignGenericAmount(null, targets, 5, true, "damage");
++        assertNotNull(split);
++        assertEquals(split.values().stream().mapToInt(Integer::intValue).sum(), 5);
++        assertTrue(split.values().stream().allMatch(v -> v >= 1), "Every recipient gets at least one");
++        assertEquals(remote.askedAtMs.size(), 1, "Abandoned questions are not sent");
++    }
++
++    @Test
++    public void seatStillHeldSurvivesTheWire() throws Exception {
++        // The real codec streams, so the class filter applies as it would between peers
++        final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
++        try (CObjectOutputStream out = new CObjectOutputStream(bytes, false, null, -1, false)) {
++            out.writeObject(new SeatLostEvent(true));
++        }
++        try (CObjectInputStream in = new CObjectInputStream(
++                new ByteArrayInputStream(bytes.toByteArray()), ClassResolvers.cacheDisabled(null), null)) {
++            final SeatLostEvent event = (SeatLostEvent) in.readObject();
++            assertTrue(event.isSeatStillHeld());
++        }
++        assertFalse(new SeatLostEvent().isSeatStillHeld());
++    }
++}
+diff --git a/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkClient.java b/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkClient.java
+index 528d70b5..6d04681e 100644
+--- a/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkClient.java
++++ b/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkClient.java
+@@ -152,6 +152,14 @@ public class HeadlessNetworkClient implements AutoCloseable, IHasForgeLog {
+         return client;
+     }
+ 
++    /** Extra delay before every auto-response, so a test can play at a human pace. */
++    public static volatile long thinkTimeMs = 0;
++
++    /** The client-side GUI, as passed to {@link HeadlessNetworkGuiGame#answerHook}. */
++    public HeadlessNetworkGuiGame getGui() {
++        return guiGame;
++    }
++
+     public void setReady() {
+         if (client != null && connected.get()) {
+             netLog.info("Sending ready status");
+@@ -321,9 +329,9 @@ public class HeadlessNetworkClient implements AutoCloseable, IHasForgeLog {
+                     } catch (Exception e) {
+                         netLog.error("Error in auto-response '{}': {}", description, e.getMessage());
+                     }
+-                }, delayMs, TimeUnit.MILLISECONDS);
++                }, delayMs + thinkTimeMs, TimeUnit.MILLISECONDS);
+ 
+-                netLog.info("Scheduled auto-response in {}ms: {}", delayMs, description);
++                netLog.info("Scheduled auto-response in {}ms: {}", delayMs + thinkTimeMs, description);
+             }
+         }
+ 
+@@ -396,6 +404,7 @@ public class HeadlessNetworkClient implements AutoCloseable, IHasForgeLog {
+         @Override
+         public void showPromptMessage(forge.game.player.PlayerView playerView, String message, forge.game.card.CardView cv) {
+             netLog.info("Prompt: {}", message);
++            beforeAnswer("prompt: " + message);
+ 
+             // Detect player selection prompts (like "who goes first")
+             // These contain "Click on the portrait" in the message
+diff --git a/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkGuiGame.java b/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkGuiGame.java
+index f4f59e5f..aba30cc9 100644
+--- a/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkGuiGame.java
++++ b/forge-gui-desktop/src/test/java/forge/net/HeadlessNetworkGuiGame.java
+@@ -40,6 +40,19 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+     public int getSetGameViewCount() { return setGameViewCount.get(); }
+     public boolean isOpenViewCalled() { return openViewCalled; }
+ 
++    /**
++     * Test hook run when the host asks this GUI a question it waits on, before the answer
++     * is returned (e.g. to drop the connection mid-decision). Receives this GUI and the method name.
++     */
++    public static volatile java.util.function.BiConsumer<HeadlessNetworkGuiGame, String> answerHook;
++
++    protected void beforeAnswer(final String method) {
++        final java.util.function.BiConsumer<HeadlessNetworkGuiGame, String> hook = answerHook;
++        if (hook != null) {
++            hook.accept(this, method);
++        }
++    }
++
+     @Override
+     protected void updateCurrentPlayer(PlayerView player) { }
+ 
+@@ -70,11 +83,13 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public SpellAbilityView getAbilityToPlay(CardView hostCard, List<SpellAbilityView> abilities, ITriggerEvent triggerEvent) {
++        beforeAnswer("getAbilityToPlay");
+         return abilities != null && !abilities.isEmpty() ? abilities.get(0) : null;
+     }
+ 
+     @Override
+     public Map<CardView, Integer> assignCombatDamage(CardView attacker, List<CardView> blockers, int damage, GameEntityView defender, boolean overrideOrder, boolean maySkip) {
++        beforeAnswer("assignCombatDamage");
+         Map<CardView, Integer> result = new HashMap<>();
+         if (blockers != null && !blockers.isEmpty()) {
+             result.put(blockers.get(0), damage);
+@@ -84,6 +99,7 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public Map<Object, Integer> assignGenericAmount(CardView effectSource, Map<Object, Integer> target, int amount, boolean atLeastOne, String amountLabel) {
++        beforeAnswer("assignGenericAmount");
+         return target;
+     }
+ 
+@@ -96,26 +112,31 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public boolean showConfirmDialog(String message, String title, String yesButtonText, String noButtonText, boolean defaultYes) {
++        beforeAnswer("showConfirmDialog");
+         return defaultYes;
+     }
+ 
+     @Override
+     public int showOptionDialog(String message, String title, FSkinProp icon, List<String> options, int defaultOption) {
++        beforeAnswer("showOptionDialog");
+         return defaultOption;
+     }
+ 
+     @Override
+     public String showInputDialog(String message, String title, FSkinProp icon, String initialInput, List<String> inputOptions, boolean isNumeric) {
++        beforeAnswer("showInputDialog");
+         return initialInput != null ? initialInput : (inputOptions != null && !inputOptions.isEmpty() ? inputOptions.get(0) : "");
+     }
+ 
+     @Override
+     public boolean confirm(CardView c, String question, boolean defaultIsYes, List<String> options) {
++        beforeAnswer("confirm");
+         return defaultIsYes;
+     }
+ 
+     @Override
+     public <T> List<T> getChoices(String message, int min, int max, List<T> choices, List<T> selected, FSerializableFunction<T, String> display) {
++        beforeAnswer("getChoices");
+         if (choices == null || choices.isEmpty()) {
+             return Collections.emptyList();
+         }
+@@ -129,6 +150,7 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public <T> IGuiGame.OrderResult<T> order(String title, String top, int remainingObjectsMin, int remainingObjectsMax, List<T> sourceChoices, List<T> destChoices, CardView referenceCard, boolean sideboardingMode, boolean showRememberCheckbox) {
++        beforeAnswer("order");
+         return new IGuiGame.OrderResult<>(sourceChoices != null ? sourceChoices : Collections.emptyList(), false);
+     }
+ 
+@@ -139,6 +161,7 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public GameEntityView chooseSingleEntityForEffect(String title, List<? extends GameEntityView> optionList, DelayedReveal delayedReveal, boolean isOptional) {
++        beforeAnswer("chooseSingleEntityForEffect");
+         if (optionList == null || optionList.isEmpty()) {
+             return null;
+         }
+@@ -147,6 +170,7 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public List<GameEntityView> chooseEntitiesForEffect(String title, List<? extends GameEntityView> optionList, int min, int max, DelayedReveal delayedReveal) {
++        beforeAnswer("chooseEntitiesForEffect");
+         if (optionList == null || optionList.isEmpty()) {
+             return Collections.emptyList();
+         }
+@@ -156,6 +180,7 @@ public class HeadlessNetworkGuiGame extends NetworkGuiGame {
+ 
+     @Override
+     public List<CardView> manipulateCardList(String title, Iterable<CardView> cards, Iterable<CardView> manipulable, boolean toTop, boolean toBottom, boolean toAnywhere) {
++        beforeAnswer("manipulateCardList");
+         List<CardView> result = new ArrayList<>();
+         if (cards != null) {
+             for (CardView card : cards) {
+diff --git a/forge-gui-desktop/src/test/java/forge/net/NetplayDisconnectChaosTest.java b/forge-gui-desktop/src/test/java/forge/net/NetplayDisconnectChaosTest.java
+new file mode 100644
+index 00000000..4d7ced1b
+--- /dev/null
++++ b/forge-gui-desktop/src/test/java/forge/net/NetplayDisconnectChaosTest.java
+@@ -0,0 +1,495 @@
++package forge.net;
++
++import forge.card.CardDb;
++import forge.deck.Deck;
++import forge.game.Game;
++import forge.game.GameView;
++import forge.game.card.Card;
++import forge.game.card.CardView;
++import forge.game.player.Player;
++import forge.game.player.PlayerView;
++import forge.game.zone.ZoneType;
++import forge.gamemodes.match.HostedMatch;
++import forge.gamemodes.match.LobbySlot;
++import forge.gamemodes.match.LobbySlotType;
++import forge.gamemodes.net.client.FGameClient;
++import forge.gamemodes.net.server.FServerManager;
++import forge.gamemodes.net.server.HostingServer;
++import forge.gamemodes.net.server.ServerGameLobby;
++import forge.item.PaperCard;
++import forge.model.FModel;
++import forge.player.PlayerControllerHuman;
++import forge.util.IHasForgeLog;
++import io.netty.channel.Channel;
++import org.testng.annotations.AfterMethod;
++import org.testng.annotations.BeforeClass;
++import org.testng.annotations.Test;
++
++import java.lang.reflect.Field;
++import java.util.ArrayList;
++import java.util.EnumMap;
++import java.util.List;
++import java.util.Map;
++import java.util.Random;
++import java.util.TreeSet;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicReference;
++
++import static org.testng.Assert.assertNull;
++import static org.testng.Assert.assertTrue;
++
++/**
++ * Unstable connections during real networked games, with remote players kept human
++ * (the stock harness hands them to a server-side AI, so the server never waits on the
++ * network). Remote clients drop at random times and at chosen moments (inside a question
++ * the host is waiting on, or on an input prompt), in several ways, and reconnect.
++ *
++ * <p>Fails on: a stall while everyone is connected, a client that never recovers, a
++ * reconnected client whose view disagrees with the server, or a game that never ends.
++ *
++ * <p>Silent drops need a short server heartbeat; the property is set before the server
++ * class loads, so run this class in its own JVM (otherwise silent drops are skipped).
++ */
++public class NetplayDisconnectChaosTest implements IHasForgeLog {
++
++    static {
++        System.setProperty("forge.net.heartbeatTimeout", "5");
++    }
++
++    private static final long STALL_LIMIT_MS = 25_000;
++    private static final long RECOVERY_LIMIT_MS = 60_000;
++    private static final long GAME_LIMIT_MS = 300_000;
++
++    /**
++     * MID_DECISION: inside a dialog the host blocks on (getChoices, order, ...).
++     * MID_CHOICE: on an input prompt that is a decision (yes/no, discard, ...), not priority.
++     * MID_PROMPT: on a priority prompt.
++     */
++    enum Disruption { ABRUPT, SILENT, RESTART, FLAP, MID_DECISION, MID_CHOICE, MID_PROMPT }
++
++    /** One remote seat: the client currently playing it, and drops armed for the next question/prompt. */
++    static final class Seat {
++        final String name;
++        volatile HeadlessNetworkClient client;
++        final AtomicReference<String> armed = new AtomicReference<>();
++        final AtomicBoolean droppedByHook = new AtomicBoolean();
++        Seat(final String name) { this.name = name; }
++    }
++
++    private final Random random = new Random(20261029);
++    private final Map<Disruption, Integer> performed = new EnumMap<>(Disruption.class);
++    private final List<String> problems = new ArrayList<>();
++    private volatile boolean disrupting;
++    private final java.util.concurrent.atomic.AtomicInteger dialogDropsLeft = new java.util.concurrent.atomic.AtomicInteger();
++    private boolean silentDropsWork;
++
++    @BeforeClass
++    public void init() throws Exception {
++        TestUtils.ensureFModelInitialized();
++        final Field heartbeat = FServerManager.class.getDeclaredField("HEARTBEAT_TIMEOUT_SECONDS");
++        heartbeat.setAccessible(true);
++        silentDropsWork = heartbeat.getInt(null) <= 10;
++        if (!silentDropsWork) {
++            netLog.warn("[Chaos] Server heartbeat is {}s (class loaded earlier in this JVM); silent drops skipped", heartbeat.getInt(null));
++        }
++    }
++
++    @AfterMethod(alwaysRun = true)
++    public void cleanup() {
++        HeadlessNetworkGuiGame.answerHook = null;
++        if (HostingServer.isHosting()) {
++            FServerManager.getInstance().stopServer();
++        }
++    }
++
++    /**
++     * Player vs player vs player: the host plus two remote friends on unstable connections.
++     * The host's own player never crosses the network (it cannot disconnect), so a bot
++     * plays that seat; both friends are remote humans answering over the network.
++     */
++    @Test(timeOut = 1_200_000)
++    public void hostAndTwoFlakyFriends() throws Exception {
++        runChaosSession(2, 20);
++    }
++
++    /** Plays games back to back (each a fresh server and lobby) until enough drops were exercised. */
++    private void runChaosSession(final int remoteCount, final int targetDisruptions) throws Exception {
++        performed.clear();
++        problems.clear();
++        dialogDropsLeft.set(4);
++        HeadlessNetworkClient.thinkTimeMs = 400; // a human pace, so drops land mid-game
++        int total = 0;
++        int games = 0;
++        try {
++            // Keep playing until enough drops, including one inside a blocking dialog (they are rare)
++            while ((total < targetDisruptions || performed.getOrDefault(Disruption.MID_DECISION, 0) == 0) && games < 4) {
++                games++;
++                HeadlessNetworkClient.thinkTimeMs = 400;
++                total += runChaosGame(remoteCount, targetDisruptions - total);
++                if (HostingServer.isHosting()) {
++                    FServerManager.getInstance().stopServer();
++                }
++            }
++        } finally {
++            HeadlessNetworkClient.thinkTimeMs = 0;
++        }
++        netLog.info("[Chaos] Session: {} drops over {} game(s): {}", total, games, performed);
++        assertTrue(total >= targetDisruptions * 3 / 4, "Exercised enough drops (" + total + " in " + games + " games): " + performed);
++        assertTrue(performed.getOrDefault(Disruption.MID_DECISION, 0) > 0,
++                "Dropped at least once while the host was blocked on a dialog: " + performed);
++    }
++
++    /** One game under disruption; returns how many disruptions were applied. */
++    private int runChaosGame(final int remoteCount, final int maxDisruptions) throws Exception {
++        final FServerManager server = FServerManager.getInstance();
++        final int port = PortAllocator.allocatePort();
++        server.startServer(port);
++        final ServerGameLobby lobby = new ServerGameLobby();
++        server.setLobby(lobby);
++        for (int i = 2; i <= remoteCount; i++) {
++            lobby.addSlot();
++        }
++
++        // The AI host attacks and asks the remote players questions over the network
++        // (Vexing Devil: "take 4 damage?"); the remote players never play lands, so their
++        // hands overflow and they must discard at every cleanup.
++        final LobbySlot host = lobby.getSlot(0);
++        host.setType(LobbySlotType.AI);
++        host.setName("ChaosHost");
++        host.setDeck(aggroDeck());
++        host.setIsReady(true);
++        final List<Seat> seats = new ArrayList<>();
++        for (int i = 1; i <= remoteCount; i++) {
++            final LobbySlot slot = lobby.getSlot(i);
++            slot.setType(LobbySlotType.OPEN);
++            slot.setDeck(TestDeckLoader.createMinimalDeck("Plains", 40));
++            slot.setIsReady(false);
++            seats.add(new Seat("Flaky" + i));
++        }
++        Thread.sleep(500);
++
++        for (final Seat seat : seats) {
++            seat.client = new HeadlessNetworkClient(seat.name, "localhost", port);
++            assertTrue(seat.client.connect(15_000), seat.name + " joins");
++            Thread.sleep(800);
++            seat.client.setReady();
++            Thread.sleep(800);
++        }
++        installHook(seats);
++
++        final Runnable start = lobby.startGame();
++        assertTrue(start != null, "Game starts");
++        start.run();
++        for (final Seat seat : seats) {
++            assertTrue(seat.client.waitForGameStart(30_000), seat.name + " receives the game");
++        }
++        final HostedMatch match = HeadlessGuiDesktop.getLastMatch();
++        final Game game = match.getGame();
++
++        final AtomicReference<String> stall = new AtomicReference<>();
++        final Thread monitor = startStallMonitor(game, seats, stall);
++        final long deadline = System.currentTimeMillis() + GAME_LIMIT_MS;
++        int count = 0;
++        try {
++            Thread.sleep(3000); // let the opening (mulligans, first turn) settle
++            while (!game.isGameOver() && count < maxDisruptions && stall.get() == null && System.currentTimeMillis() < deadline) {
++                final Seat seat = seats.get(random.nextInt(seats.size()));
++                if (isEliminated(game, seat)) {
++                    if (seats.stream().allMatch(s -> isEliminated(game, s))) break;
++                    continue;
++                }
++                final Disruption kind = pickDisruption();
++                disrupting = true;
++                final long fullSyncsBefore = seat.client.getFullStateSyncsReceived();
++                final HeadlessNetworkClient before = seat.client;
++                netLog.info("[Chaos] #{} {} on {} (turn {}, {})", count + 1, kind, seat.name,
++                        game.getPhaseHandler().getTurn(), game.getPhaseHandler().getPhase());
++                if (!disrupt(kind, seat, port)) {
++                    disrupting = false;
++                    continue;
++                }
++                synchronized (performed) {
++                    performed.merge(kind, 1, Integer::sum);
++                }
++                count++;
++                awaitRecovery(game, seat, before, fullSyncsBefore, kind);
++                disrupting = false;
++                if (!game.isGameOver() && !isEliminated(game, seat)) {
++                    checkViewMatchesServer(game, seat, kind);
++                }
++                Thread.sleep(800 + random.nextInt(2000));
++            }
++            // Let the game play out at full speed with whatever state the drops left behind
++            HeadlessNetworkClient.thinkTimeMs = 0;
++            while (!game.isGameOver() && stall.get() == null && System.currentTimeMillis() < deadline) {
++                Thread.sleep(500);
++            }
++        } finally {
++            monitor.interrupt();
++            HeadlessNetworkGuiGame.answerHook = null;
++            netLog.info("[Chaos] Performed: {}  problems: {}", performed, problems);
++            for (final Seat seat : seats) {
++                seat.client.close();
++            }
++        }
++        assertNull(stall.get(), "Game stalled: " + stall.get());
++        assertTrue(problems.isEmpty(), "Problems: " + String.join(" | ", problems));
++        assertTrue(game.isGameOver(), "Game finished within " + GAME_LIMIT_MS / 1000 + "s; performed " + performed);
++        return count;
++    }
++
++    // ------------------------------------------------------------------ disruptions
++
++    private Disruption pickDisruption() {
++        while (true) {
++            final int roll = random.nextInt(100);
++            // MID_DECISION is applied by the hook whenever a blocking dialog arrives
++            final Disruption kind = roll < 20 ? Disruption.ABRUPT
++                    : roll < 35 ? Disruption.SILENT
++                    : roll < 47 ? Disruption.RESTART
++                    : roll < 62 ? Disruption.FLAP
++                    : roll < 85 ? Disruption.MID_CHOICE
++                    : Disruption.MID_PROMPT;
++            if (kind != Disruption.SILENT || silentDropsWork) return kind;
++        }
++    }
++
++    /** Returns false if the disruption could not be applied (e.g. no question arrived to drop inside). */
++    private boolean disrupt(final Disruption kind, final Seat seat, final int port) throws Exception {
++        switch (kind) {
++            case ABRUPT -> closeChannel(seat.client);
++            case SILENT -> seat.client.getClient().simulateDisconnect(FGameClient.DisconnectMode.OUTBOUND);
++            case RESTART -> {
++                // The old copy's connection dies silently; a fresh copy logs in under the same name
++                final HeadlessNetworkClient old = seat.client;
++                old.getClient().simulateDisconnect(FGameClient.DisconnectMode.OUTBOUND);
++                Thread.sleep(200);
++                final HeadlessNetworkClient fresh = new HeadlessNetworkClient(seat.name, "localhost", port);
++                fresh.connect(3000); // a resume carries no slot assignment
++                seat.client = fresh;
++                if (!fresh.waitForGameStart(15_000)) {
++                    problems.add("RESTART: " + seat.name + " did not get the seat back");
++                }
++                Thread.sleep(1500);
++                if (old.getClient().getReconnectState() != FGameClient.ReconnectState.SEAT_LOST) {
++                    problems.add("RESTART: replaced copy of " + seat.name + " did not stand down (" + old.getClient().getReconnectState() + ")");
++                }
++                old.close();
++            }
++            case FLAP -> {
++                for (int i = 0; i < 3; i++) {
++                    closeChannel(seat.client);
++                    final long until = System.currentTimeMillis() + 15_000;
++                    Thread.sleep(300);
++                    while (seat.client.getClient().getReconnectState() != FGameClient.ReconnectState.CONNECTED
++                            && System.currentTimeMillis() < until) {
++                        Thread.sleep(100);
++                    }
++                    Thread.sleep(200 + random.nextInt(600));
++                }
++            }
++            case MID_DECISION, MID_CHOICE, MID_PROMPT -> {
++                seat.droppedByHook.set(false);
++                seat.armed.set(kind.name());
++                final long until = System.currentTimeMillis() + 20_000;
++                while (!seat.droppedByHook.get() && System.currentTimeMillis() < until) {
++                    Thread.sleep(50);
++                }
++                seat.armed.set(null);
++                if (!seat.droppedByHook.get()) {
++                    netLog.info("[Chaos] No {} arrived for {} in 20s; skipped", kind, seat.name);
++                    return false;
++                }
++            }
++        }
++        return true;
++    }
++
++    /** Drops the connection inside a question or prompt the host is waiting on, before the answer leaves. */
++    private void installHook(final List<Seat> seats) {
++        HeadlessNetworkGuiGame.answerHook = (gui, method) -> {
++            for (final Seat seat : seats) {
++                final HeadlessNetworkClient client = seat.client;
++                if (client == null || client.getGui() != gui) continue;
++                final boolean isPrompt = method.startsWith("prompt:");
++                // Blocking dialogs are rare (a few per game), so drop the first ones whenever they come
++                if (!isPrompt && seat.armed.get() == null && dialogDropsLeft.getAndDecrement() > 0) {
++                    netLog.info("[Chaos] Dropping {} inside dialog {} (host is blocked on the answer)", seat.name, method);
++                    synchronized (performed) {
++                        performed.merge(Disruption.MID_DECISION, 1, Integer::sum);
++                    }
++                    closeChannel(client);
++                    return;
++                }
++                final String want = seat.armed.get();
++                if (want == null) return;
++                if (isPrompt && method.contains("Waiting")) return; // not a decision of ours
++                final boolean isPriority = isPrompt && method.startsWith("prompt: Priority");
++                final boolean matches = switch (Disruption.valueOf(want)) {
++                    case MID_DECISION -> !isPrompt;
++                    case MID_CHOICE -> isPrompt && !isPriority;
++                    default -> isPriority;
++                };
++                if (!matches) return;
++                if (seat.armed.compareAndSet(want, null)) {
++                    netLog.info("[Chaos] Dropping {} inside {}", seat.name, method);
++                    closeChannel(client);
++                    seat.droppedByHook.set(true);
++                }
++                return;
++            }
++        };
++    }
++
++    private static void closeChannel(final HeadlessNetworkClient client) {
++        try {
++            final Field field = FGameClient.class.getDeclaredField("channel");
++            field.setAccessible(true);
++            final Channel channel = (Channel) field.get(client.getClient());
++            if (channel != null) {
++                channel.close();
++            }
++        } catch (final ReflectiveOperationException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    // ------------------------------------------------------------------ checks
++
++    private void awaitRecovery(final Game game, final Seat seat, final HeadlessNetworkClient before,
++                               final long fullSyncsBefore, final Disruption kind) throws InterruptedException {
++        final long until = System.currentTimeMillis() + RECOVERY_LIMIT_MS;
++        while (System.currentTimeMillis() < until && !game.isGameOver()) {
++            final HeadlessNetworkClient now = seat.client;
++            final boolean resynced = now != before || now.getFullStateSyncsReceived() > fullSyncsBefore;
++            if (resynced && now.getClient().getReconnectState() == FGameClient.ReconnectState.CONNECTED) {
++                return;
++            }
++            Thread.sleep(100);
++        }
++        if (!game.isGameOver()) {
++            problems.add(kind + ": " + seat.name + " did not recover within " + RECOVERY_LIMIT_MS / 1000
++                    + "s (client state " + seat.client.getClient().getReconnectState() + ")");
++        }
++    }
++
++    /** The reconnected client's view converges to the server's game within a few seconds. */
++    private void checkViewMatchesServer(final Game game, final Seat seat, final Disruption kind) throws InterruptedException {
++        String last = null;
++        final long until = System.currentTimeMillis() + 8000;
++        while (System.currentTimeMillis() < until && !game.isGameOver()) {
++            last = compare(game, seat.client.getGameView());
++            if (last == null) return;
++            Thread.sleep(250);
++        }
++        if (last != null && !game.isGameOver()) {
++            problems.add("after " + kind + " on " + seat.name + ": " + last);
++        }
++    }
++
++    private static String compare(final Game game, final GameView view) {
++        if (view == null) return "client has no game view";
++        if (view.getPlayers() == null) return "client view has no players yet"; // mid-resync; retried
++        for (final Player p : game.getRegisteredPlayers()) {
++            PlayerView pv = null;
++            for (final PlayerView candidate : view.getPlayers()) {
++                if (candidate.getName().equals(p.getName())) pv = candidate;
++            }
++            if (pv == null) return "client is missing player " + p.getName();
++            if (pv.getLife() != p.getLife()) return p.getName() + " life: client " + pv.getLife() + " server " + p.getLife();
++            for (final ZoneType zone : new ZoneType[] {ZoneType.Hand, ZoneType.Library, ZoneType.Graveyard, ZoneType.Exile}) {
++                if (pv.getZoneSize(zone) != p.getZone(zone).size()) {
++                    return p.getName() + " " + zone + ": client " + pv.getZoneSize(zone) + " server " + p.getZone(zone).size();
++                }
++            }
++            final TreeSet<Integer> serverField = new TreeSet<>();
++            for (final Card c : p.getCardsIn(ZoneType.Battlefield)) serverField.add(c.getId());
++            final TreeSet<Integer> clientField = new TreeSet<>();
++            if (pv.getCards(ZoneType.Battlefield) != null) {
++                for (final CardView c : pv.getCards(ZoneType.Battlefield)) clientField.add(c.getId());
++            }
++            if (!serverField.equals(clientField)) {
++                return p.getName() + " battlefield: client " + clientField + " server " + serverField;
++            }
++        }
++        return null;
++    }
++
++    /** Flags a game that stops changing while no disruption is in progress. */
++    private Thread startStallMonitor(final Game game, final List<Seat> seats, final AtomicReference<String> stall) {
++        final Thread monitor = new Thread(() -> {
++            String signature = "";
++            long changed = System.currentTimeMillis();
++            try {
++                while (!game.isGameOver() && stall.get() == null) {
++                    Thread.sleep(500);
++                    final String now = signature(game);
++                    if (!now.equals(signature) || disrupting) {
++                        signature = now;
++                        changed = System.currentTimeMillis();
++                    } else if (System.currentTimeMillis() - changed > STALL_LIMIT_MS) {
++                        stall.set("no progress for " + STALL_LIMIT_MS / 1000 + "s at " + now + "; " + inputs(game, seats));
++                    }
++                }
++            } catch (final InterruptedException ignored) {
++                // test finished
++            }
++        }, "chaos-stall-monitor");
++        monitor.setDaemon(true);
++        monitor.start();
++        return monitor;
++    }
++
++    private static String signature(final Game game) {
++        final StringBuilder sb = new StringBuilder();
++        sb.append("turn ").append(game.getPhaseHandler().getTurn()).append(' ').append(game.getPhaseHandler().getPhase())
++                .append(" stack ").append(game.getStack().size());
++        for (final Player p : game.getRegisteredPlayers()) {
++            sb.append(" | ").append(p.getName()).append(" life ").append(p.getLife())
++                    .append(" hand ").append(p.getZone(ZoneType.Hand).size())
++                    .append(" lib ").append(p.getZone(ZoneType.Library).size())
++                    .append(" bf ").append(p.getZone(ZoneType.Battlefield).size());
++        }
++        return sb.toString();
++    }
++
++    private static String inputs(final Game game, final List<Seat> seats) {
++        final StringBuilder sb = new StringBuilder();
++        for (final Player p : game.getRegisteredPlayers()) {
++            if (p.getController() instanceof PlayerControllerHuman human) {
++                final Object input = human.getInputQueue().getInput();
++                sb.append(p.getName()).append(" input=").append(input == null ? "none" : input.getClass().getSimpleName()).append("; ");
++            }
++        }
++        for (final Seat seat : seats) {
++            sb.append(seat.name).append(" client=").append(seat.client.getClient().getReconnectState()).append("; ");
++        }
++        return sb.toString();
++    }
++
++    private static boolean isEliminated(final Game game, final Seat seat) {
++        for (final Player p : game.getRegisteredPlayers()) {
++            if (p.getName().equals(seat.name)) return p.hasLost();
++        }
++        return true;
++    }
++
++    private static Deck aggroDeck() {
++        final CardDb db = FModel.getMagicDb().getCommonCards();
++        final Deck deck = new Deck("Chaos aggro");
++        // Cards that ask the opponent something: Vexing Devil (yes/no prompt) and
++        // Fact or Fiction (the opponent splits the piles); goblins end the game.
++        add(deck, db, "Mountain", 12);
++        add(deck, db, "Island", 10);
++        add(deck, db, "Vexing Devil", 8);
++        add(deck, db, "Fact or Fiction", 4);
++        add(deck, db, "Raging Goblin", 6);
++        return deck;
++    }
++
++    private static void add(final Deck deck, final CardDb db, final String name, final int count) {
++        final PaperCard card = db.getCard(name);
++        if (card == null) throw new IllegalStateException("Card not found: " + name);
++        for (int i = 0; i < count; i++) deck.getMain().add(card);
++    }
++}
+diff --git a/forge-gui-desktop/src/test/java/forge/net/NetplaySeatReclaimTest.java b/forge-gui-desktop/src/test/java/forge/net/NetplaySeatReclaimTest.java
+new file mode 100644
+index 00000000..bc12ed36
+--- /dev/null
++++ b/forge-gui-desktop/src/test/java/forge/net/NetplaySeatReclaimTest.java
+@@ -0,0 +1,87 @@
++package forge.net;
++
++import forge.deck.Deck;
++import forge.gamemodes.match.LobbySlot;
++import forge.gamemodes.match.LobbySlotType;
++import forge.gamemodes.net.client.FGameClient;
++import forge.gamemodes.net.server.FServerManager;
++import forge.gamemodes.net.server.ServerGameLobby;
++import forge.util.IHasForgeLog;
++import org.testng.annotations.BeforeClass;
++import org.testng.annotations.Test;
++
++import static org.testng.Assert.assertEquals;
++import static org.testng.Assert.assertTrue;
++
++/**
++ * ForgeUI netplay fix: a player whose connection died silently (the server has not yet
++ * timed it out) reconnects from the same address and gets their seat back immediately,
++ * instead of being refused with "seat unavailable" until the AI takes over.
++ */
++public class NetplaySeatReclaimTest implements IHasForgeLog {
++
++    @BeforeClass
++    public void init() {
++        TestUtils.ensureFModelInitialized();
++    }
++
++    @Test(timeOut = 120000)
++    public void reconnectReclaimsSeatHeldBySilentConnection() throws Exception {
++        final FServerManager server = FServerManager.getInstance();
++        final int port = PortAllocator.allocatePort();
++        HeadlessNetworkClient first = null;
++        HeadlessNetworkClient second = null;
++        try {
++            server.startServer(port);
++            final ServerGameLobby lobby = new ServerGameLobby();
++            server.setLobby(lobby);
++
++            // A long game, so the match is still running when the player comes back
++            final Deck hostDeck = TestDeckLoader.createMinimalDeck("Mountain", 60);
++            final Deck remoteDeck = TestDeckLoader.createMinimalDeck("Forest", 60);
++            final LobbySlot host = lobby.getSlot(0);
++            host.setType(LobbySlotType.AI);
++            host.setName("Host");
++            host.setDeck(hostDeck);
++            host.setIsReady(true);
++            final LobbySlot remote = lobby.getSlot(1);
++            remote.setType(LobbySlotType.OPEN);
++            remote.setDeck(remoteDeck);
++            remote.setIsReady(false);
++            Thread.sleep(500);
++
++            first = new HeadlessNetworkClient("Rejoiner", "localhost", port);
++            assertTrue(first.connect(15000), "First connection joins the lobby");
++            Thread.sleep(500);
++            first.setReady();
++            Thread.sleep(1000);
++
++            final Runnable start = lobby.startGame();
++            assertTrue(start != null, "Game starts");
++            start.run();
++            assertTrue(first.waitForGameStart(30000), "First connection receives the game");
++
++            // The connection goes silent but stays open: the server still thinks it is
++            // alive for up to the 45s heartbeat timeout (the 10-21 "seat unavailable" case).
++            first.getClient().simulateDisconnect(FGameClient.DisconnectMode.OUTBOUND);
++            Thread.sleep(500);
++
++            second = new HeadlessNetworkClient("Rejoiner", "localhost", port);
++            second.connect(3000); // a resume carries no new slot assignment; wait on the game state instead
++            assertTrue(second.waitForGameStart(15000),
++                    "The new connection takes the seat back well before the server's 45s heartbeat timeout");
++
++            // The replaced connection must stand down, not reconnect and take the seat back.
++            Thread.sleep(4000);
++            assertEquals(first.getClient().getReconnectState(), FGameClient.ReconnectState.SEAT_LOST,
++                    "The replaced connection stops instead of reconnecting");
++            assertEquals(second.getClient().getReconnectState(), FGameClient.ReconnectState.CONNECTED,
++                    "The reclaiming connection keeps the seat");
++            netLog.info("Seat reclaimed; game in progress for the new connection");
++        } finally {
++            if (second != null) second.close();
++            if (first != null) first.close();
++            if (forge.gamemodes.net.server.HostingServer.isHosting()) server.stopServer();
++        }
++    }
++}
+diff --git a/forge-gui-desktop/src/test/java/forge/net/embedded/StaleSelectionResyncTest.java b/forge-gui-desktop/src/test/java/forge/net/embedded/StaleSelectionResyncTest.java
+new file mode 100644
+index 00000000..6ac07b56
+--- /dev/null
++++ b/forge-gui-desktop/src/test/java/forge/net/embedded/StaleSelectionResyncTest.java
+@@ -0,0 +1,94 @@
++package forge.net.embedded;
++
++import forge.game.GameType;
++import forge.game.GameView;
++import forge.game.card.CardView;
++import forge.game.phase.PhaseType;
++import forge.game.player.PlayerView;
++import forge.game.player.RegisteredPlayer;
++import forge.gamemodes.match.HostedMatch;
++import forge.gamemodes.net.ProtocolGuiGame;
++import forge.gamemodes.net.event.GuiGameEvent;
++import forge.gui.FThreads;
++import forge.interfaces.IGameController;
++import forge.localinstance.properties.ForgePreferences.FPref;
++import forge.model.FModel;
++import forge.net.TestDeckLoader;
++import forge.net.TestUtils;
++import forge.player.GamePlayerUtil;
++import forge.player.LobbyPlayerHuman;
++import org.testng.annotations.Test;
++
++import java.util.List;
++import java.util.concurrent.TimeUnit;
++
++import static org.testng.Assert.assertEquals;
++import static org.testng.Assert.assertTrue;
++
++/**
++ * ForgeUI netplay fix: a remote player who clicks a card the game no longer has (their
++ * view went stale, e.g. after a reconnect) gets a fresh full state, instead of every
++ * click being silently dropped while they cannot act (the 10-19 "can't block" case).
++ */
++public class StaleSelectionResyncTest {
++
++    @Test(timeOut = 120_000)
++    public void clickOnMissingCardRefreshesThePlayersView() throws Exception {
++        TestUtils.ensureFModelInitialized();
++        FModel.getPreferences().setPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, false);
++        FModel.getPreferences().setPref(FPref.UI_RECORD_REPLAYS, false);
++
++        final ProtocolGuiGameInProcessTest.RecordingRemote remote = new ProtocolGuiGameInProcessTest.RecordingRemote();
++        final ProtocolGuiGame gui = new ProtocolGuiGame(remote);
++        final RegisteredPlayer human = new RegisteredPlayer(TestDeckLoader.createMinimalDeck("Forest", 40))
++                .setPlayer(new LobbyPlayerHuman("Stale"));
++        final RegisteredPlayer ai = new RegisteredPlayer(TestDeckLoader.createMinimalDeck("Plains", 40))
++                .setPlayer(GamePlayerUtil.createAiPlayer("AI"));
++        final HostedMatch match = new HostedMatch();
++        match.startMatch(GameType.Constructed, null, List.of(human, ai), human, gui);
++
++        int fullStatesBefore = -1;
++        int fullStatesAfterFirst = -1;
++        final long deadline = System.currentTimeMillis() + 90_000;
++        while (System.currentTimeMillis() < deadline) {
++            final GuiGameEvent prompt = remote.buttonPrompts.poll(5, TimeUnit.SECONDS);
++            if (prompt == null) {
++                continue;
++            }
++            final PlayerView owner = (PlayerView) prompt.getObjects()[0];
++            if (remote.myPlayers == null || owner == null || !remote.myPlayers.contains(owner)) {
++                continue;
++            }
++            final IGameController controller = gui.getGameController(owner);
++            final GameView gv = gui.getGameView();
++            final boolean myMain = owner.equals(gv.getPlayerTurn()) && gv.getPhase() == PhaseType.MAIN1;
++            if (myMain && fullStatesBefore < 0) {
++                // A card id the game never had, as a stale client view would send
++                final CardView ghost = new CardView(987_654, gv.getTracker());
++                fullStatesBefore = remote.fullStates;
++                FThreads.invokeInEdtLater(() -> controller.selectCard(ghost, null, null));
++                final long wait = System.currentTimeMillis() + 5000;
++                while (remote.fullStates == fullStatesBefore && System.currentTimeMillis() < wait) {
++                    Thread.sleep(50);
++                }
++                fullStatesAfterFirst = remote.fullStates;
++                // A burst of the same stale clicks is refreshed once, not once per click
++                for (int i = 0; i < 3; i++) {
++                    FThreads.invokeInEdtLater(() -> controller.selectCard(ghost, null, null));
++                }
++                Thread.sleep(500);
++                assertEquals(remote.fullStates, fullStatesAfterFirst, "Repeated stale clicks within the window resend nothing");
++                FThreads.invokeInEdtLater(controller::concede);
++                break;
++            }
++            FThreads.invokeInEdtLater(controller::selectButtonOk);
++        }
++
++        final long end = System.currentTimeMillis() + 30_000;
++        while (match.getGameView() != null && !match.getGameView().isGameOver() && System.currentTimeMillis() < end) {
++            Thread.sleep(100);
++        }
++        assertTrue(fullStatesBefore >= 0, "Reached the player's main phase");
++        assertEquals(fullStatesAfterFirst, fullStatesBefore + 1, "A click on a missing card sends the player one full state");
++    }
++}
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolHandler.java b/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolHandler.java
+index cfe50429..193e15b7 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolHandler.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolHandler.java
+@@ -93,6 +93,7 @@ public abstract class GameProtocolHandler<T> extends ChannelInboundHandlerAdapte
+                     }
+                 } else {
+                     Serializable reply = null;
++                    String dialogError = null;
+                     try {
+                         final Object theReply = method.invoke(protocolMethod.receiver(toInvoke), args);
+                         if (theReply instanceof Serializable) {
+@@ -106,10 +107,16 @@ public abstract class GameProtocolHandler<T> extends ChannelInboundHandlerAdapte
+                     } catch (final NullPointerException | InvocationTargetException e) {
+                         //throw new RuntimeException(e.getTargetException());
+                         catchedError[0] += e.toString();
+-                        SOptionPane.showMessageDialog(catchedError[0], "Error", FSkinProp.ICO_WARNING);
++                        dialogError = catchedError[0];
+                         netLog.error("Exception in protocol method {} args={}: {}", methodName, describeArgs(args), e.toString());
+                     }
++                    // Reply first: the other side's game thread is blocked on it, and the
++                    // error dialog below is modal and may wait on this user.
+                     getRemote(ctx).send(new ReplyEvent(event.getId(), reply));
++                    if (dialogError != null) {
++                        final String error = dialogError;
++                        FThreads.invokeInEdtLater(() -> SOptionPane.showMessageDialog(error, "Error", FSkinProp.ICO_WARNING));
++                    }
+                 }
+                 final long elapsed = System.currentTimeMillis() - startMs;
+                 if (queueDelayMs > 50 || elapsed > 50) {
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolSender.java b/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolSender.java
+index 33333979..bfed4bef 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolSender.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/GameProtocolSender.java
+@@ -30,4 +30,17 @@ public final class GameProtocolSender {
+         method.checkReturnValue(returned);
+         return (T) returned;
+     }
++
++    /**
++     * Like {@link #sendAndWait} but may return {@link ReplyPool#DISCONNECTED}, which the
++     * caller must check before casting.
++     */
++    public Object sendAndWaitOrDisconnect(final ProtocolMethod method, final Object... args) {
++        method.checkArgs(args);
++        final Object returned = remote.sendAndWait(new GuiGameEvent(method, args));
++        if (returned != ReplyPool.DISCONNECTED) {
++            method.checkReturnValue(returned);
++        }
++        return returned;
++    }
+ }
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/ProtocolGuiGame.java b/forge-gui/src/main/java/forge/gamemodes/net/ProtocolGuiGame.java
+index d8a865aa..b8ec9790 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/ProtocolGuiGame.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/ProtocolGuiGame.java
+@@ -31,8 +31,11 @@ import java.util.ArrayList;
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.util.function.Supplier;
+ import java.util.stream.Collectors;
+ 
++import com.google.common.collect.Lists;
++
+ /**
+  * Host-side proxy for a GUI that lives on the other side of an {@link IRemote}. Turns
+  * {@link IGuiGame} calls into {@link ProtocolMethod} events and keeps the peer's copy of the
+@@ -62,6 +65,15 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+     private boolean fallbackLogged = false;  // Prevent duplicate fallback log messages
+     private volatile boolean paused;
+     private volatile boolean resyncPending;
++    // A disconnected player's pending question waits here until the reconnect resync
++    // finishes, then is asked again. Abandoned (AI takeover, server stop) answers with
++    // a safe default instead, so the game thread never acts on a missing reply.
++    private final Object reconnectMonitor = new Object();
++    private volatile boolean awaitingResync;
++    private volatile boolean abandoned;
++    private static final Object ABANDONED = new Object();
++    private static final long DISCONNECT_RETRY_MS = 500;
++    private static final long RECONNECT_POLL_MS = 1000;
+ 
+     private GameEventForwarder forwarder;
+     private boolean flushing;
+@@ -91,6 +103,7 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+     }
+ 
+     public void pause() {
++        awaitingResync = true;
+         paused = true;
+     }
+     public void resume() {
+@@ -100,6 +113,26 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+         return paused;
+     }
+ 
++    /** The reconnect handshake has sent fresh state; questions waiting on this player are asked again. */
++    public void notifyResynced() {
++        synchronized (reconnectMonitor) {
++            awaitingResync = false;
++            reconnectMonitor.notifyAll();
++        }
++    }
++
++    /** This player will not answer again (AI takeover or server stop); pending questions take defaults. */
++    public void abandon() {
++        synchronized (reconnectMonitor) {
++            abandoned = true;
++            reconnectMonitor.notifyAll();
++        }
++    }
++
++    public boolean isAbandoned() {
++        return abandoned;
++    }
++
+     /**
+      * Reset delta sync state for reconnection.
+      * After a client reconnects, it has no prior delta baseline,
+@@ -113,6 +146,16 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+         super.setSelection(Selection.NONE);
+     }
+ 
++    /**
++     * Replace the client's whole view, as on reconnect but without reopening it. For a
++     * client that acted on an object the game no longer has. Call while the game thread
++     * is parked on this player's input, like the reconnect handshake.
++     */
++    public void resyncClientView() {
++        resetForReconnect();
++        sendFullState();
++    }
++
+     public void setForwarder(GameEventForwarder forwarder) {
+         this.forwarder = forwarder;
+     }
+@@ -166,21 +209,69 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+     /**
+      * Dispatches and blocks for the client's reply, with no graph walk. Used for
+      * dialogs whose args carry the full question (e.g. plain-text confirms).
++     * If this player is abandoned, returns {@code fallback} instead.
+      */
+-    private <T> T sendAndWait(final ProtocolMethod method, final Object... args) {
+-        if (paused) { return null; }
+-        return sender.sendAndWait(method, args);
++    private <T> T sendAndWait(final Supplier<T> fallback, final ProtocolMethod method, final Object... args) {
++        return requestReply(false, fallback, method, args);
+     }
+ 
+     /**
+      * Walks the trackable graph, dispatches, and blocks for the client's reply.
+      * Used for dialogs that reference entities, cards, or zones the client must
+      * have to render the prompt. Game-thread-only.
++     * If this player is abandoned, returns {@code fallback} instead.
+      */
+-    private <T> T syncAndSendAndWait(final ProtocolMethod method, final Object... args) {
+-        if (paused) { return null; }
+-        updateGameView();
+-        return sender.sendAndWait(method, args);
++    private <T> T syncAndSendAndWait(final Supplier<T> fallback, final ProtocolMethod method, final Object... args) {
++        return requestReply(true, fallback, method, args);
++    }
++
++    /**
++     * Asks until answered. A disconnect does not answer the question: the game thread
++     * waits for the reconnect resync and asks again, or takes {@code fallback} once
++     * this player is abandoned or the game is over.
++     */
++    @SuppressWarnings("unchecked")
++    private <T> T requestReply(final boolean sync, final Supplier<T> fallback, final ProtocolMethod method, final Object... args) {
++        while (true) {
++            if (!paused && !awaitingResync && !abandoned) {
++                if (sync) {
++                    updateGameView();
++                }
++                final Object reply = sender.sendAndWaitOrDisconnect(method, args);
++                if (reply != ReplyPool.DISCONNECTED) {
++                    return (T) reply;
++                }
++                netLog.info("[Reconnect] {} lost its connection; waiting to ask again", method);
++            }
++            if (awaitReconnect() == ABANDONED) {
++                netLog.info("[Reconnect] {} answered with its default: player abandoned or game over", method);
++                return fallback.get();
++            }
++        }
++    }
++
++    /** Returns null when the question should be asked again, or {@link #ABANDONED}. */
++    private Object awaitReconnect() {
++        synchronized (reconnectMonitor) {
++            try {
++                if (!paused && !awaitingResync && !abandoned) {
++                    // Disconnected but not yet paused by the server: brief back-off, no busy loop.
++                    reconnectMonitor.wait(DISCONNECT_RETRY_MS);
++                }
++                while ((paused || awaitingResync) && !abandoned && !isGameOver()) {
++                    reconnectMonitor.wait(RECONNECT_POLL_MS);
++                }
++            } catch (final InterruptedException e) {
++                Thread.currentThread().interrupt();
++                return ABANDONED;
++            }
++            return abandoned || isGameOver() ? ABANDONED : null;
++        }
++    }
++
++    private boolean isGameOver() {
++        final GameView gameView = getGameView();
++        return gameView != null && gameView.isGameOver();
+     }
+ 
+     /**
+@@ -381,17 +472,34 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+ 
+     @Override
+     public SpellAbilityView getAbilityToPlay(final CardView hostCard, final List<SpellAbilityView> abilities, final ITriggerEvent triggerEvent) {
+-        return syncAndSendAndWait(ProtocolMethod.getAbilityToPlay, hostCard, abilities, null/*triggerEvent*/); //someplatform don't have mousetriggerevent class or it will not allow them to click/tap
++        // Abandoned: null is a pass
++        return syncAndSendAndWait(() -> null, ProtocolMethod.getAbilityToPlay, hostCard, abilities, null/*triggerEvent*/); //someplatform don't have mousetriggerevent class or it will not allow them to click/tap
+     }
+ 
+     @Override
+     public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers, final int damage, final GameEntityView defender, final boolean overrideOrder, final boolean maySkip) {
+-        return syncAndSendAndWait(ProtocolMethod.assignCombatDamage, attacker, blockers, damage, defender, overrideOrder, maySkip);
++        // Abandoned: null lets the controller apply its default assignment
++        return syncAndSendAndWait(() -> null, ProtocolMethod.assignCombatDamage, attacker, blockers, damage, defender, overrideOrder, maySkip);
+     }
+ 
+     @Override
+     public Map<Object, Integer> assignGenericAmount(final CardView effectSource, final Map<Object, Integer> targets, final int amount, final boolean atLeastOne, final String amountLabel) {
+-        return syncAndSendAndWait(ProtocolMethod.assignGenericAmount, effectSource, targets, amount, atLeastOne, amountLabel);
++        return syncAndSendAndWait(() -> defaultDistribution(targets, amount, atLeastOne), ProtocolMethod.assignGenericAmount, effectSource, targets, amount, atLeastOne, amountLabel);
++    }
++
++    /** Every recipient gets its required minimum; the remainder goes to the first. */
++    private static Map<Object, Integer> defaultDistribution(final Map<Object, Integer> targets, final int amount, final boolean atLeastOne) {
++        final Map<Object, Integer> result = new LinkedHashMap<>();
++        int remaining = amount;
++        for (final Object target : targets.keySet()) {
++            final int share = atLeastOne && remaining > 0 ? 1 : 0;
++            result.put(target, share);
++            remaining -= share;
++        }
++        if (remaining > 0 && !result.isEmpty()) {
++            result.merge(result.keySet().iterator().next(), remaining, Integer::sum);
++        }
++        return result;
+     }
+ 
+     @Override
+@@ -406,55 +514,75 @@ public class ProtocolGuiGame extends NetworkGuiGame implements IHasForgeLog {
+ 
+     @Override
+     public boolean showConfirmDialog(final String message, final String title, final String yesButtonText, final String noButtonText, final boolean defaultYes) {
+-        final Boolean result = sendAndWait(ProtocolMethod.showConfirmDialog, message, title, yesButtonText, noButtonText, defaultYes);
++        final Boolean result = sendAndWait(() -> defaultYes, ProtocolMethod.showConfirmDialog, message, title, yesButtonText, noButtonText, defaultYes);
+         return result != null ? result : defaultYes;
+     }
+ 
+     @Override
+     public int showOptionDialog(final String message, final String title, final FSkinProp icon, final List<String> options, final int defaultOption) {
+-        final Integer result = syncAndSendAndWait(ProtocolMethod.showOptionDialog, message, title, icon, options, defaultOption);
++        final Integer result = syncAndSendAndWait(() -> defaultOption, ProtocolMethod.showOptionDialog, message, title, icon, options, defaultOption);
+         return result != null ? result : defaultOption;
+     }
+ 
+     @Override
+     public String showInputDialog(final String message, final String title, final FSkinProp icon, final String initialInput, final List<String> inputOptions, final boolean isNumeric) {
+-        return syncAndSendAndWait(ProtocolMethod.showInputDialog, message, title, icon, initialInput, inputOptions, isNumeric);
++        return syncAndSendAndWait(() -> initialInput, ProtocolMethod.showInputDialog, message, title, icon, initialInput, inputOptions, isNumeric);
+     }
+ 
+     @Override
+     public boolean confirm(final CardView c, final String question, final boolean defaultIsYes, final List<String> options) {
+-        final Boolean result = syncAndSendAndWait(ProtocolMethod.confirm, c, question, defaultIsYes, options);
++        final Boolean result = syncAndSendAndWait(() -> defaultIsYes, ProtocolMethod.confirm, c, question, defaultIsYes, options);
+         return result != null ? result : defaultIsYes;
+     }
+ 
+     @Override
+     public <T> List<T> getChoices(final String message, final int min, final int max, final List<T> choices, final List<T> selected, final FSerializableFunction<T, String> display) {
+-        return syncAndSendAndWait(ProtocolMethod.getChoices, message, min, max, choices, selected, display);
++        return syncAndSendAndWait(() -> firstOf(choices, min), ProtocolMethod.getChoices, message, min, max, choices, selected, display);
+     }
+ 
+     @Override
+     public <T> IGuiGame.OrderResult<T> order(final String title, final String top, final int remainingObjectsMin, final int remainingObjectsMax, final List<T> sourceChoices, final List<T> destChoices, final CardView referenceCard, final boolean sideboardingMode, final boolean showRememberCheckbox) {
+-        return syncAndSendAndWait(ProtocolMethod.order, title, top, remainingObjectsMin, remainingObjectsMax, sourceChoices, destChoices, referenceCard, sideboardingMode, showRememberCheckbox);
++        return syncAndSendAndWait(() -> defaultOrder(remainingObjectsMax, sourceChoices, destChoices), ProtocolMethod.order, title, top, remainingObjectsMin, remainingObjectsMax, sourceChoices, destChoices, referenceCard, sideboardingMode, showRememberCheckbox);
++    }
++
++    /** Keeps the given order, moving just enough source items to leave {@code remainingMax} behind. */
++    private static <T> IGuiGame.OrderResult<T> defaultOrder(final int remainingMax, final List<T> sourceChoices, final List<T> destChoices) {
++        final List<T> ordered = destChoices == null ? new ArrayList<>() : new ArrayList<>(destChoices);
++        if (sourceChoices != null) {
++            ordered.addAll(sourceChoices.subList(0, Math.max(0, sourceChoices.size() - remainingMax)));
++        }
++        return new IGuiGame.OrderResult<>(ordered, false);
++    }
++
++    private static <T> List<T> firstOf(final List<T> choices, final int count) {
++        if (choices == null) {
++            return new ArrayList<>();
++        }
++        return new ArrayList<>(choices.subList(0, Math.min(Math.max(0, count), choices.size())));
+     }
+ 
+     @Override
+     public List<PaperCard> sideboard(final CardPool sideboard, final CardPool main, final String message) {
+-        return syncAndSendAndWait(ProtocolMethod.sideboard, sideboard, main, message);
++        // Abandoned: null keeps the current main deck
++        return syncAndSendAndWait(() -> null, ProtocolMethod.sideboard, sideboard, main, message);
+     }
+ 
+     @Override
+     public GameEntityView chooseSingleEntityForEffect(final String title, final List<? extends GameEntityView> optionList, final DelayedReveal delayedReveal, final boolean isOptional) {
+-        return syncAndSendAndWait(ProtocolMethod.chooseSingleEntityForEffect, title, optionList, delayedReveal, isOptional);
++        return syncAndSendAndWait(() -> isOptional || optionList == null || optionList.isEmpty() ? null : optionList.get(0),
++                ProtocolMethod.chooseSingleEntityForEffect, title, optionList, delayedReveal, isOptional);
+     }
+ 
+     @Override
+     public List<GameEntityView> chooseEntitiesForEffect(final String title, final List<? extends GameEntityView> optionList, final int min, final int max, final DelayedReveal delayedReveal) {
+-        return syncAndSendAndWait(ProtocolMethod.chooseEntitiesForEffect, title, optionList, min, max, delayedReveal);
++        return syncAndSendAndWait(() -> firstOf(optionList == null ? null : new ArrayList<GameEntityView>(optionList), min),
++                ProtocolMethod.chooseEntitiesForEffect, title, optionList, min, max, delayedReveal);
+     }
+ 
+     @Override
+     public List<CardView> manipulateCardList(final String title, final Iterable<CardView> cards, final Iterable<CardView> manipulable, final boolean toTop, final boolean toBottom, final boolean toAnywhere) {
+-        return syncAndSendAndWait(ProtocolMethod.manipulateCardList, title, cards, manipulable, toTop, toBottom, toAnywhere);
++        // Abandoned: leave the cards in the order given
++        return syncAndSendAndWait(() -> Lists.newArrayList(cards), ProtocolMethod.manipulateCardList, title, cards, manipulable, toTop, toBottom, toAnywhere);
+     }
+ 
+     @Override
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/ReplyPool.java b/forge-gui/src/main/java/forge/gamemodes/net/ReplyPool.java
+index a12a7012..5d81e286 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/ReplyPool.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/ReplyPool.java
+@@ -5,9 +5,24 @@ import com.google.common.collect.Maps;
+ import java.util.Map;
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.FutureTask;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
+ 
+ public class ReplyPool {
+ 
++    /**
++     * Completion value for replies abandoned because the connection went away.
++     * Distinct from a {@code null} answer, so a waiting game thread can wait for
++     * the player to reconnect and ask again instead of acting on a non-answer.
++     * Never crosses the wire.
++     */
++    public static final Object DISCONNECTED = new Object() {
++        @Override
++        public String toString() {
++            return "ReplyPool.DISCONNECTED";
++        }
++    };
++
+     private final Map<Integer, CompletableFuture> pool = Maps.newHashMap();
+ 
+     public ReplyPool() {
+@@ -37,20 +52,62 @@ public class ReplyPool {
+             return future.get();
+         } catch (final InterruptedException | ExecutionException e) {
+             throw new RuntimeException(e);
++        } finally {
++            remove(index, future);
++        }
++    }
++
++    /**
++     * Waits at most {@code timeoutMs} for the reply; a missing reply yields {@code null}.
++     * For callers that must never block indefinitely (e.g. a UI thread).
++     */
++    public Object get(final int index, final long timeoutMs) {
++        final CompletableFuture future;
++        synchronized (pool) {
++            future = pool.get(index);
++        }
++        try {
++            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
++        } catch (final TimeoutException e) {
++            return null;
++        } catch (final InterruptedException | ExecutionException e) {
++            throw new RuntimeException(e);
++        } finally {
++            remove(index, future);
++        }
++    }
++
++    private void remove(final int index, final CompletableFuture future) {
++        synchronized (pool) {
++            if (pool.get(index) == future) {
++                pool.remove(index);
++            }
+         }
+     }
+ 
+     /**
+      * Cancel all pending replies by completing them with null.
+-     * This is used when a player is converted to AI to unblock any waiting game threads.
++     * Used by the AFK timeout, where null means "pass".
+      */
+     public void cancelAll() {
++        completeAll(null);
++    }
++
++    /**
++     * Release every waiting thread with {@link #DISCONNECTED}: the connection is gone,
++     * but the player may reconnect and be asked again.
++     */
++    public void abortForDisconnect() {
++        completeAll(DISCONNECTED);
++    }
++
++    private void completeAll(final Object value) {
+         synchronized (pool) {
++            // Complete but keep: a thread between initialize() and get() must still find its
++            // future (clearing here made that get() throw). Each get() removes its own entry.
+             for (CompletableFuture future : pool.values()) {
+-                // Complete with null to unblock waiting threads
+-                future.set(null);
++                future.set(value);
+             }
+-            pool.clear();
+         }
+     }
+ 
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/client/FGameClient.java b/forge-gui/src/main/java/forge/gamemodes/net/client/FGameClient.java
+index 2605414d..6a3c69c2 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/client/FGameClient.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/client/FGameClient.java
+@@ -55,6 +55,9 @@ public class FGameClient implements IToServer, IHasForgeLog {
+     static final int READER_IDLE_SECONDS = 45;
+     private static final int[] BACKOFF_SECONDS = {1, 5, 15, 45, 60};
+     private static final int RESUME_WATCH_SECONDS = 5;
++    // Requests to the host are lookups (e.g. ability descriptions), answered in well under a second
++    private static final long REPLY_TIMEOUT_MS = 15_000;
++    private volatile int currentAttempt;
+     private final IGuiGame clientGui;
+     private final String hostname;
+     private final Integer port;
+@@ -248,8 +251,8 @@ public class FGameClient implements IToServer, IHasForgeLog {
+             replies.complete(event.getId(), null);
+         }
+ 
+-        // Wait for reply
+-        return replies.get(event.getId());
++        // Wait for reply. Callers include the UI thread, so never wait indefinitely.
++        return replies.get(event.getId(), REPLY_TIMEOUT_MS);
+     }
+ 
+     List<ILobbyListener> getLobbyListeners() {
+@@ -307,6 +310,8 @@ public class FGameClient implements IToServer, IHasForgeLog {
+             }
+             reconnectState = ReconnectState.RECONNECTING;
+         }
++        // Nothing asked on the old connection will be answered; release waiting UI threads
++        replies.cancelAll();
+         if (channel != null && channel.isOpen()) {
+             channel.close();
+         }
+@@ -336,6 +341,7 @@ public class FGameClient implements IToServer, IHasForgeLog {
+                 return;
+             }
+         }
++        currentAttempt = attemptIndex;
+         netLog.info("[Reconnect] Attempt {}/{} - connecting to {}:{}",
+                 attemptIndex + 1, BACKOFF_SECONDS.length, hostname, port);
+         try {
+@@ -393,9 +399,24 @@ public class FGameClient implements IToServer, IHasForgeLog {
+         notifyReconnectState(ReconnectState.CONNECTED, 0, 0);
+     }
+ 
+-    void onSeatLost() {
++    /**
++     * The server still holds our seat on the connection that just dropped (it has not
++     * timed it out yet). Not final: keep the backoff going until the seat frees up.
++     */
++    void onSeatStillHeld() {
+         synchronized (reconnectLock) {
+             if (shuttingDown || reconnectState != ReconnectState.RECONNECTING) return;
++        }
++        netLog.info("[Reconnect] Seat still held by the previous connection; retrying");
++        cancelResumeWatch();
++        continueOrFail(currentAttempt);
++    }
++
++    void onSeatLost() {
++        synchronized (reconnectLock) {
++            // From CONNECTED: the seat moved to a newer connection of ours; the coming close
++            // must not start a reconnect that would take it back.
++            if (shuttingDown || reconnectState == ReconnectState.SEAT_LOST || reconnectState == ReconnectState.FAILED) return;
+             reconnectState = ReconnectState.SEAT_LOST;
+         }
+         cancelResumeWatch();
+@@ -471,9 +492,13 @@ public class FGameClient implements IToServer, IHasForgeLog {
+     private class LobbyUpdateHandler extends ChannelInboundHandlerAdapter {
+         @Override
+         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+-            if (msg instanceof SeatLostEvent) {
++            if (msg instanceof SeatLostEvent seatLost) {
+                 if (isActiveChannel(ctx.channel())) {
+-                    onSeatLost();
++                    if (seatLost.isSeatStillHeld()) {
++                        onSeatStillHeld();
++                    } else {
++                        onSeatLost();
++                    }
+                 }
+                 return;
+             }
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/event/SeatLostEvent.java b/forge-gui/src/main/java/forge/gamemodes/net/event/SeatLostEvent.java
+index 3baebb09..8c2d0cd1 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/event/SeatLostEvent.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/event/SeatLostEvent.java
+@@ -8,16 +8,36 @@ import forge.gamemodes.net.server.RemoteClient;
+  * Replaces the prior "infer seat-lost from any LobbyUpdateEvent during
+  * RECONNECTING" heuristic, which fired spuriously on the lobby update that
+  * normally accompanies a successful resume.
++ *
++ * <p>{@link #isSeatStillHeld()} marks the transient case: the seat is still held by
++ * the player's previous connection, which the server has not yet seen drop. The
++ * client should keep retrying rather than give up.
+  */
+ public final class SeatLostEvent implements NetEvent {
++    // Unchanged on purpose: adding a field is a compatible change, so stock and patched
++    // builds still read each other's event (stock reads it as a plain seat-lost).
+     private static final long serialVersionUID = 1L;
+ 
++    private final boolean seatStillHeld;
++
++    public SeatLostEvent() {
++        this(false);
++    }
++
++    public SeatLostEvent(final boolean seatStillHeld) {
++        this.seatStillHeld = seatStillHeld;
++    }
++
++    public boolean isSeatStillHeld() {
++        return seatStillHeld;
++    }
++
+     @Override
+     public void updateForClient(final RemoteClient client) {
+     }
+ 
+     @Override
+     public String toString() {
+-        return "SeatLost";
++        return seatStillHeld ? "SeatLost(held; retry)" : "SeatLost";
+     }
+ }
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/server/FServerManager.java b/forge-gui/src/main/java/forge/gamemodes/net/server/FServerManager.java
+index cc86b70d..2866d7d1 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/server/FServerManager.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/server/FServerManager.java
+@@ -320,6 +320,16 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+             timer.cancel();
+         }
+         reconnectTimers.clear();
++        // No one can reconnect once the server is gone: release any game thread waiting on a remote player
++        final List<RemoteClient> remaining = new ArrayList<>(clients.values());
++        remaining.addAll(disconnectedClients.values());
++        for (final RemoteClient client : remaining) {
++            final RemoteClientGuiGame gui = client.getGui();
++            if (gui != null) {
++                gui.abandon();
++            }
++            client.getReplyPool().abortForDisconnect();
++        }
+         disconnectedClients.clear();
+         clients.clear();
+         afkSlots.clear();
+@@ -919,6 +929,37 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+         return null;
+     }
+ 
++    /** The seated, registered client for {@code username} on a channel other than {@code except}. */
++    private Map.Entry<Channel, RemoteClient> findSeatHeldElsewhere(final String username, final Channel except) {
++        for (final Map.Entry<Channel, RemoteClient> entry : clients.entrySet()) {
++            final RemoteClient seated = entry.getValue();
++            if (entry.getKey() != except && seated.hasValidSlot() && username.equals(seated.getUsername())) {
++                return entry;
++            }
++        }
++        return null;
++    }
++
++    private static boolean sameHost(final SocketAddress a, final SocketAddress b) {
++        return a instanceof InetSocketAddress ia && b instanceof InetSocketAddress ib
++                && ia.getAddress() != null && ia.getAddress().equals(ib.getAddress());
++    }
++
++    /**
++     * Detach a seat from a connection the player has replaced, as if it had dropped:
++     * its later close is then ignored, and its pending questions wait for the new one.
++     */
++    private RemoteClient retireStaleConnection(final Channel stale, final RemoteClient seated) {
++        clients.remove(stale);
++        pauseRemoteClientGuiGame(seated);
++        seated.getReplyPool().abortForDisconnect();
++        // If anything is still listening there (e.g. a second copy of the game), tell it the
++        // seat moved, so it stops instead of reconnecting and taking the seat straight back.
++        seated.send(new SeatLostEvent());
++        stale.close();
++        return seated;
++    }
++
+     private void pauseRemoteClientGuiGame(final RemoteClient client) {
+         final RemoteClientGuiGame gui = client.getGui();
+         if (gui == null) { return; }
+@@ -969,6 +1010,9 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+             pch.getInputQueue().updateObservers();
+             netLog.info("[Reconnect] Replayed current prompt for slot {}", slotIndex);
+         }
++
++        // A dialog that was open when the connection dropped is now asked again
++        netGui.notifyResynced();
+     }
+ 
+     private void handleReconnectTimeout(final String username) {
+@@ -1012,6 +1056,8 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+         // Clear InputQueue to unblock the game thread (waiting on cdlDone)
+         pch.getInputQueue().clearInputs();
+         netLog.info("[Reconnect] Cleared input queue for slot {}", slotIndex);
++        // A dialog the game thread is still waiting on takes its default instead
++        ((RemoteClientGuiGame) pch.getGui()).abandon();
+         hostedMatch.tallyNextGameDecisions();
+     }
+ 
+@@ -1099,7 +1145,20 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+                 client.setUsername(username);
+ 
+                 // Check if this is a reconnecting player
+-                final RemoteClient disconnected = disconnectedClients.remove(username);
++                RemoteClient disconnected = disconnectedClients.remove(username);
++                // A dropped connection can look alive here until the heartbeat timeout fires,
++                // and the reconnect usually arrives first. Same address: retire the stale
++                // connection and reconnect now. Otherwise ask the client to keep retrying.
++                Map.Entry<Channel, RemoteClient> heldSeat = null;
++                if (disconnected == null && isMatchActive()) {
++                    heldSeat = findSeatHeldElsewhere(username, ctx.channel());
++                    if (heldSeat != null && sameHost(heldSeat.getValue().getRemoteAddress(), ctx.channel().remoteAddress())) {
++                        netLog.info("[Reconnect] {} logged in again while still seated (slot {}); replacing the stale connection",
++                                username, heldSeat.getValue().getIndex());
++                        disconnected = retireStaleConnection(heldSeat.getKey(), heldSeat.getValue());
++                        heldSeat = null;
++                    }
++                }
+                 if (disconnected != null) {
+                     // Cancel timeout timer
+                     final Timer timer = reconnectTimers.remove(username);
+@@ -1135,6 +1194,15 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+                         broadcast(new MessageEvent(String.format("%s has reconnected.", username)));
+                     }
+                     netLog.info("[Reconnect] Player reconnected: {}", username);
++                } else if (heldSeat != null) {
++                    // Seat still held by a connection from another address. Its heartbeat
++                    // timeout frees it for reconnect shortly; the client keeps retrying.
++                    netLog.info("[Reconnect] {} is still seated on another connection (slot {}); asking the client to retry",
++                            username, heldSeat.getValue().getIndex());
++                    if (client != null) {
++                        broadcastTo(new SeatLostEvent(true), client);
++                    }
++                    ctx.close();
+                 } else if (isMatchActive()) {
+                     // Match is in progress and this user isn't on the disconnected list —
+                     // either their reconnect window expired, or they were never in this match.
+@@ -1244,9 +1312,17 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+                 return;
+             }
+ 
+-            // Cancel any pending replies immediately to unblock game thread
+-            netLog.info("[Disconnect] Canceling pending replies for disconnected client");
+-            client.getReplyPool().cancelAll();
++            if (isMatchActive() && client.hasValidSlot()) {
++                // Pause before releasing the game thread, so a pending question waits for the
++                // reconnect and is asked again instead of being answered with nothing.
++                pauseRemoteClientGuiGame(client);
++                netLog.info("[Disconnect] Holding pending questions for reconnect");
++                client.getReplyPool().abortForDisconnect();
++            } else {
++                // Cancel any pending replies immediately to unblock game thread
++                netLog.info("[Disconnect] Canceling pending replies for disconnected client");
++                client.getReplyPool().cancelAll();
++            }
+ 
+             final String username = client.getUsername();
+             final int playerIndex = client.getIndex();
+@@ -1258,8 +1334,7 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+                     && localLobby.getCurrentEvent().getPhase() == EventPhase.DRAFTING;
+ 
+             if (isMatchActive() && client.hasValidSlot()) {
+-                // Match is active — pause, store for reconnect, run 5-minute reclaim timer.
+-                pauseRemoteClientGuiGame(client);
++                // Match is active — paused above; store for reconnect, run 5-minute reclaim timer.
+                 disconnectedClients.put(username, client);
+ 
+                 // Start periodic countdown timer (ticks every 30s)
+@@ -1282,7 +1357,10 @@ public final class FServerManager implements IHasForgeLog, HostingServer.Server
+ 
+                 broadcast(MessageEvent.warning(
+                     String.format("%s disconnected. Waiting %s for reconnect...", username, formatTime(RECONNECT_TIMEOUT_SECONDS))));
+-                lobbyListener.message(null, "(Host can use /skipreconnect to replace disconnected player with AI, or /skiptimeout to wait indefinitely.)", ChatMessage.MessageType.SYSTEM);
++                // Null-safe like dispatchToLocalListener: an exception here skipped the rest of disconnect handling
++                if (lobbyListener != null) {
++                    lobbyListener.message(null, "(Host can use /skipreconnect to replace disconnected player with AI, or /skiptimeout to wait indefinitely.)", ChatMessage.MessageType.SYSTEM);
++                }
+                 netLog.info("[Disconnect] Player disconnected mid-game: {} (slot {}). Waiting for reconnect.", username, playerIndex);
+             } else if (draftInProgress && client.hasValidSlot()) {
+                 // Draft is in progress — let the draft host own the grace window and
+diff --git a/forge-gui/src/main/java/forge/gamemodes/net/server/RemoteClient.java b/forge-gui/src/main/java/forge/gamemodes/net/server/RemoteClient.java
+index 6c72ae44..a481caa5 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/net/server/RemoteClient.java
++++ b/forge-gui/src/main/java/forge/gamemodes/net/server/RemoteClient.java
+@@ -48,11 +48,30 @@ public final class RemoteClient implements IToClient, IHasForgeLog {
+      * tracker to the new channel's pipeline so IdRef resolution keeps working.
+      */
+     public void swapChannel(final Channel newChannel) {
++        // Release anything still waiting on the old connection so it asks again on the new one
++        final ReplyPool previous = replies;
+         this.channel = newChannel;
+         this.replies = new ReplyPool();
++        previous.abortForDisconnect();
+         applyCodecTracker(newChannel);
+     }
+ 
++    /**
++     * A closed channel has no encoder and will never answer; sending to it only
++     * produced an error per message. Log the first drop per channel.
++     */
++    private boolean isClosed(final Channel ch, final NetEvent event) {
++        if (ch != null && ch.isActive()) {
++            return false;
++        }
++        if (ch != loggedClosedChannel) {
++            loggedClosedChannel = ch;
++            netLog.info("Dropping messages for {}: connection closed (first: {})", username, event);
++        }
++        return true;
++    }
++    private volatile Channel loggedClosedChannel;
++
+     /**
+      * Check if this client has been assigned a valid lobby slot.
+      * @return true if the client has a valid slot (index >= 0)
+@@ -88,6 +107,7 @@ public final class RemoteClient implements IToClient, IHasForgeLog {
+     @Override
+     public void send(final NetEvent event) {
+         final Channel ch = channel;
++        if (isClosed(ch, event)) return;
+         recordSendIfSaturated(ch);
+         final ByteBuf encoded = encodeOnCallingThread(event);
+         if (encoded == null) return;
+@@ -108,6 +128,7 @@ public final class RemoteClient implements IToClient, IHasForgeLog {
+     @Override
+     public void write(final NetEvent event) {
+         final Channel ch = channel;
++        if (isClosed(ch, event)) return;
+         recordSendIfSaturated(ch);
+         final ByteBuf encoded = encodeOnCallingThread(event);
+         if (encoded == null) return;
+@@ -127,13 +148,18 @@ public final class RemoteClient implements IToClient, IHasForgeLog {
+ 
+     @Override
+     public Object sendAndWait(final IdentifiableNetEvent event) {
+-        replies.initialize(event.getId());
++        // Read both once: a reconnect swaps them together, and a reply must come back on the pool it was asked on
++        final ReplyPool pool = replies;
+         final Channel ch = channel;
++        if (isClosed(ch, event)) {
++            return ReplyPool.DISCONNECTED;
++        }
++        pool.initialize(event.getId());
+         recordSendIfSaturated(ch);
+         final ByteBuf encoded = encodeOnCallingThread(event);
+         if (encoded == null) {
+-            replies.complete(event.getId(), null);
+-            return replies.get(event.getId());
++            pool.complete(event.getId(), null);
++            return pool.get(event.getId());
+         }
+         ch.writeAndFlush(encoded).addListener(f -> {
+             if (!f.isSuccess()) {
+@@ -145,10 +171,11 @@ public final class RemoteClient implements IToClient, IHasForgeLog {
+                     netLog.error("sendAndWait write failed for {} (event: {}, cause: {})",
+                             username, event, f.isCancelled() ? "cancelled" : "no cause");
+                 }
+-                replies.complete(event.getId(), null);
++                // The question never arrived; ask again once the connection is back
++                pool.complete(event.getId(), ReplyPool.DISCONNECTED);
+             }
+         });
+-        return replies.get(event.getId());
++        return pool.get(event.getId());
+     }
+ 
+     public String getUsername() {
+diff --git a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+index 62623dc4..88ada5fe 100644
+--- a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
++++ b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+@@ -730,6 +730,9 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
+ 
+         //override generic
+         List<SpellAbilityView> chosen = getGui().getChoices(title, num, num, Lists.newArrayList(spellViewCache.keySet()));
++        if (chosen == null) {
++            return result; // no answer (e.g. the player dropped)
++        }
+ 
+         for (SpellAbilityView view : chosen) {
+             if (spellViewCache.containsKey(view)) {
+@@ -2569,6 +2572,9 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
+                     vTargets.put(GameEntityView.get(e), amount);
+                 }
+                 final Map<Object, Integer> vResult = getGui().assignGenericAmount(vSource, vTargets, amount, true, label);
++                if (vResult == null) {
++                    return false; // no answer: treat as not divided, like a cancel
++                }
+                 for (GameEntity e : targets) {
+                     currentAbility.addDividedAllocation(e, vResult.get(GameEntityView.get(e)));
+                 }
+@@ -2854,10 +2860,34 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
+         final boolean selected = inputProxy.selectCard(cardView, otherCardViewsToSelect, triggerEvent);
+         if (selected) {
+             macros().addRememberedAction(new SelectCardAction(cardView));
++        } else {
++            refreshStaleRemoteView(cardView);
+         }
+         return selected;
+     }
+ 
++    private long lastStaleViewResync;
++
++    /**
++     * A network player clicked a card the game no longer has: their screen is out of
++     * date (e.g. after a reconnect), and every further click would be ignored the same
++     * way. Replace their view and re-show the current prompt.
++     */
++    private void refreshStaleRemoteView(final CardView cardView) {
++        if (cardView == null || !(getGui() instanceof forge.gamemodes.net.ProtocolGuiGame remote)
++                || getGame().findByView(cardView) != null) {
++            return;
++        }
++        final long now = System.currentTimeMillis();
++        if (now - lastStaleViewResync < 3000) {
++            return;
++        }
++        lastStaleViewResync = now;
++        netLog.warn("Card {} selected by {} is not in the game; refreshing their view", cardView.getId(), player.getName());
++        remote.resyncClientView();
++        getInputQueue().updateObservers();
++    }
++
+     @Override
+     public void selectStackItem(final StackItemView item) {
+         if (item == null || !(inputProxy.getInput() instanceof InputSelectStackItems)) {

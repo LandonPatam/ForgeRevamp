@@ -1,0 +1,178 @@
+{
+  "Bred for the Hunt": {
+    "path": "res://assets/cards/f7a5612ad96cfd7d2d73.jpg",
+    "source": "https://scryfall.com/card/40k/222/bred-for-the-hunt?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/e/7/e747ba48-8088-43be-b97b-ba5d1c23781f.jpg?1783920768",
+    "set": "40k",
+    "collector": "222",
+    "artist": "David Astruga"
+  },
+  "Cathars' Crusade": {
+    "path": "res://assets/cards/ca4ddd459a05e2503290.jpg",
+    "source": "https://scryfall.com/card/inr/483/cathars-crusade?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/3/e/3ebdc35c-019d-41d9-aff7-b317246aefb1.jpg?1783907975",
+    "set": "inr",
+    "collector": "483",
+    "artist": "Stephen Andrade"
+  },
+  "Custodi Soulbinders": {
+    "path": "res://assets/cards/745bba7648a4b8fbd456.jpg",
+    "source": "https://scryfall.com/card/cm2/23/custodi-soulbinders?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/7/3/731dec63-2aae-4256-9d1f-499f89ff0388.jpg?1783934773",
+    "set": "cm2",
+    "collector": "23",
+    "artist": "Karla Ortiz"
+  },
+  "Deepglow Skate": {
+    "path": "res://assets/cards/c32b4cbb4434f07c70f3.jpg",
+    "source": "https://scryfall.com/card/sld/2362/deepglow-skate?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/f/e/fef1c2a5-d5d8-4c1e-9b14-ee202a5f16b1.jpg?1783904219",
+    "set": "sld",
+    "collector": "2362",
+    "artist": "Ken Mitchroney"
+  },
+  "Disdainful Stroke": {
+    "path": "res://assets/cards/5fdaf799799ec9c3d622.jpg",
+    "source": "https://scryfall.com/card/soa/17/disdainful-stroke?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/3/a/3a057032-6ece-4aa7-8e99-df2a07359b2b.jpg?1783903929",
+    "set": "soa",
+    "collector": "17",
+    "artist": "Matthew G. Lewis"
+  },
+  "Elite Scaleguard": {
+    "path": "res://assets/cards/b6fd372fedcda840a781.jpg",
+    "source": "https://scryfall.com/card/cm2/27/elite-scaleguard?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/0/2/0271a2bc-19c8-423b-8702-d0bfe52b3580.jpg?1783934771",
+    "set": "cm2",
+    "collector": "27",
+    "artist": "Steve Prescott"
+  },
+  "Evolution Sage": {
+    "path": "res://assets/cards/789c164baea328e3e0fd.jpg",
+    "source": "https://scryfall.com/card/znc/65/evolution-sage?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/9/6/969bf351-c7df-4eb0-8065-9b8d5233f8f3.jpg?1783929469",
+    "set": "znc",
+    "collector": "65",
+    "artist": "Simon Dominic"
+  },
+  "Forgotten Ancient": {
+    "path": "res://assets/cards/837cef2ee1d6053746a8.jpg",
+    "source": "https://scryfall.com/card/fic/304/forgotten-ancient?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/d/e/de0f3be6-4e5b-4186-af49-fe3dadadcd01.jpg?1783906259",
+    "set": "fic",
+    "collector": "304",
+    "artist": "Esuthio"
+  },
+  "Ghave, Guru of Spores": {
+    "path": "res://assets/cards/4f485d029e11dd065d7d.jpg",
+    "source": "https://scryfall.com/card/sld/1137/ghave-guru-of-spores?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/8/1/817f782f-7e62-44b3-9bb2-3a57d34dfe67.jpg?1783918766",
+    "set": "sld",
+    "collector": "1137",
+    "artist": "Sean O'Neil"
+  },
+  "Hardened Scales": {
+    "path": "res://assets/cards/8ef23b99c95f645ce25f.jpg",
+    "source": "https://scryfall.com/card/pip/200/hardened-scales?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/7/e/7ecefd95-4eff-4403-83c1-c0c29a2f2a76.jpg?1783912355",
+    "set": "pip",
+    "collector": "200",
+    "artist": "Maxim Kostin"
+  },
+  "Juniper Order Ranger": {
+    "path": "res://assets/cards/c04fcbaa3270b5a4db96.jpg",
+    "source": "https://scryfall.com/card/cm2/158/juniper-order-ranger?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/1/3/138a8e44-a7b1-4ce3-983d-9b6d56056b83.jpg?1783934722",
+    "set": "cm2",
+    "collector": "158",
+    "artist": "Greg Hildebrandt"
+  },
+  "Kalonian Hydra": {
+    "path": "res://assets/cards/87c6a62cf756bce5b433.jpg",
+    "source": "https://scryfall.com/card/blc/226/kalonian-hydra?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/9/a/9a936dcd-684a-47f6-860c-2f3541d8286c.jpg?1783910665",
+    "set": "blc",
+    "collector": "226",
+    "artist": "Chris Rahn"
+  },
+  "Manifold Insights": {
+    "path": "res://assets/cards/34929ea4c82139d9b939.jpg",
+    "source": "https://scryfall.com/card/cm2/44/manifold-insights?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/e/9/e9c67dc7-dee8-4e62-bf4e-a371f1688975.jpg?1783934765",
+    "set": "cm2",
+    "collector": "44",
+    "artist": "Tommy Arnold"
+  },
+  "Merciless Eviction": {
+    "path": "res://assets/cards/cb486587d268c66ce2b1.jpg",
+    "source": "https://scryfall.com/card/cm2/160/merciless-eviction?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/a/3/a3b9f5dd-3f2b-4071-a22b-0d4fa39fb64b.jpg?1783934721",
+    "set": "cm2",
+    "collector": "160",
+    "artist": "Richard Wright"
+  },
+  "Migratory Route": {
+    "path": "res://assets/cards/bf4bec4f8fdba5f4d49f.jpg",
+    "source": "https://scryfall.com/card/scd/237/migratory-route?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/4/3/4356ddc7-32d3-4b46-88b0-5a4fe7fd2c46.jpg?1783918635",
+    "set": "scd",
+    "collector": "237",
+    "artist": "Winona Nelson"
+  },
+  "Putrefy": {
+    "path": "res://assets/cards/19c6dddbe35b1d6ef562.jpg",
+    "source": "https://scryfall.com/card/sld/2299/putrefy?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/9/7/97512e73-eac4-416b-8769-ee8a32309291.jpg?1783905088",
+    "set": "sld",
+    "collector": "2299",
+    "artist": "Yosuke Adachi"
+  },
+  "Simic Signet": {
+    "path": "res://assets/cards/4d22dced45425570289f.jpg",
+    "source": "https://scryfall.com/card/c21/262/simic-signet?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/4/c/4cb9a0b9-ddc8-4cdc-b352-0289c66f6fed.jpg?1783927506",
+    "set": "c21",
+    "collector": "262",
+    "artist": "Mike Sass"
+  },
+  "Spitting Image": {
+    "path": "res://assets/cards/c4d2b5575b7b97054259.jpg",
+    "source": "https://scryfall.com/card/cmr/453/spitting-image?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/f/5/f51d5d93-e4f7-4c83-a89f-f600668d2c29.jpg?1783928695",
+    "set": "cmr",
+    "collector": "453",
+    "artist": "Jim Nelson"
+  },
+  "Swords to Plowshares": {
+    "path": "res://assets/cards/f6dbe198ff3fdc021f47.jpg",
+    "source": "https://scryfall.com/card/fdc/53/swords-to-plowshares?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/3/6/36959f2b-75b5-4d68-b193-ada980822fd9.jpg?1789752896",
+    "set": "fdc",
+    "collector": "53",
+    "artist": "Jesper Ejsing"
+  },
+  "Sylvan Reclamation": {
+    "path": "res://assets/cards/81ca2650a27ecd10263d.jpg",
+    "source": "https://scryfall.com/card/znc/104/sylvan-reclamation?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/7/9/7999b93a-b18d-4d82-99ec-719e481b0c00.jpg?1783929456",
+    "set": "znc",
+    "collector": "104",
+    "artist": "Seb McKinnon"
+  },
+  "Thrummingbird": {
+    "path": "res://assets/cards/303dc63f0610e7c9853b.jpg",
+    "source": "https://scryfall.com/card/one/288/thrummingbird?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/3/c/3c9dd552-1020-4e82-ba51-f54b3938b920.jpg?1783917968",
+    "set": "one",
+    "collector": "288",
+    "artist": "Flavio Girón"
+  },
+  "Vulturous Zombie": {
+    "path": "res://assets/cards/87f9733190482a52d5da.jpg",
+    "source": "https://scryfall.com/card/cm2/170/vulturous-zombie?utm_source=api",
+    "image": "https://cards.scryfall.io/large/front/7/f/7f562c38-3c53-4dc6-9816-6e4be3355e2e.jpg?1783934716",
+    "set": "cm2",
+    "collector": "170",
+    "artist": "Greg Staples"
+  }
+}
