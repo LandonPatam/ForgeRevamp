@@ -1,6 +1,6 @@
 # Online play
 
-One player hosts; up to three friends join by typing the host's IP. Everyone runs this same build of ForgeUI.
+One player hosts; up to three friends join by typing the host's IP. Everyone runs the matching build of ForgeUI for their operating system. macOS and Windows use the same lobby and game protocols; neither side sends local filesystem paths to the other.
 Regular Forge cannot join: this does not use Forge's netplay protocol, and the `forge/` netplay patches are unrelated to it.
 
 ## Using it
@@ -66,8 +66,6 @@ Deck names and player names from joined players are displayed; deck files are pa
 ### Disconnects
 
 - A dropped player reconnects automatically with their token; everyone is told who they are waiting for. A newer connection replaces an older one.
-- Joining apps also save their host address, seat token, match identity and public session-disk details in `user://online-session.cfg`. After a crash/restart, the home screen offers a **Rejoin online game** session disk; selecting it creates a fresh connection and restores the same seat from the host's current snapshot. No hands, decisions or pending actions are saved or replayed. The host must still be running and the seat must not have timed out. Host recovery is not supported.
-- Leave game, confirmed Quit during a joined game, a completed match, a host-ended notice and a failed reconnect clear the saved credentials. **Forget session** removes an unconnected recovery disk locally; the host's absent-seat timeout still applies. Closing the app while the recovery disk is idle preserves it.
 - The game waits for an absent player's decisions. After 5 minutes absent (`ABSENT_LIMIT_NANOS`), or at once when they choose Leave game, the seat concedes. Forge's concede does not release a waiting prompt unless the game ends, so `releaseAbandonedInput` clears them, and `BridgeProtocol.fallbackAnswer` answers decisions.
 - The host's End Game or quit asks its owned child over loopback to send the session-scoped `sessionEnded` event before exiting. This is necessary on Windows, where force-terminating Java skips shutdown hooks. Only the host's local seat can request shutdown; remote seats are refused. If the child is unresponsive, the service still stops its owned process.
 - The child briefly waits for notified clients to close their sockets before teardown; Godot can discard unread payloads when a close handshake finishes. Clients drain available frames before deciding to reconnect and flush their own close after accepting the terminal notice.
@@ -76,7 +74,7 @@ Deck names and player names from joined players are displayed; deck files are pa
 
 ## Known limits
 
-- Nothing has run across a real internet connection yet: all automated checks connect over loopback on one machine.
+- A physical Mac-to-Windows game with lobby protocol version 4, and a connection from another internet connection, have not been verified after this update. Automated checks exercise native Apple Silicon and the bundled Intel runtime under Rosetta, including connecting to this Mac’s own LAN address; this does not test a remote machine’s firewall or the router from outside.
 - `OnlineLobby.NET_VERSION` only catches protocol changes when it is bumped. Different builds with the same number, or different card data, are not detected. Bump it when lobby or seat messages change.
 - There is no spectating, chat, or rejoining the lobby after the host stops hosting. A session is one match.
 - If the match process fails to start after the lobby has closed, joined players wait until their boot times out, and everyone must reconnect to a new session.
@@ -84,6 +82,46 @@ Deck names and player names from joined players are displayed; deck files are pa
 
 ## Checks
 
-- `node bridge/tools/online-check.mjs`: real service, lobby, seats, tokens, hidden hands, reconnect and leaving, including mid-decision. Runs with discovery off, so it contacts no router or address service.
+- `node bridge/tools/online-check.mjs`: real service, lobby, kicking/cancelling, full-roster rejection, Windows CRLF/UTF-8 deck changes, accepted-deck preservation, four-player seats, tokens, hidden hands, reconnect and leaving, including mid-decision. Runs with discovery off, so it contacts no router or address service.
 - `node bridge/tools/online-turn-check.mjs`: real host/friend/bot combat, inactive-seat button rejection and turn/phase agreement through later turns. Add `--four` for three humans and a bot, or `--response` to verify affordable combat tricks retain priority after attackers and blockers. Uses temporary fixtures and stops only its own JVM.
 - `node client-godot/tools/app-check.mjs --render`: `online_join_check` runs the joining path through the real application; the settings section is captured as `app-settings-online-*.png`.
+
+For the Mac payload, run `node bridge/tools/online-check.mjs --mac-app dist/ForgeUI-mac-optimized/ForgeUI.app --arch arm64`; repeat with `--arch x86_64` on an Intel Mac or with Rosetta. Add `--host-address <this-Mac-LAN-IPv4>` to exercise the non-loopback listener. The runtime, service classes and Forge assets come from that app; test libraries and logs are isolated. The source-mode runner now uses the platform classpath separator on Windows and macOS.
+
+`node client-godot/tools/online-app-check.mjs` tests the exported Mac application's real online joining, seat token, disk/table reveal and Leave cleanup with its bundled Java payload. Set `FORGE_EXPORTED_EXE` to check a different exported Mac app; `--intel` runs both the game and Java as x86_64. It reuses `ApplicationIntegration.online_join_check` for both hosting and joining, including physical PLAY readiness and automatic host launch, and does not contact a router. `--source` checks the local Mac sources before packaging. `--peer <Windows-LAN-IP>` runs the live joining check against a host running the matching lobby protocol version 4 build.
+
+Rejected lobby configuration is validated before replacing the accepted roster. Received deck changes are validated in a separate temporary file; a rejected replacement cannot overwrite the accepted deck. Successful changes remove the previous copy, and session cleanup removes all received decks. These fixes are shared by Windows and macOS builds and do not change the wire protocol.
+
+## Joining-player restart recovery
+
+A joining app saves its seat before loading and updates the match identity and
+public session-disk metadata from authoritative snapshots. After an app crash or
+restart, its ONLINE SESSION disk offers CLICK TO REJOIN. Click it to insert the
+disk and connect a fresh adapter to the same engine seat. PLAY and a second table
+remain blocked until that disk is resumed or forgotten. No queued action or
+answer is restored or replayed, and a different match identity is rejected.
+
+The host engine must still be running. Disconnected remote seats are held for up
+to five minutes before concession; client retries stop after 180 seconds. This
+does not recover solo games, host crashes, exited engines or expired seats.
+
+Only the endpoint, seat credential, match UUID, deck ID/name and public disk
+metadata are stored in `user://online-session.cfg`, using a temporary file and
+atomic rename. Never share that credential file. No hands, full snapshots,
+pending actions, answers or revision/request counters are saved. Leave, confirmed
+Quit from a connected/parked remote game, game over, host shutdown and terminal
+reconnect failure remove it. Closing the app with an idle recovery disk preserves
+it. Forget session removes only local recovery data; the host may continue to
+wait until the seat expires.
+
+`RemoteSessionChecks` verifies replacement saves on the current platform.
+`ApplicationIntegration.online_join_check` loses the joining scene and memory
+without Leave, restores the file/disk and rejoins the original seat through
+insertion, then verifies terminal host cleanup and reverse-role readiness.
+Run `node client-godot/tools/online-app-check.mjs --source` for this focused Mac
+flow, or the rendered full application suite. This simulated scene loss does not
+kill the Godot process. Manual acceptance: force-quit only the joining app, keep
+the host running, reopen and rejoin before five minutes; check the same hand,
+board, seat and decision, then check Leave, Forget session and an unavailable
+host. `node bridge/tools/solo-phase-check.mjs` separately checks real bot phase
+waits at M1/M2 on two turns each and DA/DB when observed.

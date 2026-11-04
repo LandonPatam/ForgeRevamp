@@ -46,6 +46,8 @@ func capture(name: String) -> void:
 	if capture_root.is_empty(): return
 	await app.get_tree().process_frame
 	await app.get_tree().process_frame
+	# macOS may stop drawing an unfocused test window between captures.
+	RenderingServer.call_deferred("force_draw")
 	await RenderingServer.frame_post_draw
 	app.get_viewport().get_texture().get_image().save_png(capture_root.path_join(name + ".png"))
 	if "--app-night-cinematics" in OS.get_cmdline_user_args() and name in ["app-main-menu", "app-play-button-press", "app-deck-insertion", "app-match-boot-rules", "app-match-boot-ready", "app-settings-zoom", "app-settings-zoom-late", "app-editor-scroll", "app-editor-return-scroll", "app-deck-editor", "app-deck-editor-1280"]:
@@ -59,11 +61,19 @@ func click_control(control: Control) -> void:
 		await app.get_tree().process_frame
 		return
 	var point := control.get_global_transform() * (control.size * 0.5)
+	if OS.get_name() == "macOS":
+		app.get_window().grab_focus()
+		app.get_viewport().warp_mouse(point)
+		await app.get_tree().create_timer(0.15).timeout
 	var motion := InputEventMouseMotion.new()
 	motion.position = point
 	motion.global_position = point
 	_pointer_input(motion)
 	await app.get_tree().process_frame
+	if OS.get_name() == "macOS":
+		var hovered := app.get_viewport().gui_get_hovered_control()
+		if control == app.start_button:
+			if not check(hovered == control, "Physical PLAY receives the pointer above the enlarged carousel"): return
 	var press := InputEventMouseButton.new()
 	press.position = point
 	press.global_position = point
@@ -82,6 +92,7 @@ func _pointer_input(event: InputEventMouse) -> void:
 		var local: InputEventMouse = event.duplicate()
 		local.position = app.computer.shelf.get_global_transform().affine_inverse() * event.position
 		app.computer.shelf._carousel_input(local)
+	elif OS.get_name() == "macOS": Input.parse_input_event(event)
 	else: app.get_viewport().push_input(event, true)
 
 func swipe_carousel(shift: float) -> void:
@@ -327,7 +338,7 @@ func hardware_controls_check() -> bool:
 		if not check(material != case_plastic and is_equal_approx(material.roughness, case_plastic.roughness) and is_equal_approx(material.normal_scale, case_plastic.normal_scale) and is_zero_approx(material.metallic) and not material.emission_enabled, "Keycaps match the case's matte plastic finish while keeping independent hover materials"): return false
 	for glyph in [world.play_arrow, world.settings_icon]:
 		if not check(glyph.material_override.albedo_color.is_equal_approx(world.KEY_INK) and not glyph.material_override.emission_enabled, "Pad-printed glyphs use charcoal without emission"): return false
-	if not check(world.play_legend.outline_size == 0 and world.play_legend.modulate.is_equal_approx(world.KEY_INK) and not world.play_activity_led.material_override.emission_enabled, "PLAY has no glow and its activity LED is unlit at rest"): return false
+	if not check(world.play_legend.outline_size == 0 and world.play_legend.modulate.is_equal_approx(world.KEY_INK) and (not world.play_activity_led.material_override.emission_enabled or is_zero_approx(world.play_activity_led.material_override.emission_energy_multiplier)), "PLAY has no glow and its activity LED is unlit at rest"): return false
 	if not await until(func(): return not app.computer.start_button.disabled and world.play_enabled, "PLAY is ready for hover verification"): return false
 	app.computer.start_button.mouse_exited.emit()
 	await app.get_tree().create_timer(0.12).timeout
@@ -399,12 +410,12 @@ func hardware_controls_check() -> bool:
 			deepest = minf(deepest, key.position.z)
 			if not captured and key.position.z < rest.z - 0.015:
 				captured = true
-				if play and not check(world.play_activity_led.material_override.emission_enabled, "PLAY briefly lights its teal activity dot while pressed"): return false
+				if play and not check(world.play_activity_led.material_override.emission_enabled and world.play_activity_led.material_override.emission_energy_multiplier > 0.0, "PLAY briefly lights its teal activity dot while pressed"): return false
 				await capture("app-play-key-depressed" if play else "app-settings-key-depressed")
 			await app.get_tree().process_frame
 		if not check(deepest < rest.z - 0.018 and key.position.is_equal_approx(rest), "Each key visibly depresses and springs back to its pocket"): return false
 	await app.get_tree().process_frame
-	if not check(not world.play_activity_led.material_override.emission_enabled, "The activity dot switches off after the press"): return false
+	if not check(is_zero_approx(world.play_activity_led.material_override.emission_energy_multiplier), "The activity dot switches off after the press"): return false
 	if not capture_root.is_empty():
 		var home: Transform3D = world.camera.transform
 		var fov: float = world.camera.fov
@@ -440,7 +451,7 @@ func settings_check() -> bool:
 	await capture("app-settings-zoom-late")
 	if not await until(func(): return app.view == "settings" and not app.busy, "zoom into Commander match settings"): return false
 	var settings: Control = app.match_settings
-	if not check(not app.computer.visible and settings.get_parent() == app.content and settings.value.bots.size() == 2, "Zoom hands off to an interactive settings screen"): return false
+	if not check(not app.computer.visible and settings.get_parent() == app.settings_viewport and settings.value.bots.size() == 2, "Zoom hands off to an interactive settings screen"): return false
 	if not check(settings.grid.columns == 1 and settings.rows[0].get_global_rect().position.x == settings.rows[1].get_global_rect().position.x, "The terminal uses aligned roster rows instead of player cards"): return false
 	settings.add_button.pressed.emit()
 	if not check(settings.value.bots.size() == 3 and settings.add_button.disabled, "Add bot supports a four-player Commander table"): return false
@@ -621,12 +632,12 @@ func enter_game(keyboard: bool = false) -> bool:
 	if not check(app.computer.phase == "materializing" and app.computer.world.camera.transform.is_equal_approx(app.computer.world.home_transform), "The board materializes on the stationary monitor"): return false
 	if not await until(func(): return app.computer.phase == "zooming", "camera zoom starts after the board settles"): return false
 	if not await until(func(): return app.game.transition_reveal, "cards and UI begin fading only after the monitor zoom"): return false
-	if not check(not app.computer.visible and app.busy and app.game.get_parent() == app.content and is_zero_approx(app.game.table_backdrop.cinematic_tint), "UI fades over the gray grid after the fullscreen handoff"): return false
+	if not check(not app.computer.visible and app.busy and app.game.get_parent() == app.game_surface.viewport and is_zero_approx(app.game.table_backdrop.cinematic_tint), "UI fades over the gray grid after the fullscreen handoff"): return false
 	await app.get_tree().create_timer(0.2).timeout
 	if not check(app.game.presentation_alpha > 0.0 and app.game.presentation_alpha < 1.0, "Foreground UI uses a gradual fade"): return false
 	await capture("app-ui-fade-in")
 	if not await until(func(): return app.game != null and app.view == "game", "monitor zoom completes into the playable Commander scene"): return false
-	if not check(app.computer.inserted and app.game.get_parent() == app.content and not app.computer.visible, "The inserted deck transitions from monitor rendering to native fullscreen input"): return false
+	if not check(app.computer.inserted and app.game.get_parent() == app.game_surface.viewport and not app.computer.visible, "The inserted deck transitions from monitor rendering to scaled fullscreen input"): return false
 	if not check(app.game.token_artwork.shared_images == app.images, "Visible gameplay artwork must use the same bounded queue and textures as deck warmup"): return false
 	if not check(not app.game.transition_preview and app.game.modal.modulate.a > 0.0 and app.game.opening_hand.modulate.a > 0.0, "Pending game decisions become visible only after the camera zoom completes"): return false
 	var disk: Node3D = app.computer.world.disk
@@ -735,6 +746,7 @@ func online_join_check() -> bool:
 	hosting.set_ready(true)
 	if not await until(func(): return hosting.is_ready(), "host readies first"): return false
 	if not check(not app.remote_game and not app.busy, "Host readiness alone never starts a joined player"): return false
+	await capture("app-online-before-ready")
 	await click_control(app.start_button)
 	if not await until(func(): return app.net.is_ready(), "PLAY marks the joined player ready"): return false
 	if not check(app.start_button.disabled and app.start_button.tooltip_text == "Ready - waiting for the other players", "A ready player sees their waiting state"): return false
@@ -757,30 +769,35 @@ func online_join_check() -> bool:
 	var state: Dictionary = app.game.snapshot
 	if not check(state.players.size() == 2 and state.players[0].name == "Joining player" and state.players[1].name == "Online host", "The joined player sits at their own seat, facing the host"): return false
 	await capture("app-online-joined-table")
+	if not check(not app.remote_store.read().is_empty(), "Joined seat is persisted before a disconnect"): return false
+	var original_session: String = app.game.adapter.session
+	var original_seat: int = app.game.adapter.state.players[0].engineId
 	var saved: Dictionary = app.remote_store.read()
-	var engine_session: String = app.game.adapter.session
-	if not check(saved.get("session_id", "") == engine_session and not saved.get("token", "").is_empty(), "Joined seat credentials persist before a crash"): return false
-	# Drop the client scene and all reconnect memory without sending Leave. The
-	# host stays alive, just as it does when a joining player's process crashes.
+	if not check(saved.session_id == original_session and saved.keys().size() == 5 and saved.deck.keys().size() == 2 and not saved.info.has("players"), "Persistence contains only credentials, real match identity and sanitized public metadata"): return false
+	# Lose the scene and reconnect memory without sending Leave, as in a crash.
 	await app.request_leave_game()
-	app.game.adapter.socket.close()
-	app.game.adapter.socket.poll()
 	app.game.get_parent().remove_child(app.game)
 	app.game.queue_free()
 	app.game = null
-	app.remote_resume = {}
-	app.remote_token = ""
+	app.game_surface.queue_free()
+	app.game_surface = null
+	await app.get_tree().process_frame
 	app.remote_game = false
+	app.remote_token = ""
+	app.remote_resume.clear()
+	app.match_deck.clear()
 	app.parked = false
-	app.match_deck = {}
 	app._restore_remote_session()
-	app.show_menu()
-	if not check(app.parked and app.game == null and app.remote_game and app.computer.session_disk != null and app.start_button.disabled, "A fresh client restores only a Resume disk and reserves the saved seat"): return false
+	app._update_status()
+	if not check(app.parked and app.game == null and is_instance_valid(app.computer.session_disk) and app.start_button.disabled, "Saved credentials restore a recovery disk and reserve PLAY"): return false
+	if not check(app.computer.session_disk.end_button.text == "Forget session" and app.computer.session_disk.state_lines[3].text == "CLICK TO REJOIN", "Recovery disk offers rejoin and forget"): return false
+	if not check(app.computer.session_disk.is_visible_in_tree() and app.computer.session_disk.modulate.a > 0.99, "The recovery disk is visible and fully opaque"): return false
+	await app.get_tree().create_timer(0.2).timeout
 	await capture("app-online-recovered-session")
-	app.resume_game()
-	if not await until(func(): return app.view == "game" and not app.busy and app.game != null, "the recovered disk reconnects and reveals the host's table"): return false
-	if not check(app.game.adapter.session == engine_session and app.game.snapshot.players[0].name == "Joining player", "Crash recovery rejoins the same match and seat from a fresh authoritative snapshot"): return false
-	if not check(app.game.adapter.pending.is_empty() and app.game.adapter.pending_answer == -1, "Recovered clients never replay a pending action or answer"): return false
+	await app.resume_game()
+	if not await until(func(): return app.view == "game" and not app.busy and app.game.snapshot.get("connectionReady", false), "saved seat rejoins through insertion"): return false
+	if not check(app.game.adapter.session == original_session and app.game.adapter.state.players[0].engineId == original_seat, "Recovery preserves the authoritative session and seat"): return false
+	if not check(app.game.adapter.pending.is_empty() and app.game.adapter.pending_answer == -1 and app.game.adapter.request_counter == 0, "Recovery never recreates an action or answer"): return false
 	await capture("app-online-recovered-table")
 	app.request_end_game()
 	if not check(app.confirm.title == "Leave online game?", "A joined player leaves rather than ends the game"): return false
@@ -789,9 +806,32 @@ func online_join_check() -> bool:
 	if not check(not stopped.has("error"), "The host's engine stops"): return false
 	if not await until(func(): return app.game == null and not app.busy and not app.ending_session and app.computer.session_disk == null, "host stop automatically returns the joined app home"): return false
 	if not check(remote_adapter.ended and remote_adapter.seat_token.is_empty() and not app.remote_game and app.remote_token.is_empty() and app.net.is_idle(), "Host stop clears the joined table, token and lobby without a confirmation"): return false
-	if not check(app.remote_store.read().is_empty(), "Host stop removes persisted reconnect credentials"): return false
 	if not await until(func(): return app.computer.world.play_enabled, "Play ready after the host ends an online game"): return false
+	if not check(app.remote_store.read().is_empty() and not FileAccess.file_exists(app.remote_store.path), "Host stop removes saved credentials"): return false
 	await capture("app-online-host-ended-home")
+	# An idle disk may be forgotten without claiming to concede or stopping a host.
+	var idle := {"url": "ws://127.0.0.1:1/ws", "token": "fixture-only", "session_id": "unavailable-fixture", "deck": {"id": app.selected_id, "name": "Recovery fixture"}, "info": {"name": "Recovery fixture", "reconnect": true}}
+	var stop_count := [0]
+	var count_stop := func(_id, operation, _result):
+		if operation == "match.stop": stop_count[0] += 1
+	app.api.response.connect(count_stop)
+	if not check(app.remote_store.save(idle) == OK, "Idle recovery fixture saves"): return false
+	app._restore_remote_session()
+	app._update_status()
+	app.request_end_game()
+	if not check(app.confirm.title == "Forget online session?" and app.confirm.ok_button_text == "Forget session", "An idle disk explains local-only forgetting"): return false
+	app.confirm.confirmed.emit()
+	if not await until(func(): return not app.busy and not app.ending_session and app.computer.session_disk == null, "forget consumes the recovery disk"): return false
+	if not check(app.remote_store.read().is_empty() and not app.remote_game and stop_count[0] == 0, "Forget clears only local recovery data"): return false
+	# Exercise the existing timeout through the application's terminal cleanup path.
+	if not check(app.remote_store.save(idle) == OK, "Unavailable recovery fixture saves"): return false
+	app._restore_remote_session()
+	app.resume_game()
+	if not await until(func(): return app.game != null, "unavailable rejoin creates a fresh adapter"): return false
+	app.game.adapter.offline_seconds = app.game.adapter.REMOTE_TIMEOUT_SECONDS
+	if not await until(func(): return app.game == null and not app.busy and not app.ending_session, "unavailable host closes the recovery session"): return false
+	if not check(app.remote_store.read().is_empty() and app.status_message.contains("no longer available") and stop_count[0] == 0, "Terminal retry failure clears credentials and reports its reason without stopping a host"): return false
+	app.api.response.disconnect(count_stop)
 	# Reverse the roles: the real application hosts and must launch itself when
 	# the other player's final PLAY arrives, without a second host click.
 	var original_preferences: Dictionary = app.match_preferences.duplicate(true)
@@ -805,6 +845,14 @@ func online_join_check() -> bool:
 	await click_control(app.start_button)
 	if not await until(func(): return app.net.is_ready(), "the application host presses PLAY"): return false
 	if not check(app.game == null and not app.busy and app.computer.phase == "idle", "Host PLAY rebounds and waits without inserting a disk"): return false
+	await capture("app-online-host-ready")
+	await app.open_match_settings()
+	await app.get_tree().create_timer(0.2).timeout
+	if not check(app.match_settings.roster_scroll.size.y >= 180, "The 2x lobby keeps seated players visible in a short window"): return false
+	await capture("app-online-host-ready-settings")
+	app.match_settings.page_scroll.scroll_vertical = int(app.match_settings.page_scroll.get_v_scroll_bar().max_value)
+	await capture("app-online-host-ready-settings-footer")
+	await app.close_match_settings()
 	hosting.set_ready(true)
 	if not await until(func(): return not remote_start.is_empty(), "the last ready player automatically launches the host"): return false
 	var hosted_status: Dictionary = {}
@@ -872,9 +920,12 @@ func end_with_format(from_game: bool) -> bool:
 	return true
 
 func run(root: Control) -> void:
+	if "--app-online-check" in OS.get_cmdline_user_args():
+		await load("res://tests/OnlineApplicationCheck.gd").new().run(root)
+		return
 	app = root
-	preload("res://tests/RemoteSessionChecks.gd").new().run(app.remote_store.path + ".checks")
 	app.api.response.connect(_fixture_match_artwork)
+	preload("res://tests/RemoteSessionChecks.gd").new().run(app.remote_store.path + ".checks")
 	await preload("res://tests/MatchBootLogChecks.gd").new().run(app)
 	await preload("res://tests/FormatLogChecks.gd").new().run(app)
 	if not check(preload("res://tests/CardAccentChecks.gd").run(), "Card accent handles artwork, borders, neutral cards, minor highlights and hue wrap"): return
@@ -1031,7 +1082,7 @@ func run(root: Control) -> void:
 	if not check(app.editor.file_dialog == null and app.editor.images == app.images and app.editor.api == app.api, "First entry reuses shared services and defers filesystem UI"): return
 	var editor_shelf: Control = app.computer.shelf
 	if not await editor_precon_check(): return
-	if not check(is_equal_approx(editor_shelf.disk_height(), home_disk_height), "Editor floppies retain their main menu size"): return
+	if not check(editor_shelf.disk_height() >= 210 and editor_shelf.disk_height() <= home_disk_height, "Editor floppies fit the workspace while home floppies retain their larger readable size"): return
 	var color_index: int = editor_shelf.selected_index
 	var colored_id: String = editor_shelf.decks[color_index].id
 	var selected_before_color: String = app.editor.draft.id
@@ -1108,6 +1159,22 @@ func run(root: Control) -> void:
 	if not check(app.computer.selected_id == app.editor.draft.id and app.selected_id == app.editor.draft.id, "Editor and carousel selection remain synchronized"): return
 	app.editor.name_edit.text = "Unsaved editor draft"
 	app.editor.name_edit.text_changed.emit("Unsaved editor draft")
+	app.computer.shelf.grab_focus()
+	app.editor.name_edit.grab_focus()
+	app.editor.name_edit.caret_column = 7
+	for code in [KEY_LEFT, KEY_RIGHT]:
+		var event := InputEventKey.new()
+		event.keycode = code
+		event.pressed = true
+		Input.parse_input_event(event)
+		await app.get_tree().process_frame
+		if not check(app.editor.name_edit.caret_column == (6 if code == KEY_LEFT else 7), "Arrow keys move the deck name caret"): return
+		if not check(not app.editor.overlay.visible and not app.editor.pending_switch and app.editor.draft.id == app.computer.selected_id, "Editing a deck name never navigates the carousel or opens the unsaved switch prompt"): return
+		event = InputEventKey.new()
+		event.keycode = code
+		Input.parse_input_event(event)
+		await app.get_tree().process_frame
+	app.editor.name_edit.release_focus()
 	app.computer.deck_selected.emit(app.decks.find(app.decks.filter(func(deck): return deck.id == first_editor_id)[0]))
 	if not check(app.editor.pending_switch and app.editor.overlay.visible, "Switching carousel decks protects unsaved edits"): return
 	app.editor.switch_cancel_button.pressed.emit()

@@ -7,7 +7,7 @@ const root=fileURLToPath(new URL('../..',import.meta.url));
 const artifacts=join(root,'client-godot/artifacts');
 mkdirSync(artifacts,{recursive:true});writeFileSync(join(artifacts,'.gdignore'),'');
 const before=process.argv.includes('--before');
-const godot=spawn(process.env.FORGE_GODOT_PATH||join(root,'.tools/godot/Godot_v4.7.2-stable_win64.exe'),['--path',join(root,'client-godot'),'--script','res://tests/DriveGeometryChecks.gd','--resolution','1600x1000','--position','-20000,-20000','--',...(before?['--drive-before']:[])],{cwd:root,windowsHide:true});
+const godot=spawn(process.env.FORGE_GODOT_PATH||join(root,process.platform==='darwin'?'.tools/godot/Godot.app/Contents/MacOS/Godot':'.tools/godot/Godot_v4.7.2-stable_win64.exe'),['--path',join(root,'client-godot'),'--script','res://tests/DriveGeometryChecks.gd','--resolution','1600x1000',...(process.platform==='darwin'?[]:['--position','-20000,-20000']),'--',...(before?['--drive-before']:[])],{cwd:root,windowsHide:true});
 let output='',errors='';
 godot.stdout.on('data',b=>{output+=b;process.stdout.write(b)});
 godot.stderr.on('data',b=>{errors+=b;process.stderr.write(b);if(/SCRIPT ERROR:|Parse Error:|Failed to load script/.test(errors))godot.kill()});

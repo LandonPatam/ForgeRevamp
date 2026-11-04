@@ -3,7 +3,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
 import {mkdirSync, mkdtempSync, writeFileSync, readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {join} from 'node:path';
+import {join,delimiter} from 'node:path';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const artifacts = join(root, 'client-godot/artifacts');
 mkdirSync(artifacts, {recursive:true});
@@ -23,7 +23,7 @@ await new Promise(r=>server.close(r));
 const jvm = spawnSync('java',['-XshowSettings:properties','-version'],{encoding:'utf8',windowsHide:true});
 const home = jvm.stderr.match(/^\s*java.home = (.+)$/m)?.[1].trim();
 if (!home) throw Error('Cannot locate Java');
-const bridge = spawn(join(home,'bin/java.exe'),['-Xmx4g','-cp','target/classes;target/lib/*','forgeui.bridge.LibraryMain','--assets','../forge/forge-gui','--port',String(port),'--library-root',fixture],{cwd:join(root,'bridge'),windowsHide:true});
+const bridge = spawn(join(home,'bin',process.platform==='win32'?'java.exe':'java'),['-Xmx4g','-cp',['target/classes','target/lib/*'].join(delimiter),'forgeui.bridge.LibraryMain','--assets','../forge/forge-gui','--port',String(port),'--library-root',fixture],{cwd:join(root,'bridge'),windowsHide:true});
 let log = '', godot;
 for (const stream of [bridge.stdout,bridge.stderr]) stream.on('data',b=>{log+=b;writeFileSync(join(artifacts,'library-bridge.log'),log)});
 try {
@@ -31,7 +31,7 @@ try {
   while (!log.includes('Library ready:') && Date.now()<deadline && bridge.exitCode===null) await new Promise(r=>setTimeout(r,200));
   if (!log.includes('Library ready:')) throw Error('Library failed to start');
   const render = process.argv.includes('--render');
-  godot = spawn(process.env.FORGE_GODOT_PATH || join(root,'.tools/godot/Godot_v4.7.2-stable_win64.exe'),['--path',join(root,'client-godot'),'res://scenes/DeckCollection.tscn',...(render?['--resolution','1600x1000','--position','-20000,-20000']:['--headless']),'--',`--library-url=ws://127.0.0.1:${port}/ws`,'--library-check',...(process.argv.includes('--online-images')?['--library-online-images']:[]),`--library-fixture=${fixture}`,`--library-capture=${render?artifacts:''}`],{cwd:root,windowsHide:true});
+  godot = spawn(process.env.FORGE_GODOT_PATH || join(root,process.platform==='darwin'?'.tools/godot/Godot.app/Contents/MacOS/Godot':'.tools/godot/Godot_v4.7.2-stable_win64.exe'),['--path',join(root,'client-godot'),'res://scenes/DeckCollection.tscn',...(render?['--resolution','1600x1000',...(process.platform==='darwin'?[]:['--position','-20000,-20000'])]:['--headless']),'--',`--library-url=ws://127.0.0.1:${port}/ws`,'--library-check',...(process.argv.includes('--online-images')?['--library-online-images']:[]),`--library-fixture=${fixture}`,`--library-capture=${render?artifacts:''}`],{cwd:root,windowsHide:true});
   let output='',errors='';
   godot.stdout.on('data',b=>{output+=b;process.stdout.write(b)});
   godot.stderr.on('data',b=>{errors+=b;process.stderr.write(b);if(/SCRIPT ERROR:|Parse Error:|Failed to load script/.test(errors))godot.kill()});

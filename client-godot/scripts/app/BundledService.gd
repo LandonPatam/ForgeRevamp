@@ -10,10 +10,18 @@ var data_dir := ""
 var error := ""
 
 static func root() -> String:
+	if OS.has_feature("macos"):
+		return OS.get_executable_path().get_base_dir().path_join("../Resources").simplify_path()
 	return OS.get_executable_path().get_base_dir()
 
+static func java_path() -> String:
+	if OS.has_feature("macos"):
+		var architecture := "arm64" if Engine.get_architecture_name() == "arm64" else "x86_64"
+		return root().path_join("runtime/" + architecture + "/Contents/Home/bin/java")
+	return root().path_join("runtime/bin/java.exe")
+
 static func available() -> bool:
-	return OS.has_feature("template") and FileAccess.file_exists(root().path_join("runtime/bin/java.exe"))
+	return OS.has_feature("template") and FileAccess.file_exists(java_path())
 
 func start(port: int) -> bool:
 	var base := root()
@@ -21,13 +29,14 @@ func start(port: int) -> bool:
 	DirAccess.make_dir_recursive_absolute(data_dir)
 	status_file = data_dir.path_join("startup.json")
 	if FileAccess.file_exists(status_file): DirAccess.remove_absolute(status_file)
-	var classpath := base.path_join("service/classes") + ";" + base.path_join("service/lib/*")
-	pid = OS.create_process(base.path_join("runtime/bin/java.exe"), [
+	var separator := ";" if OS.has_feature("windows") else ":"
+	var classpath := base.path_join("service/classes") + separator + base.path_join("service/lib/*")
+	pid = OS.create_process(java_path(), [
 		"-Xmx4g", "-cp", classpath, "forgeui.bridge.LibraryMain",
 		"--assets", base.path_join("forge-gui"), "--port", str(port),
 		"--startup-status", status_file, "--data-dir", data_dir, "--parent-pid", str(OS.get_process_id())])
 	if pid <= 0:
-		error = "The Forge service could not be started. Reinstall the game, or check that antivirus has not blocked runtime\\bin\\java.exe."
+		error = "The Forge service could not be started. Reinstall the game and check that the bundled Java runtime is allowed to run."
 		return false
 	return true
 

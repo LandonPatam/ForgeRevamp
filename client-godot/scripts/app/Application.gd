@@ -8,6 +8,9 @@ const Computer = preload("res://scripts/app/ComputerMenu.gd")
 const Startup = preload("res://scripts/app/StartupScreen.gd")
 const Bundled = preload("res://scripts/app/BundledService.gd")
 const EditorScene = preload("res://scenes/DeckCollection.tscn")
+const ScaledSurface = preload("res://scripts/app/ScaledSurface.gd")
+var editor_surface: SubViewportContainer
+var game_surface: SubViewportContainer
 var api: Node
 var images: Node
 var client_owner := ""
@@ -58,13 +61,14 @@ var match_preferences: Dictionary = {}
 var bot_deck_catalog: Dictionary = {}
 var match_settings: Control
 var settings_viewport: SubViewport
+var settings_surface: SubViewportContainer
 var net: Node
 ## This game is someone else's: its engine runs on the host, so this app starts and stops nothing.
 var remote_game := false
 var remote_token := ""
-var remote_end_pending := ""
 var remote_store = preload("res://scripts/app/RemoteSession.gd").new()
 var remote_resume: Dictionary = {}
+var remote_end_pending := ""
 ## Hosting a table with joined players: ending it ends it for them too.
 var online_table := false
 
@@ -97,6 +101,10 @@ func _ready() -> void:
 		if arg in ["--smoke", "--live-check", "--mock"] or arg.begins_with("--live=") or arg.begins_with("--visual-checks=") or arg.begins_with("--capture="):
 			get_tree().change_scene_to_file.call_deferred("res://scenes/Main.tscn")
 			return
+	if "--app-check" in OS.get_cmdline_user_args():
+		for arg in OS.get_cmdline_user_args():
+			if arg.begins_with("--library-fixture="): remote_store.path = arg.trim_prefix("--library-fixture=").path_join("online-session.cfg")
+	_restore_remote_session()
 	theme = P.popup_theme()
 	theme.default_font = P.make_theme().default_font
 	client_owner = Crypto.new().generate_random_bytes(16).hex_encode()
@@ -117,12 +125,9 @@ func _ready() -> void:
 			api.url = arg.trim_prefix("--library-url=")
 			library_url_given = true
 		if arg.begins_with("--service-port="): service_port = int(arg.trim_prefix("--service-port="))
-		if arg == "--app-check": images.network_enabled = false
+		if arg in ["--app-check", "--ui-scale-check"]: images.network_enabled = false
 		if arg.begins_with("--startup-status="): startup_file = arg.trim_prefix("--startup-status=")
 		if arg == "--open-decks": open_editor_after_load = true
-		if arg.begins_with("--library-fixture=") and "--app-check" in OS.get_cmdline_user_args():
-			remote_store.path = arg.trim_prefix("--library-fixture=").path_join("online-session.cfg")
-	_restore_remote_session()
 	if not library_url_given and Bundled.available():
 		bundled = Bundled.new()
 		api.url = "ws://127.0.0.1:%d/ws" % service_port
@@ -165,6 +170,9 @@ func _ready() -> void:
 		if arg == "--app-check":
 			checks = load("res://tests/ApplicationIntegration.gd").new()
 			checks.run.call_deferred(self)
+	if "--ui-scale-check" in OS.get_cmdline_user_args():
+		checks = load("res://tests/UIScaleIntegration.gd").new()
+		checks.run.call_deferred(self)
 
 func _show_startup() -> void:
 	view = "loading"
@@ -343,7 +351,7 @@ func _ensure_computer() -> void:
 		computer.deck_inserted.connect(func():
 			if not pending_game_url.is_empty(): _show_game(pending_game_url))
 		content.add_child(computer)
-		if not remote_resume.is_empty(): computer.set_session_info(_session_info())
+		if parked: computer.set_session_info(_session_info())
 	computer.show()
 
 func _fill_decks() -> void:
@@ -396,7 +404,21 @@ func open_editor() -> void:
 		editor = EditorScene.instantiate()
 		editor.app_host = self
 		editor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		computer.add_child(editor)
+		editor_surface = ScaledSurface.new()
+		editor_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		computer.add_child(editor_surface)
+		editor_surface.attach(editor)
+		editor.visibility_changed.connect(func():
+			if is_instance_valid(editor_surface): editor_surface.visible = editor.visible)
+		var sync_editor_popup := func():
+			if is_instance_valid(editor_surface):
+				var popup_open: bool = editor.overlay.visible or editor.context_menu.visible
+				editor_surface.full_input = popup_open
+				# Embedded popup menus also need the whole outer surface to own
+				# input, including where it overlaps the carousel/header.
+				editor_surface.z_index = 80 if popup_open else 0
+		editor.overlay.visibility_changed.connect(sync_editor_popup)
+		editor.context_menu.visibility_changed.connect(sync_editor_popup)
 		computer.editor_surface = editor
 	else:
 		if editor.online: editor._request("list")
@@ -419,12 +441,14 @@ func open_match_settings() -> void:
 	computer.phase = "settings_press"
 	computer.shelf.enabled = false
 	await computer.world.click_settings()
-	settings_viewport = SubViewport.new()
-	settings_viewport.disable_3d = true
-	settings_viewport.size = Vector2i(size)
-	settings_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	settings_surface = ScaledSurface.new()
+	settings_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	content.add_child(settings_surface)
+	settings_surface.hide()
+	settings_surface.sync_size()
+	settings_viewport = settings_surface.viewport
+	settings_surface.render_when_hidden = true
 	settings_viewport.gui_disable_input = true
-	add_child(settings_viewport)
 	match_settings = preload("res://scripts/app/MatchSettings.gd").new()
 	match_settings.value = match_preferences.duplicate(true)
 	match_settings.api = api
@@ -433,7 +457,6 @@ func open_match_settings() -> void:
 	match_settings.selected_deck = selected_id
 	match_settings.net = net
 	match_settings.game_running = game != null or parked
-	match_settings.size = size
 	match_settings.saved.connect(func(value):
 		if preload("res://scripts/app/MatchPreferences.gd").save(value) != OK:
 			match_settings.error_label.text = "Could not save match settings. Try again."
@@ -444,14 +467,13 @@ func open_match_settings() -> void:
 	match_settings.canceled.connect(func():
 		net.configure(match_preferences)
 		close_match_settings())
-	settings_viewport.add_child(match_settings)
+	settings_surface.attach(match_settings)
 	# The key has already rebounded and rendered; retuning overlaps the zoom.
 	computer.zoom_into_settings(settings_viewport.get_texture())
 	await computer.world.animation.finished
-	match_settings.reparent(content, false)
-	match_settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	settings_viewport.queue_free()
-	settings_viewport = null
+	settings_surface.show()
+	settings_surface.render_when_hidden = false
+	settings_viewport.gui_disable_input = false
 	computer.hide()
 	view = "settings"
 	busy = false
@@ -462,14 +484,9 @@ func close_match_settings() -> void:
 	view = "settings_transition"
 	for child in match_settings.get_children():
 		if child is Window: child.hide()
-	settings_viewport = SubViewport.new()
-	settings_viewport.disable_3d = true
-	settings_viewport.size = Vector2i(size)
-	settings_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	settings_surface.hide()
+	settings_surface.render_when_hidden = true
 	settings_viewport.gui_disable_input = true
-	add_child(settings_viewport)
-	match_settings.reparent(settings_viewport, false)
-	match_settings.size = size
 	await get_tree().process_frame
 	await get_tree().process_frame
 	computer.world.prepare_settings_zoom_out(settings_viewport.get_texture(), size)
@@ -477,7 +494,8 @@ func close_match_settings() -> void:
 	await computer.zoom_out_of_settings(settings_viewport.get_texture())
 	computer.reset_launch()
 	if is_instance_valid(computer.session_disk): computer.session_disk.modulate.a = 1.0
-	settings_viewport.queue_free()
+	settings_surface.queue_free()
+	settings_surface = null
 	settings_viewport = null
 	match_settings = null
 	busy = false
@@ -500,8 +518,12 @@ func _launch_ready_online_match() -> void:
 
 ## Everyone is ready. Bring this app back to the computer, then run the normal disk insertion.
 func _begin_remote_match(url: String, token: String) -> void:
-	# Save as soon as the lobby hands off the seat, including crashes during insertion.
-	remote_resume = {"url": url, "token": token, "session_id": "", "deck": {"id": net.deck_id, "name": selected_deck.get("name", "Online game")}, "info": {"name": selected_deck.get("name", "Online game"), "reconnect": true, "decision": "Rejoin while the host is still running. Disconnected seats are held for up to five minutes."}}
+	if parked or game != null: return
+	var joining: Array = decks.filter(func(deck): return deck.id == net.deck_id)
+	match_deck = joining[0].duplicate(true) if not joining.is_empty() else selected_deck.duplicate(true)
+	remote_game = true
+	remote_token = token
+	remote_resume = {"url": url, "token": token, "session_id": "", "deck": {"id": match_deck.get("id", ""), "name": match_deck.get("name", "Commander")}, "info": _remote_disk_info({})}
 	_save_remote_session()
 	while busy: await get_tree().process_frame
 	if view == "settings": close_match_settings()
@@ -700,32 +722,6 @@ func _show_game(url: String, resuming := false) -> void:
 		game.adapter.session_ended.connect(_remote_session_ended)
 	await _reveal_game(resuming)
 
-func _save_remote_session() -> void:
-	if remote_store.save(remote_resume) != OK:
-		push_warning("Could not save the online reconnect details.")
-
-func _restore_remote_session() -> void:
-	remote_resume = remote_store.read()
-	if remote_resume.is_empty(): return
-	remote_game = true
-	remote_token = remote_resume.token
-	match_deck = remote_resume.get("deck", {}).duplicate(true)
-	parked = true
-	if is_instance_valid(computer): computer.set_session_info(_session_info())
-
-func _remember_remote_snapshot(state: Dictionary) -> void:
-	if not remote_game or remote_resume.is_empty() or not state.get("connectionReady", false): return
-	if state.get("game", {}).get("gameOver", false):
-		remote_store.clear()
-		return
-	var info := {"name": match_deck.get("name", "Online game"), "turn": state.get("game", {}).get("turn", 1), "phase": state.get("game", {}).get("phase", ""), "life": state.players[0].life if not state.get("players", []).is_empty() else 40, "reconnect": true, "decision": "Rejoin while the host is still running. Disconnected seats are held for up to five minutes."}
-	var identity: String = state.get("sessionId", "")
-	if remote_resume.get("info", {}) == info and remote_resume.get("session_id", "") == identity: return
-	remote_resume.info = info
-	remote_resume.session_id = identity
-	remote_resume.deck = {"id": match_deck.get("id", ""), "name": match_deck.get("name", "Online game")}
-	_save_remote_session()
-
 func _table_can_reveal(snapshot: Dictionary, resuming: bool) -> bool:
 	if snapshot.get("players", []).size() < 2 or not snapshot.get("connectionReady", false): return false
 	if snapshot.get("tableReady", false): return true
@@ -742,23 +738,23 @@ func _reveal_game(resuming: bool) -> void:
 	if editor != null: editor.hide()
 	computer.show()
 	game.set_transition_preview(true)
-	game.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	game.size = size
-	transition_viewport = SubViewport.new()
-	transition_viewport.disable_3d = true
-	transition_viewport.size = Vector2i(size)
-	transition_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	if not is_instance_valid(game_surface):
+		game_surface = ScaledSurface.new()
+		game_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		content.add_child(game_surface)
+	game_surface.hide()
+	game_surface.sync_size()
+	transition_viewport = game_surface.viewport
+	game_surface.render_when_hidden = true
 	transition_viewport.gui_disable_input = true
-	add_child(transition_viewport)
 	if game.get_parent() == null:
-		transition_viewport.add_child(game)
+		game_surface.attach(game)
 		game.library_return_button = game._terminal_button("Main menu", request_return_to_menu)
 		game.rail.add_child(game.library_return_button)
 		game.rail.move_child(game.library_return_button, 0)
 		var end_button: Button = game._terminal_button("End game", request_end_game)
 		game.rail.add_child(end_button)
 		game.rail.move_child(end_button, 1)
-	else: game.reparent(transition_viewport, false)
 	game.process_mode = Node.PROCESS_MODE_INHERIT
 	game.show()
 	await get_tree().process_frame
@@ -786,13 +782,12 @@ func _reveal_game(resuming: bool) -> void:
 		computer.boot_log.rows[5] = "AWAITING PLAYER INPUT"
 	computer.zoom_started.connect(game.begin_transition_zoom, CONNECT_ONE_SHOT)
 	await computer.zoom_into_game(transition_viewport.get_texture())
-	game.reparent(content, false)
-	game.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	game.position = Vector2.ZERO
+	game_surface.show()
+	game_surface.render_when_hidden = false
+	transition_viewport.gui_disable_input = false
 	game._layout_board.call_deferred()
 	computer.hide()
 	if resuming: computer.set_session_info({})
-	transition_viewport.queue_free()
 	transition_viewport = null
 	pending_game_url = ""
 	var reveal_blocker := Control.new()
@@ -814,8 +809,7 @@ func request_return_to_menu() -> void:
 	confirm.cancel_button_text = "Keep playing"
 	confirm.confirmed.connect(func(): confirm.hide(); confirm.queue_free(); request_leave_game())
 	confirm.canceled.connect(func(): confirm.hide(); confirm.queue_free())
-	add_child(confirm)
-	confirm.popup_centered()
+	_show_confirmation()
 
 func request_leave_game() -> void:
 	if busy or game == null: return
@@ -833,6 +827,7 @@ func request_leave_game() -> void:
 		var pixels := get_viewport().get_texture().get_image()
 		if pixels != null and not pixels.is_empty(): frame = ImageTexture.create_from_image(pixels)
 	game.hide()
+	game_surface.hide()
 	if match_deck.has("id"):
 		selected_id = match_deck.id
 		computer.select_id(selected_id)
@@ -841,14 +836,11 @@ func request_leave_game() -> void:
 	show_menu()
 
 func resume_game() -> void:
-	if busy or ending_session or not parked: return
-	if game == null and remote_resume.is_empty(): return
+	if busy or ending_session or not parked or (game == null and remote_resume.is_empty()): return
 	busy = true
 	parked = false
-	if game == null:
-		await _show_game(remote_resume.url, true)
-		return
-	await _reveal_game(true)
+	if game == null: await _show_game(remote_resume.url, true)
+	else: await _reveal_game(true)
 
 func request_end_game() -> void:
 	if busy or ending_session or (game == null and remote_resume.is_empty()): return
@@ -857,19 +849,18 @@ func request_end_game() -> void:
 	confirm.title = "Leave online game?" if remote_game else "End Commander game?"
 	confirm.dialog_text = "You will concede and the others will play on without you." if remote_game else ("This ends the game for everyone at your table." if online_table else "End this game and remove its session disk?")
 	confirm.ok_button_text = "Leave game" if remote_game else "End game"
-	confirm.cancel_button_text = "Keep playing"
 	if game == null:
 		confirm.title = "Forget online session?"
-		confirm.dialog_text = "Remove this saved reconnect? The host may keep waiting until your seat times out."
+		confirm.dialog_text = "This removes your saved seat from this computer. The host may keep waiting until the disconnected seat times out."
 		confirm.ok_button_text = "Forget session"
+	confirm.cancel_button_text = "Keep playing"
 	confirm.confirmed.connect(func():
 		confirm.hide()
 		confirm.queue_free()
 		if game == null: _forget_remote_session()
 		else: _end_confirmed_session())
 	confirm.canceled.connect(func(): confirm.hide(); confirm.queue_free())
-	add_child(confirm)
-	confirm.popup_centered()
+	_show_confirmation()
 
 ## A won game continues straight into the end-of-game wipe, without the confirmation.
 func end_after_victory() -> void:
@@ -886,7 +877,8 @@ func _clear_ended_match() -> void:
 		game.get_parent().remove_child(game)
 		game.queue_free()
 	game = null
-	if is_instance_valid(transition_viewport): transition_viewport.queue_free()
+	if is_instance_valid(game_surface): game_surface.queue_free()
+	game_surface = null
 	transition_viewport = null
 	parked = false
 	match_deck.clear()
@@ -899,19 +891,10 @@ func _clear_ended_match() -> void:
 	online_table = false
 	if not ending_session: computer.set_session_info({})
 
-func _forget_remote_session() -> void:
-	busy = true
-	ending_session = true
-	_clear_ended_match()
-	await computer.format_session_disk(func(): return true)
-	ending_session = false
-	busy = false
-	show_menu()
-
 func _remote_session_ended(message: String) -> void:
-	if not remote_game or ending_session: return
 	remote_store.clear()
-	status_message = message
+	remote_resume.clear()
+	if not remote_game or ending_session: return
 	remote_end_pending = message
 	# Allow an insertion/zoom already in progress to release its scene safely.
 	while busy: await get_tree().process_frame
@@ -939,6 +922,7 @@ func _end_confirmed_session() -> void:
 		if pixels != null and not pixels.is_empty(): frame = ImageTexture.create_from_image(pixels)
 	game.hide()
 	view = "transition"
+	if is_instance_valid(game_surface): game_surface.hide()
 	var deck_id_for_return: String = str(match_deck.get("id", selected_id))
 	# Stop exactly once, concurrently with the visual. Data above is frozen.
 	if remote_game:
@@ -983,6 +967,18 @@ func _update_status() -> void:
 		elif parked and not busy: status_label.text = "LIVE GAME SET ASIDE - SELECT SESSION DISK"
 		elif (net.is_joined() or net.is_hosting()) and not busy: status_label.text = "READY - WAITING FOR ALL PLAYERS" if net.is_ready() else "ONLINE LOBBY - PRESS PLAY TO READY UP"
 
+func _show_confirmation() -> void:
+	# Confirmations can open over home, the editor, settings or a parked game.
+	# Give them a modal surface of their own so they always use the same 2x UI.
+	var surface := ScaledSurface.new()
+	surface.z_index = 500
+	surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(surface)
+	surface.attach(confirm)
+	confirm.tree_exited.connect(func():
+		if is_instance_valid(surface): surface.queue_free())
+	confirm.popup_centered()
+
 func _request_quit() -> void:
 	if busy: return
 	if is_instance_valid(confirm) and confirm.visible: return
@@ -1009,5 +1005,47 @@ func _request_quit() -> void:
 		else: get_tree().quit()
 		confirm.queue_free())
 	confirm.canceled.connect(func(): confirm.hide(); confirm.queue_free())
-	add_child(confirm)
-	confirm.popup_centered()
+	_show_confirmation()
+
+func _restore_remote_session() -> void:
+	remote_resume = remote_store.read()
+	if remote_resume.is_empty(): return
+	remote_game = true
+	remote_token = remote_resume.token
+	match_deck = remote_resume.deck.duplicate(true)
+	parked = true
+	if is_instance_valid(computer): computer.set_session_info(_session_info())
+
+func _remote_disk_info(state: Dictionary) -> Dictionary:
+	var players: Array = state.get("players", [])
+	return {"name": match_deck.get("name", "Commander"), "turn": state.get("game", {}).get("turn", 1), "phase": state.get("game", {}).get("phase", ""), "life": players[0].get("life", 40) if not players.is_empty() else 40, "reconnect": true, "decision": "Rejoin while the host is still running. Disconnected seats are held for up to five minutes."}
+
+func _save_remote_session() -> void:
+	if remote_store.save(remote_resume) != OK:
+		push_warning("Could not save online session recovery data.")
+
+func _remember_remote_snapshot(state: Dictionary) -> void:
+	if not remote_game or not state.get("connectionReady", false): return
+	if state.get("game", {}).get("gameOver", false):
+		remote_store.clear()
+		remote_resume.clear()
+		return
+	if remote_resume.is_empty(): return
+	var next := remote_resume.duplicate(true)
+	next.session_id = state.get("sessionId", "")
+	next.deck = {"id": match_deck.get("id", ""), "name": match_deck.get("name", "Commander")}
+	next.info = _remote_disk_info(state)
+	if next != remote_resume:
+		remote_resume = next
+		_save_remote_session()
+
+func _forget_remote_session() -> void:
+	busy = true
+	ending_session = true
+	_clear_ended_match()
+	end_cleanup_done = true
+	await computer.format_session_disk(func(): return true)
+	end_visual_done = true
+	ending_session = false
+	busy = false
+	show_menu()

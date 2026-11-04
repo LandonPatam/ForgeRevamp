@@ -1,10 +1,23 @@
 extends Control
-var lines: Array = []
+var last_pointer := Vector2.INF
+var lines: Array = []:
+	set(value):
+		if lines == value: return
+		lines = value
+		last_pointer = Vector2.INF
+		# Fixed combat arrows use the retained drawing until their endpoints
+		# change. A live targeting arrow still follows every pointer movement.
+		set_process(lines.any(func(line): return line[1] == Vector2.INF))
+		queue_redraw()
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_process(lines.any(func(line): return line[1] == Vector2.INF))
 
 func _process(_delta: float) -> void:
+	var pointer := get_global_mouse_position()
+	if pointer == last_pointer: return
+	last_pointer = pointer
 	queue_redraw()
 
 func _draw() -> void:

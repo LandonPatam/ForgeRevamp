@@ -10,6 +10,9 @@ var hot := false
 var ink := P.TEXT
 var deck_tile := false
 var selected := false
+var choose_on_release := false
+var selection_pressed := false
+var context_pressed := false
 var title := ""
 var subtitle := ""
 var deck_name_label: Label
@@ -39,12 +42,22 @@ func _ready() -> void:
 	mouse_entered.connect(func(): hot = true; queue_redraw(); hovered.emit(card))
 	mouse_exited.connect(func(): hot = false; queue_redraw())
 	gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			context_requested.emit(card)
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
 			accept_event()
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			chosen.emit(card)
-			accept_event())
+			if event.pressed: context_pressed = true
+			elif context_pressed:
+				context_pressed = false
+				# Opening a Window on mouse-down steals the release and leaves
+				# this tile holding mouse capture behind the next dialog.
+				if Rect2(Vector2.ZERO, size).has_point(event.position): context_requested.emit(card)
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			accept_event()
+			if choose_on_release:
+				if event.pressed: selection_pressed = true
+				elif selection_pressed:
+					selection_pressed = false
+					if Rect2(Vector2.ZERO, size).has_point(event.position): chosen.emit(card)
+			elif event.pressed: chosen.emit(card))
 	resized.connect(queue_redraw)
 
 func _layout_deck_name() -> void:

@@ -57,6 +57,7 @@ func run(ui: Control, directory: String = "") -> void:
 	ui._apply_state(state)
 	assert(not ui.modal.visible and ui.prompt_body.visible, "Forge completion should close the chooser and restore stack controls")
 	await _die_variants(ui, state, directory)
+	await _normalized_die_variants(ui, state)
 	await _shared_toss(ui, state, directory)
 	ui.live = was_live
 	if saved_cancel == null:
@@ -71,7 +72,7 @@ func _die_variants(ui: Control, state: Dictionary, directory: String) -> void:
 		var sample := state.duplicate(true)
 		sample.players = []
 		for index in range(count):
-			sample.players.append({"id": 40 + index, "name": ["Alex", "Ada", "Bryn", "Cyra"][index]})
+			sample.players.append({"id": 40 + index, "name": ["Alex", "Ada", "Bryn", "Cyra"][index], "life": 40})
 		var panel := CoinTossDialog.new()
 		ui._prepare_modal()
 		ui.modal_center.add_child(panel)
@@ -81,6 +82,8 @@ func _die_variants(ui: Control, state: Dictionary, directory: String) -> void:
 			sample.players.sort_custom(func(a, b): return int(a.id) < int(b.id))
 			sample.startingToss = {"id": 8000 + count, "winnerId": 40 + winner, "winnerSeat": winner, "winnerName": sample.players[winner].name, "choosing": true}
 			panel.present(sample)
+			await ui.get_tree().process_frame
+			assert(Rect2(Vector2.ZERO, ui.get_viewport_rect().size).encloses(panel.get_global_rect()), "Starting rolls must fit the Mac viewport")
 			assert(panel.winner_index == winner and panel.outcome_marks.size() == count)
 			assert(panel.hint.text.contains("1 in %d" % count))
 			# The viewer's local seat comes first, but die lettering stays fixed.
@@ -150,3 +153,30 @@ func _shared_toss(ui: Control, state: Dictionary, directory: String) -> void:
 	ui._clear_live_session()
 	assert(not panel.is_processing() and ui.coin_toss_seen.is_empty(), "Session cleanup cancels an unfinished coin without marking the next session's toss seen")
 	print("PASS: shared coin animation, named winner/waiting state, seat-specific controls, snapshot/reconnect stability and session cleanup")
+
+func _normalized_die_variants(ui: Control, state: Dictionary) -> void:
+	# Exercise LiveAdapter's real engine-ID to viewer-local seat conversion.
+	for count in [3, 4]:
+		var raw := {"type": "state", "protocolVersion": 2, "sessionId": "roll-fixture", "revision": 1, "me": 40, "game": {"activePlayer": 40, "turn": 0}, "players": [], "stack": [], "combat": [], "asks": [], "prompt": {}, "log": []}
+		for index in range(count):
+			raw.players.append({"id": 40 + index, "name": ["Alex", "Ada", "Bryn", "Cyra"][index], "life": 40, "mana": {}, "zones": {"Battlefield": [], "Hand": [], "Command": [], "Graveyard": [], "Exile": []}})
+		var panel := CoinTossDialog.new()
+		ui._prepare_modal()
+		ui.modal_center.add_child(panel)
+		ui.modal_panel = panel
+		panel.set_process(false)
+		for winner in range(count):
+			raw.startingToss = {"id": 8100 + count, "winnerId": 40 + winner, "winnerName": raw.players[winner].name, "choosing": true}
+			for viewer in range(count):
+				raw.me = 40 + viewer
+				var adapter = load("res://scripts/bridge/LiveAdapter.gd").new()
+				var normalized: Dictionary = adapter.normalize(raw)
+				normalized.connectionReady = true
+				panel.present(normalized)
+				assert(panel.winner_index == winner, "Normalized viewer seats must preserve the authoritative winning die face")
+				assert(panel.outcome_marks == ["A1", "A2", "B", "C"].slice(0, count), "Initials must follow stable engine IDs on every device")
+				assert(panel.local_winner == (viewer == winner), "Only the winner may choose the starting player")
+		ui._close_modal()
+		panel.queue_free()
+		await ui.get_tree().process_frame
+	print("PASS: starting-roll identity across real normalized snapshots for every winner and viewer")

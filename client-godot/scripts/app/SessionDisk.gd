@@ -70,17 +70,14 @@ func update_info(value: Dictionary) -> void:
 	info = value.duplicate(true)
 	if printed == null: return
 	var name_value: String = info.get("name", "Commander")
-	printed.text = "LIVE SESSION\n------------\n%s" % name_value.left(36)
-	var values := ["TURN %d" % int(info.get("turn", 1)), str(info.get("phase", "")), "LIFE %d" % int(info.get("life", 40)), "CLICK TO RESUME"]
+	var reconnect: bool = info.get("reconnect", false)
+	printed.text = "%s\n------------\n%s" % ["ONLINE SESSION" if reconnect else "LIVE SESSION", name_value.left(36)]
+	end_button.text = "Forget session" if reconnect else "End Game"
+	var values := ["TURN %d" % int(info.get("turn", 1)), str(info.get("phase", "")), "LIFE %d" % int(info.get("life", 40)), "CLICK TO REJOIN" if reconnect else "CLICK TO RESUME"]
 	for index in range(state_lines.size()): state_lines[index].text = values[index]
 	details.text = "RESUME GAME\nTurn %d · %s\n%s" % [int(info.get("turn", 1)), str(info.get("phase", "")), name_value]
+	if reconnect: details.text = "REJOIN ONLINE GAME\n" + name_value
 	resume_button.tooltip_text = str(info.get("decision", "Resume the same live game"))
-	if info.get("reconnect", false):
-		printed.text = "ONLINE SESSION\n------------\n%s" % name_value.left(36)
-		state_lines[3].text = "CLICK TO REJOIN"
-		details.text = "REJOIN ONLINE GAME\n" + name_value
-		end_button.text = "Forget session"
-	else: end_button.text = "End Game"
 	disk.face_view.render_target_update_mode = SubViewport.UPDATE_ONCE
 	disk.queue_redraw()
 
@@ -88,7 +85,10 @@ func _layout() -> void:
 	if disk == null: return
 	resume_button.size = Vector2(size.x, size.x)
 	disk.size = Vector2(size.x, size.x)
-	details.position = Vector2(0, size.x + 8)
-	details.size = Vector2(size.x, 76)
-	end_button.position = Vector2(22, size.x + 88)
-	end_button.size = Vector2(size.x - 44, 34)
+	var ui_scale := maxf(1.0, size.x / 235.0)
+	details.add_theme_font_size_override("font_size", roundi(16 * ui_scale))
+	end_button.add_theme_font_size_override("font_size", roundi(16 * ui_scale))
+	details.position = Vector2(0, size.x + 8 * ui_scale)
+	details.size = Vector2(size.x, 76 * ui_scale)
+	end_button.position = Vector2(22 * ui_scale, size.x + 88 * ui_scale)
+	end_button.size = Vector2(size.x - 44 * ui_scale, 34 * ui_scale)

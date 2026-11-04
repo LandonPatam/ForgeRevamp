@@ -1,6 +1,7 @@
 extends PanelContainer
 ## Shared presentation of Forge's starting toss. Never submits a game decision.
 signal settled
+const Avatar = preload("res://scripts/ui/PlayerAvatar.gd")
 const P = preload("res://scripts/ui/Palette.gd")
 const SPIN_SECONDS := 1.8
 const TOTAL_SECONDS := 2.65
@@ -14,36 +15,46 @@ var coin: Control
 var title: Label
 var status: Label
 var hint: Label
+var portrait: Control
+var layout_scale := 1.0
 var participants: Label
 var players: Array = []
 var outcome_marks: Array[String] = []
 var winner_index := 0
 
 func _ready() -> void:
-	P.style_popup(self, 28)
-	custom_minimum_size.x = 520
+	# The Mac table uses a 2x UI viewport; keep the full panel inside short windows.
+	layout_scale = clampf((get_viewport_rect().size.y - 80.0) / 760.0, 0.42, 1.0)
+	P.style_popup(self, roundi(28 * layout_scale))
+	custom_minimum_size.x = 520 * layout_scale
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
+	column.add_theme_constant_override("separation", roundi(12 * layout_scale))
 	add_child(column)
 	title = _label("COIN TOSS", 30)
 	column.add_child(title)
 	coin = Control.new()
-	coin.custom_minimum_size = Vector2(460, 210)
+	coin.custom_minimum_size = Vector2(460, 210) * layout_scale
 	coin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	coin.draw.connect(_draw_coin)
 	column.add_child(coin)
 	status = _label("Flipping...", 25)
-	status.custom_minimum_size = Vector2(460, 64)
+	status.custom_minimum_size = Vector2(460, 64) * layout_scale
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	column.add_child(status)
+	portrait = Avatar.new()
+	portrait.portrait_only = true
+	portrait.custom_minimum_size = Vector2(136, 88) * layout_scale
+	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(portrait)
 	participants = _label("", 16)
-	participants.custom_minimum_size = Vector2(460, 48)
+	participants.custom_minimum_size = Vector2(460, 48) * layout_scale
 	participants.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(participants)
 	hint = _label("The winner chooses who starts.", 16)
-	hint.custom_minimum_size.x = 460
-	hint.custom_minimum_size.y = 48
+	hint.custom_minimum_size.x = 460 * layout_scale
+	hint.custom_minimum_size.y = 48 * layout_scale
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_color_override("font_color", Color("85bfb2"))
 	column.add_child(hint)
@@ -53,7 +64,7 @@ func _label(text: String, font_size: int) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_font_size_override("font_size", roundi(font_size * layout_scale))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return label
 
@@ -64,7 +75,7 @@ func present(state: Dictionary) -> void:
 	connected = state.get("connectionReady", false)
 	players = state.get("players", []).duplicate(true)
 	# Snapshot seats rotate per viewer; engine IDs keep the die identical for all.
-	players.sort_custom(func(a, b): return int(a.id) < int(b.id))
+	players.sort_custom(func(a, b): return _engine_id(a) < _engine_id(b))
 	outcome_marks.clear()
 	var initials: Array[String] = []
 	for player in players:
@@ -73,16 +84,20 @@ func present(state: Dictionary) -> void:
 	var winner_id := int(toss.get("winnerId", -1))
 	var seat := int(toss.get("winnerSeat", -1))
 	if seat >= 0 and seat < state.get("players", []).size():
-		winner_id = int(state.players[seat].id)
+		winner_id = _engine_id(state.players[seat])
 	var key: Array[String] = []
 	for index in range(players.size()):
 		var mark := initials[index]
 		if initials.count(mark) > 1: mark += str(initials.slice(0, index + 1).count(mark))
 		outcome_marks.append(mark)
 		key.append("%s · %s" % [mark, players[index].name])
-		if int(players[index].id) == winner_id: winner_index = index
+		if _engine_id(players[index]) == winner_id: winner_index = index
 	participants.text = "\n".join(key) if players.size() > 2 else ""
+	if seat >= 0 and seat < state.get("players", []).size(): portrait.set_player(state.players[seat], false)
 	_update_text()
+
+func _engine_id(player: Dictionary) -> int:
+	return int(player.get("engineId", player.get("id", -1)))
 
 func _process(delta: float) -> void:
 	if complete: return
@@ -96,6 +111,7 @@ func _process(delta: float) -> void:
 func _update_text() -> void:
 	if status == null: return
 	var landed := elapsed >= SPIN_SECONDS
+	portrait.modulate.a = 1.0 if landed else 0.0
 	var dice := players.size() > 2
 	title.text = "%d-SIDED DIE" % players.size() if dice else "COIN TOSS"
 	status.text = str(toss.get("winnerName", "Player")) + (" won the roll" if dice else " won the toss") if landed else ("Rolling..." if dice else "Flipping...")
@@ -115,12 +131,12 @@ func _draw_coin() -> void:
 	var progress := clampf(elapsed / SPIN_SECONDS, 0.0, 1.0)
 	var spin := (1.0 - pow(1.0 - progress, 2.0)) * TAU * 4.0
 	var width := maxf(0.075, absf(cos(spin))) if progress < 1.0 else 1.0
-	var center := Vector2(coin.size.x * 0.5, 125 - sin(progress * PI) * 46)
-	coin.draw_set_transform(Vector2(coin.size.x * 0.5, 192), 0, Vector2(1, 0.16))
+	var center := Vector2(coin.size.x * 0.5, (125 - sin(progress * PI) * 46) * layout_scale)
+	coin.draw_set_transform(Vector2(coin.size.x * 0.5, 192 * layout_scale), 0, Vector2(1, 0.16) * layout_scale)
 	coin.draw_circle(Vector2.ZERO, 63, Color(0, 0, 0, 0.25))
-	coin.draw_set_transform(center + Vector2(4, 3), 0, Vector2(width, 1))
+	coin.draw_set_transform(center + Vector2(4, 3) * layout_scale, 0, Vector2(width, 1) * layout_scale)
 	coin.draw_circle(Vector2.ZERO, 66, Color("78542a"))
-	coin.draw_set_transform(center, 0, Vector2(width, 1))
+	coin.draw_set_transform(center, 0, Vector2(width, 1) * layout_scale)
 	coin.draw_circle(Vector2.ZERO, 66, Color("d9af60"))
 	coin.draw_arc(Vector2.ZERO, 60, 0, TAU, 80, Color("ffe3a2"), 3, true)
 	coin.draw_arc(Vector2.ZERO, 51, 0, TAU, 80, Color("9e7537"), 2, true)
@@ -152,9 +168,9 @@ func _draw_die() -> void:
 	var progress := clampf(elapsed / SPIN_SECONDS, 0.0, 1.0)
 	var remaining := pow(1.0 - progress, 2.3)
 	var orientation := Basis(Vector3.RIGHT, remaining * TAU * 2.0) * Basis(Vector3.UP, remaining * TAU * 3.0) * landing
-	var center := Vector2(coin.size.x * 0.5, 115 - sin(progress * PI) * 18)
-	var radius := 54.0 if count == 4 else 68.0
-	coin.draw_set_transform(Vector2(coin.size.x * 0.5, 192), 0, Vector2(1, 0.16))
+	var center := Vector2(coin.size.x * 0.5, (115 - sin(progress * PI) * 18) * layout_scale)
+	var radius := (54.0 if count == 4 else 68.0) * layout_scale
+	coin.draw_set_transform(Vector2(coin.size.x * 0.5, 192 * layout_scale), 0, Vector2(1, 0.16) * layout_scale)
 	coin.draw_circle(Vector2.ZERO, 70, Color(0, 0, 0, 0.25))
 	coin.draw_set_transform(Vector2.ZERO)
 	var surfaces: Array = []
@@ -179,11 +195,11 @@ func _draw_die() -> void:
 		coin.draw_colored_polygon(points, color)
 		var outline := points.duplicate()
 		outline.append(points[0])
-		coin.draw_polyline(outline, Color("eadbff"), 2.0, true)
+		coin.draw_polyline(outline, Color("eadbff"), 2.0 * layout_scale, true)
 		if surface.index < count and surface.light > 0.3:
 			var mark: String = outcome_marks[surface.index]
 			var font := get_theme_default_font()
-			var font_size := 34 if mark.length() == 1 else 27
+			var font_size := roundi((34 if mark.length() == 1 else 27) * layout_scale)
 			var extent := font.get_string_size(mark, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 			coin.draw_string(font, surface.midpoint + Vector2(-extent.x * 0.5, font_size * 0.34), mark, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color("231a36"))
 

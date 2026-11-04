@@ -36,6 +36,7 @@ const DIM := Color("4b9898")
 const DARK := Color("031013")
 var roster: PanelContainer
 var roster_scroll: ScrollContainer
+var page_scroll: ScrollContainer
 var roster_header: HBoxContainer
 var rows: Array[PanelContainer] = []
 var name_heading: Label
@@ -87,9 +88,14 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]: margin.add_theme_constant_override("margin_" + side, 30)
 	add_child(margin)
+	page_scroll = ScrollContainer.new()
+	page_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	margin.add_child(page_scroll)
 	var column := VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_theme_constant_override("separation", 12)
-	margin.add_child(column)
+	page_scroll.add_child(column)
 	var bar := HBoxContainer.new()
 	column.add_child(bar)
 	var system := _text(" FORGE/OS ", 15)
@@ -124,6 +130,7 @@ func _ready() -> void:
 		if title == "CALLSIGN": name_heading = label
 		roster_header.add_child(label)
 	roster_scroll = ScrollContainer.new()
+	roster_scroll.custom_minimum_size.y = 180
 	roster_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	roster_body.add_child(roster_scroll)
@@ -471,8 +478,8 @@ func _render_online() -> void:
 	server_field = null
 	host_button = null
 	join_button = null
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 14)
 	online_body.add_child(row)
 	row.add_child(_text("[ ONLINE ]", 15))
 	if net.is_hosting(): _online_hosting(row)
@@ -482,8 +489,11 @@ func _render_online() -> void:
 		var problem := _text("> " + str(net.error), 13, Color("ffc891"))
 		problem.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		online_body.add_child(problem)
+	for child in online_body.get_children():
+		if child is Label:
+			child.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
-func _online_idle(row: HBoxContainer, typed: String, had_focus: bool) -> void:
+func _online_idle(row: Container, typed: String, had_focus: bool) -> void:
 	host_button = _button("[F5] HOST SESSION", _host)
 	row.add_child(host_button)
 	var prompt := _text("SERVER IP>", 15, DIM)
@@ -491,6 +501,7 @@ func _online_idle(row: HBoxContainer, typed: String, had_focus: bool) -> void:
 	server_field = LineEdit.new()
 	server_field.text = typed
 	server_field.placeholder_text = "address from the host"
+	server_field.custom_minimum_size.x = 180
 	server_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	server_field.add_theme_font_size_override("font_size", 17)
 	server_field.text_submitted.connect(func(_text_value): _join())
@@ -505,7 +516,7 @@ func _online_idle(row: HBoxContainer, typed: String, had_focus: bool) -> void:
 		host_button.tooltip_text = "End the live game first"
 		join_button.tooltip_text = "End the live game first"
 
-func _online_hosting(row: HBoxContainer) -> void:
+func _online_hosting(row: Container) -> void:
 	var address: String = net.share_address()
 	var label := _text("HOSTING  //  FRIENDS TYPE THIS IP:", 15, DIM)
 	row.add_child(label)
@@ -524,7 +535,7 @@ func _online_hosting(row: HBoxContainer) -> void:
 	online_body.add_child(_text("> EVERY PLAYER: SAVE, THEN PRESS PLAY TO READY UP. STARTS WHEN ALL ARE READY.", 13, DIM))
 	online_body.add_child(_text("> HOST: " + ("READY" if net.is_ready() else "NOT READY"), 13, DIM))
 
-func _online_joined(row: HBoxContainer) -> void:
+func _online_joined(row: Container) -> void:
 	var label := _text("CONNECTED TO %s  //  %s" % [net.address, "READY - WAITING FOR ALL PLAYERS" if net.is_ready() else "SAVE, THEN PRESS PLAY TO READY UP"], 15)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.clip_text = true

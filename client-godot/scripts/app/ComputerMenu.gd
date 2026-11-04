@@ -106,7 +106,8 @@ func _ready() -> void:
 	add_child(container)
 	world_view = SubViewport.new()
 	world_view.own_world_3d = true
-	world_view.msaa_3d = Viewport.MSAA_4X
+	# Two samples keep Retina edges smooth without the four-sample render cost.
+	world_view.msaa_3d = Viewport.MSAA_2X
 	world_view.handle_input_locally = false
 	container.add_child(world_view)
 	world = World.new()
@@ -175,10 +176,11 @@ func _ready() -> void:
 	forge_star.draw.connect(func():
 		# Align the vector star to the text's visible capitals, avoiding the
 		# different baseline metrics of the font used for the star glyph.
-		var center := forge_star.size * 0.5 + Vector2(0, -2)
+		var glyph_scale := forge_star.size.y / 14.0
+		var center := forge_star.size * 0.5 + Vector2(0, -2) * glyph_scale
 		var points := PackedVector2Array()
 		for point in [Vector2(0, -6), Vector2(1.8, -1.8), Vector2(6, 0), Vector2(1.8, 1.8), Vector2(0, 6), Vector2(-1.8, 1.8), Vector2(-6, 0), Vector2(-1.8, -1.8)]:
-			points.append(center + point)
+			points.append(center + point * glyph_scale)
 		forge_star.draw_colored_polygon(points, Color.WHITE))
 	badge_row.add_child(forge_star)
 	var forge_name := _outside_label("FORGE", 13)
@@ -209,6 +211,9 @@ func _ready() -> void:
 	shelf.new_deck_requested.connect(func():
 		if phase == "idle" and is_instance_valid(editor_surface): editor_surface.create_from_carousel())
 	add_child(shelf)
+	# GUI picking follows sibling order, not z_index. Keep the physical keys
+	# after the enlarged carousel so its empty upper margin cannot eat clicks.
+	move_child(shelf, start_button.get_index())
 	resized.connect(_layout)
 	world_view.size_changed.connect(_position_play_button)
 	gui_input.connect(_monitor_input)
@@ -502,40 +507,59 @@ func select_id(id: String) -> void:
 
 func _layout() -> void:
 	if shelf == null: return
-	forge_badge.position = Vector2(34, 13)
-	forge_badge.size = Vector2(88, 26)
-	editor_button.size = Vector2(148, 26)
-	editor_button.position = Vector2((size.x - editor_button.size.x) * 0.5, 13)
-	quit_button.size = Vector2(90, 26)
-	quit_button.position = Vector2(size.x - quit_button.size.x - 34, 13)
-	light_switch.position = Vector2(size.x - 244, 9)
-	var filter_x := forge_badge.position.x + forge_badge.size.x + 12
+	# Size the surrounding controls for the actual viewport, including Retina
+	# windows, while leaving the physical computer and CRT projection alone.
+	var ui_scale := lerpf(clampf(size.x / 1500.0, 1.6, 2.2), 2.0, editor_progress)
+	var margin := 24.0 * ui_scale
+	var top := 13.0 * ui_scale
+	var compact := size.x < lerpf(1600.0, 1800.0, editor_progress)
+	forge_badge.position = Vector2(margin, top)
+	forge_badge.size = Vector2(88, 26) * ui_scale
+	var badge_row: HBoxContainer = forge_badge.get_child(0)
+	badge_row.add_theme_constant_override("separation", roundi(6 * ui_scale))
+	forge_star.custom_minimum_size = Vector2(14, 14) * ui_scale
+	forge_star.queue_redraw()
+	badge_row.get_child(1).add_theme_font_size_override("font_size", roundi(13 * ui_scale))
+	for button in [editor_button, quit_button] + filter_buttons.values():
+		button.add_theme_font_size_override("font_size", roundi(13 * ui_scale))
+	editor_button.size = Vector2(148, 26) * ui_scale
+	editor_button.position = Vector2((size.x - editor_button.size.x) * 0.5, top)
+	quit_button.size = Vector2(90, 26) * ui_scale
+	quit_button.position = Vector2(size.x - quit_button.size.x - margin, top)
+	light_switch.size = Vector2(104, 34) * ui_scale
+	light_switch.position = Vector2(quit_button.position.x - light_switch.size.x - 16 * ui_scale, top - 4 * ui_scale)
+	light_switch.queue_redraw()
+	var filter_x := margin if compact else forge_badge.position.x + forge_badge.size.x + 12 * ui_scale
 	for option in DECK_FILTERS:
 		var filter_button: Button = filter_buttons[option[0]]
-		filter_button.size = Vector2(52 if option[0] == "all" else 82, 26)
-		filter_button.position = Vector2(filter_x, 13)
-		filter_x += filter_button.size.x + 4
-	light_switch.size = Vector2(104, 34)
-	var height := clampf(size.y * 0.38, 290, 390)
+		filter_button.size = Vector2(52 if option[0] == "all" else 82, 26) * ui_scale
+		filter_button.position = Vector2(filter_x, top + (36 * ui_scale if compact else 0.0))
+		filter_x += filter_button.size.x + 4 * ui_scale
+	menu_frame.align_header([forge_badge, editor_button, quit_button, light_switch] + filter_buttons.values(), editor_button.get_rect().get_center().y)
+	var editor_height := clampf(size.y * 0.38, 290, 780)
+	var home_height := clampf(size.y * 0.42, 340, 820)
+	var height := lerpf(home_height, editor_height, editor_progress)
 	var home_top := size.y-height-10
 	var travel := (home_top-70)*editor_progress
 	shelf.night_visibility = 1.0 - smoothstep(0.2, 0.85, editor_progress)
 	# Clear the closer-framed case and its contact shadow above the editor.
-	world_container.position.y = -travel-200*editor_progress
+	world_container.position.y = -travel-400*editor_progress
 	if is_instance_valid(atmosphere):
 		atmosphere.position.y = world_container.position.y
 		atmosphere.material.set_shader_parameter("home_visibility",1.0-smoothstep(0.25,0.85,editor_progress))
 		atmosphere.visible = editor_progress < 1.0
 	shelf.position = Vector2(0, home_top-travel)
-	shelf.minimum_disk_height = 210
+	shelf.minimum_disk_height = lerpf(250, 210, editor_progress)
+	shelf.maximum_disk_height = lerpf(680, 630, editor_progress)
+	shelf.selection_lift = lerpf(0.04, 0.20, editor_progress)
 	shelf.size = Vector2(size.x, height)
 	if is_instance_valid(editor_surface):
 		editor_surface.set_workspace_top(shelf.position.y+shelf.size.y+6)
 		editor_surface.modulate.a = smoothstep(0.3, 0.85, editor_progress)
 	if is_instance_valid(session_disk):
-		var disk_size := clampf(size.y * 0.235, 180, 235)
+		var disk_size := clampf(size.y * 0.235, 180, 470)
 		session_disk.position = Vector2(minf(size.x * 0.82 - disk_size * 0.5, size.x - disk_size - 24), size.y * 0.22-travel)
-		session_disk.size = Vector2(disk_size, disk_size + 126)
+		session_disk.size = Vector2(disk_size, disk_size + 126 * maxf(1.0, disk_size / 235.0))
 		session_disk.modulate.a = 0.0 if phase == "formatting" else 1.0-editor_progress
 	_position_play_button.call_deferred()
 

@@ -30,6 +30,8 @@ var press_position := Vector2.ZERO
 var press_cursor := 0.0
 var enabled := true
 var minimum_disk_height := 210.0
+var maximum_disk_height := 315.0
+var selection_lift := 0.20
 var looping := true
 var show_create := false
 var wheel_at := 0
@@ -219,7 +221,7 @@ func _place(tile: Control, distance: float, height: float, spacing: float) -> vo
 	var closeness := exp(-distance * distance * 2.1)
 	var depth := lerpf(0.62, 1.0, closeness)
 	var bob := sin(elapsed * 1.35 + 0.4) * 4.0 * closeness
-	var center := Vector2(size.x * 0.5 + distance * spacing, size.y * 0.64 - closeness * size.y * 0.20 + bob)
+	var center := Vector2(size.x * 0.5 + distance * spacing, size.y * 0.64 - closeness * size.y * selection_lift + bob)
 	tile.position = center - tile.size * 0.5
 	tile.scale = Vector2.ONE * depth * (height / tile.size.y)
 	tile.rotation = clampf(distance, -2, 2) * -0.055 + sin(elapsed * 0.9) * 0.016 * closeness
@@ -253,7 +255,7 @@ func _sync_copies(spacing: float) -> void:
 			copies.append(copy)
 
 func disk_height() -> float:
-	return clampf(size.y * 0.80, minimum_disk_height, 315) * 1.10
+	return clampf(size.y * 0.80, minimum_disk_height, maximum_disk_height)
 
 func close_color_menu() -> void:
 	if color_menu != null: color_menu.hide()

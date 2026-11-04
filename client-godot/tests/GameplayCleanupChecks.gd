@@ -87,6 +87,7 @@ func run(ui: Control) -> void:
 	ui.targeting = false
 	ui._update_lines()
 	assert(ui.targeting_overlay.lines.size() == 1, "A block replaces the attack-to-player arrow")
+	assert(not ui.targeting_overlay.is_processing(), "Fixed combat arrows retain their drawing without rebuilding every frame")
 	var line: Array = ui.targeting_overlay.lines[0]
 	assert(line[0] == ui.cards[attacker].get_global_transform() * (ui.cards[attacker].size * 0.5) and line[1] == ui.cards[blocker].get_global_transform() * (ui.cards[blocker].size * 0.5), "Blocked attack points to its specific blocker")
 	ui.snapshot.combat[0].blockers = []
@@ -98,6 +99,12 @@ func run(ui: Control) -> void:
 	ui.snapshot.combat[0].trample = true
 	ui._update_lines()
 	assert(ui.targeting_overlay.lines.size() == 1, "A blocked trampler can still threaten the defending player")
+	var fixed_lines: Array = ui.targeting_overlay.lines.duplicate(true)
+	ui.targeting_overlay.lines = [[Vector2(10, 20), Vector2.INF]]
+	assert(ui.targeting_overlay.is_processing(), "A targeting arrow still follows the pointer every frame")
+	ui.targeting_overlay.lines = []
+	assert(not ui.targeting_overlay.is_processing(), "Clearing targeting stops its idle pointer polling")
+	ui.targeting_overlay.lines = fixed_lines
 	ui.snapshot.revealed = [commander]
 	ui._show_revealed()
 	assert(ui.modal.visible and ui.modal_panel.ask.options[0].card.id == commander.id, "Revealed-card browsing must render actual card faces")

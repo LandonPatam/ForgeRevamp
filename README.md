@@ -4,7 +4,11 @@ Native Godot Commander frontend using Forge for game rules, with local bots and 
 
 ## Shared Windows and Mac development
 
-Source lives in [LandonPatam/ForgeRevamp](https://github.com/LandonPatam/ForgeRevamp). Both platforms share one main branch; features and platform fixes use short-lived branches. See [the development workflow](docs/development-workflow.md), including the one-time Mac reconciliation instructions. The initial baseline comes from Windows and still needs the existing Mac-only fixes integrated and tested.
+Source lives in [LandonPatam/ForgeRevamp](https://github.com/LandonPatam/ForgeRevamp). Both platforms share one main branch; features and platform fixes use short-lived branches. See [the development workflow](docs/development-workflow.md), including the one-time Mac reconciliation instructions. The Windows baseline and Mac compatibility work are reconciled on `chore/mac-reconciliation`; merge after affected checks pass on both platforms.
+
+## macOS app
+
+`python3 client-godot/tools/package-macos.py` builds a universal app and DMG with separate Apple Silicon and Intel Java 17 runtimes. Drag ForgeUI.app to Applications. See [build setup and signing](docs/macos-build.md).
 
 ## Layout
 - `forge/`: upstream Card-Forge/forge, checked out at `FORGE_COMMIT` (not tracked here), with tracked local patches described in [FORGE_PATCHES.md](FORGE_PATCHES.md).
@@ -24,7 +28,7 @@ In Git Bash / Anaconda Bash, run `bash ./client-godot/tools/run.sh -Live` for a 
 
 ## Setup
 
-Install Git, JDK 17, Maven and Godot 4.7.2 (plus its export templates for packaging). Windows scripts default to portable tools under `.tools/`; use the script-specific environment overrides for tools installed elsewhere. The Windows baseline's PowerShell/Bash launchers need the existing Mac equivalents integrated before they can be used on macOS.
+Install Git, JDK 17, Maven and Godot 4.7.2 (plus its export templates for packaging). Windows scripts default to portable tools under `.tools/`; use the script-specific environment overrides for tools installed elsewhere. On macOS, `bash client-godot/tools/run.sh` starts the app and its owned Java service; `-Decks`, `-Mock`, `-Live`, `-Connect`, `-Editor`, `-Check` and `-Capture` select the corresponding source workflows. See [macOS prerequisites and packaging](docs/macos-build.md).
 
 After cloning this repository, fetch the pinned Forge source and apply its local patches:
 

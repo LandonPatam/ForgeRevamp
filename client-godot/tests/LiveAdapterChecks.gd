@@ -1,6 +1,13 @@
 extends RefCounted
 
 func run() -> void:
+	var restored = load("res://scripts/bridge/LiveAdapter.gd").new()
+	restored.seat_token = "fixture-seat"
+	restored.expected_session = "original-match"
+	var pinned_ended := [false]
+	restored.session_ended.connect(func(message): pinned_ended[0] = message == "This online game is no longer available.")
+	restored._receive({"type": "state", "protocolVersion": 2, "sessionId": "different-match"})
+	assert(pinned_ended[0] and restored.ended and restored.seat_token.is_empty() and restored.state.get("sessionId", "") != "different-match", "Pinned recovery rejects a different match without publishing it")
 	var adapter = load("res://scripts/bridge/LiveAdapter.gd").new()
 	var raw := {"type": "state", "protocolVersion": 2, "sessionId": "first", "revision": 8, "me": 42, "game": {"activePlayer": 42, "phaseKey": "COMBAT_DECLARE_ATTACKERS", "phase": "localized name"}, "players": [], "asks": [{"id": 7, "kind": "choose", "options": [], "min": 0, "max": 0}], "stack": [{"id": 42, "sourceId": 90, "text": "Spell"}], "combat": [{"attacker": 90, "defenderId": 0, "defenderKind": "card"}], "revealed": [], "prompt": {"okEnabled": true}, "log": []}
 	for id in [0, 42, 71]:
@@ -113,11 +120,6 @@ func run() -> void:
 	unavailable.offline_seconds = unavailable.REMOTE_TIMEOUT_SECONDS - 1.0
 	unavailable.poll(2.0)
 	assert(unavailable.ended, "An unavailable host cannot leave the client reconnecting forever")
-	var restored = load("res://scripts/bridge/LiveAdapter.gd").new()
-	restored.seat_token = "saved-seat"
-	restored.expected_session = "original-match"
-	restored._receive(raw)
-	assert(restored.ended and restored.seat_token.is_empty() and restored.state.is_empty(), "Saved credentials cannot restore a different match at the same address")
 	await _terminal_departure()
 	print("PASS: live adapter recovery and privacy checks")
 
@@ -125,7 +127,10 @@ func _terminal_departure() -> void:
 	# The host keeps the socket open until the client reads its terminal notice.
 	var listener := TCPServer.new()
 	var listen_result := listener.listen(0, "127.0.0.1")
-	assert(listen_result == OK)
+	if listen_result != OK:
+		push_error("The terminal-close fixture could not listen")
+		(Engine.get_main_loop() as SceneTree).quit(1)
+		return
 	var adapter = load("res://scripts/bridge/LiveAdapter.gd").new()
 	adapter.url = "ws://127.0.0.1:%d" % listener.get_local_port()
 	adapter.seat_token = "test-seat"
@@ -137,13 +142,21 @@ func _terminal_departure() -> void:
 		adapter.poll(0.01)
 		if peer == null and listener.is_connection_available():
 			peer = WebSocketPeer.new()
-			var accept_result := peer.accept_stream(listener.take_connection())
-			assert(accept_result == OK)
+			var accepted := peer.accept_stream(listener.take_connection())
+			if accepted != OK:
+				listener.stop()
+				push_error("The terminal-close fixture could not accept the client")
+				tree.quit(1)
+				return
 		if peer != null:
 			peer.poll()
 			if peer.get_ready_state() == WebSocketPeer.STATE_OPEN and adapter.connected: break
 		await tree.process_frame
-	assert(peer != null and adapter.connected, "The terminal-close fixture must connect")
+	if peer == null or not adapter.connected:
+		listener.stop()
+		push_error("The terminal-close fixture must connect")
+		tree.quit(1)
+		return
 	peer.send_text(JSON.stringify({"type": "sessionEnded", "protocolVersion": 2, "sessionId": "test-session", "message": "The host ended the game."}))
 	while Time.get_ticks_msec() < deadline and not adapter.ended:
 		peer.poll()

@@ -125,6 +125,12 @@ var field_ratio := 0.46
 var table_minimum_height := MIN_TABLE_HEIGHT
 var opponent_divider: Control
 var local_divider: Control
+var layout_guard: Node
+var layout_retry_button: Button
+var layout_recovery: Control
+var layout_process_modes: Dictionary = {}
+var layout_paused := false
+var client_diagnostics: RefCounted
 var verification_mode := false
 var hovered_source: Control
 var raised_card: Control
@@ -176,7 +182,7 @@ func _ready() -> void:
 			live = true
 			adapter = Live.new()
 			adapter.url = arg.trim_prefix("--live=")
-	verification_mode = Array(OS.get_cmdline_user_args()).any(func(arg): return arg in ["--smoke", "--live-check", "--app-check"] or arg.begins_with("--visual-checks=") or arg.begins_with("--capture="))
+	verification_mode = Array(OS.get_cmdline_user_args()).any(func(arg): return arg in ["--smoke", "--live-check", "--app-check", "--hand-hover-check", "--layout-loop-check"] or arg.begins_with("--visual-checks=") or arg.begins_with("--capture="))
 	_load_table_settings()
 	theme = P.make_theme()
 	table_backdrop = Backdrop.new()
@@ -190,15 +196,20 @@ func _ready() -> void:
 	add_child(token_artwork)
 	if live:
 		_update_live_actions()
-	RenderingServer.frame_pre_draw.connect(_sync_raised_card)
-	RenderingServer.frame_pre_draw.connect(_update_lines)
-	RenderingServer.frame_pre_draw.connect(_sync_transition_preview)
+	RenderingServer.frame_pre_draw.connect(_prepare_render)
 	_sync_transition_preview()
 	adapter.state_changed.connect(_apply_state)
 	adapter.feedback.connect(_notify)
 	adapter.action_rejected.connect(_reject_card_action)
 	adapter.status_changed.connect(func(message): status_label.text = message)
 	adapter.session_reset.connect(_clear_live_session)
+	if not verification_mode and ProjectSettings.get_setting("application/config/client_diagnostics", false):
+		client_diagnostics = preload("res://scripts/app/ClientDiagnostics.gd").new()
+		client_diagnostics.start(self)
+	layout_guard = preload("res://scripts/ui/LayoutLoopGuard.gd").new()
+	add_child(layout_guard)
+	layout_guard.tripped.connect(_pause_layout_loop)
+	layout_guard.watch(self)
 	adapter.start()
 	_intent("phase_stops", {"stops": phase_stops})
 	get_window().focus_exited.connect(_cancel_pointer_gesture)
@@ -209,6 +220,10 @@ func _ready() -> void:
 			_capture.call_deferred(arg.trim_prefix("--capture="))
 		if arg == "--smoke":
 			_smoke.call_deferred()
+		if arg == "--hand-hover-check":
+			_hand_hover_check.call_deferred()
+		if arg == "--layout-loop-check":
+			_layout_loop_check.call_deferred()
 		if arg.begins_with("--visual-checks="):
 			_visual_checks.call_deferred(arg.trim_prefix("--visual-checks="))
 
@@ -235,6 +250,7 @@ func _terminal_button(text: String, callback: Callable, tooltip: String = "", pr
 	return button
 
 func _intent(action: String, extra: Dictionary = {}) -> void:
+	if layout_paused: return
 	if live and action == "card" and snapshot.get("connectionReady", false) and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority":
 		pending_command_cast = int(extra.get("id", -1)) if snapshot.players[0].zones.Command.any(func(card): return int(card.id) == int(extra.get("id", -1))) else -1
 	if action == "cancel": pending_command_cast = -1
@@ -343,7 +359,7 @@ func _build_shell() -> void:
 	free_cards.z_index = 5
 	add_child(free_cards)
 	var rail_panel := preload("res://scripts/ui/TerminalRail.gd").new()
-	rail_panel.custom_minimum_size.x = 276
+	rail_panel.custom_minimum_size.x = 248
 	content.add_child(rail_panel)
 	rail = VBoxContainer.new()
 	rail.add_theme_constant_override("separation", 8)
@@ -775,7 +791,9 @@ func _make_hud(id: int) -> void:
 	hud_values[id] = {"portrait": portrait, "name": name_label, "info": info, "zones": zone_buttons, "zone_tray": zones}
 
 func _apply_state(value: Dictionary) -> void:
+	if client_diagnostics != null: client_diagnostics.capture(value, self)
 	snapshot = value
+	if layout_paused: return
 	# Reconnecting to an established game needs no new opening-hand ceremony.
 	if live and (snapshot.get("openingHandComplete", false) or (not opening_hand.active and int(snapshot.game.get("turn", 0)) > 0 and not str(snapshot.game.get("phase", "")).is_empty() and not snapshot.game.get("mulligan", false) and snapshot.prompt.get("inputKind", "") not in ["InputConfirmMulligan", "InputLondonMulligan"])):
 		opening_hand_released = true
@@ -1098,6 +1116,7 @@ func _opponent_region(id: int, width: float, left_width: float) -> Vector2:
 	return Vector2((id - 1) * (span + 16), span)
 
 func _layout_board() -> void:
+	if layout_paused: return
 	if board == null or snapshot.is_empty() or board.size.x < 100:
 		return
 	var w: float = board.size.x
@@ -1533,6 +1552,7 @@ func _card_unhovered(source: Control) -> void:
 
 func _process(_delta: float) -> void:
 	adapter.poll(_delta)
+	if layout_paused: return
 	if live and is_instance_valid(interaction_panel):
 		var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing): _present_interaction()
@@ -1549,7 +1569,6 @@ func _process(_delta: float) -> void:
 			pending_returns.erase(id)
 			_layout_board()
 	_update_hand_hover()
-	_sync_raised_card()
 
 func _sync_hand_copies() -> void:
 	if hand_root == null:
@@ -1568,8 +1587,12 @@ func _sync_hand_copies() -> void:
 			copy.table_angle = false
 			copy.gui_input.connect(_hand_copy_input.bind(view))
 			hand_root.add_child(copy)
+			# Share the source face: a hidden copy can consume UPDATE_ONCE before
+			# its face draws, leaving a blank texture when it is first lifted.
+			copy.visual.texture = view.surface.get_texture()
 			hand_copies[view.data.id] = copy
 		hand_copies[view.data.id].update_card(view.data)
+		hand_copies[view.data.id].surface.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		if not lifted:
 			view.visual.show()
 			if hand_copies.has(view.data.id):
@@ -1614,6 +1637,66 @@ func _order_hand_input() -> void:
 func _hand_copy_input(event: InputEvent, source: Control) -> void:
 	if is_instance_valid(source) and source.hand_mode and source.hover_active:
 		source._gui_input(event)
+
+func _pause_layout_loop(scroll: ScrollContainer) -> void:
+	layout_paused = true
+	_cancel_pointer_gesture()
+	if client_diagnostics != null: client_diagnostics.record_layout_recovery(scroll, self)
+	# Presentation processing stops; Main continues polling the same adapter.
+	for child in get_children():
+		if child == layout_guard or child == layout_recovery: continue
+		layout_process_modes[child] = child.process_mode
+		child.process_mode = Node.PROCESS_MODE_DISABLED
+	if not is_instance_valid(layout_recovery):
+		layout_recovery = Control.new()
+		layout_recovery.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		layout_recovery.mouse_filter = Control.MOUSE_FILTER_STOP
+		layout_recovery.z_index = 1000
+		add_child(layout_recovery)
+		var shade := ColorRect.new()
+		shade.color = Color(0.01, 0.02, 0.03, 0.88)
+		shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		layout_recovery.add_child(shade)
+		var center := CenterContainer.new()
+		center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		layout_recovery.add_child(center)
+		var panel := PanelContainer.new()
+		P.style_popup(panel, 18)
+		center.add_child(panel)
+		var column := VBoxContainer.new()
+		column.add_theme_constant_override("separation", 16)
+		panel.add_child(column)
+		var message := _label("The display was paused to prevent a layout crash.\nYour match is still running. Retry the display to continue.", 18, P.TEXT)
+		message.custom_minimum_size.x = 460
+		column.add_child(message)
+		layout_retry_button = _button("Retry display", _retry_layout)
+		layout_retry_button.focus_mode = Control.FOCUS_ALL
+		P.style_popup_button(layout_retry_button, true)
+		column.add_child(layout_retry_button)
+		if is_instance_valid(app_host):
+			column.add_child(_button("Return to main menu", app_host.request_leave_game))
+	layout_recovery.show()
+	layout_retry_button.grab_focus()
+
+func _retry_layout() -> void:
+	layout_recovery.hide()
+	for child in layout_process_modes:
+		if is_instance_valid(child): child.process_mode = layout_process_modes[child]
+	layout_process_modes.clear()
+	layout_guard.retry()
+	layout_paused = false
+	_apply_state(snapshot)
+
+func _prepare_render() -> void:
+	if layout_paused: return
+	var target := get_viewport()
+	if target is SubViewport:
+		if target.render_target_update_mode == SubViewport.UPDATE_DISABLED: return
+	elif not is_visible_in_tree(): return
+	# Sample animated card transforms once, immediately before drawing.
+	_sync_raised_card()
+	_update_lines()
+	_sync_transition_preview()
 
 func _sync_raised_card() -> void:
 	_sync_hand_copies()
@@ -2089,17 +2172,18 @@ func _attackable_seat(id: int) -> bool:
 func _update_lines() -> void:
 	if targeting_overlay == null:
 		return
-	targeting_overlay.lines.clear()
+	var lines: Array = []
 	if targeting and not selected.is_empty() and cards.has(selected.id):
-		targeting_overlay.lines.append([(cards[selected.id].get_global_transform() * (cards[selected.id].size * 0.5)), Vector2.INF])
+		lines.append([(cards[selected.id].get_global_transform() * (cards[selected.id].size * 0.5)), Vector2.INF])
 	for combat in snapshot.get("combat", []):
 		for blocker_id in combat.get("blockers", []):
 			if cards.has(int(blocker_id)) and cards.has(int(combat.attacker)):
 				var blocker: Control = cards[int(blocker_id)]
 				var attacker: Control = cards[int(combat.attacker)]
-				targeting_overlay.lines.append([attacker.get_global_transform() * (attacker.size * 0.5), blocker.get_global_transform() * (blocker.size * 0.5), Color("80d9ff")])
+				lines.append([attacker.get_global_transform() * (attacker.size * 0.5), blocker.get_global_transform() * (blocker.size * 0.5), Color("80d9ff")])
 		if combat.get("blockers", []).is_empty() and (not combat.get("blocked", false) or combat.get("trample", false)) and cards.has(combat.attacker) and hud.has(combat.defenderId) and not (targeting and selected.get("id", -1) == combat.attacker):
-			targeting_overlay.lines.append([(cards[combat.attacker].get_global_transform() * (cards[combat.attacker].size * 0.5)), hud_values[combat.defenderId].portrait.get_global_rect().get_center()])
+			lines.append([(cards[combat.attacker].get_global_transform() * (cards[combat.attacker].size * 0.5)), hud_values[combat.defenderId].portrait.get_global_rect().get_center()])
+	targeting_overlay.lines = lines
 
 func _cancel_attack_target() -> void:
 	targeting = false
@@ -2799,6 +2883,9 @@ func _adjust_card_zoom(step: float) -> void:
 	_layout_hand()
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if layout_paused:
+		get_viewport().set_input_as_handled()
+		return
 	if transition_preview or transition_reveal: return
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
@@ -2863,11 +2950,27 @@ func _capture(path: String) -> void:
 		print("Screenshot saved: " + path)
 		get_tree().quit()
 
+func _layout_loop_check() -> void:
+	var layout_checks := preload("res://tests/LayoutLoopChecks.gd").new()
+	await layout_checks.run(self)
+	if layout_checks.failed:
+		get_tree().quit(1)
+		return
+	get_tree().quit()
+
+func _hand_hover_check() -> void:
+	await preload("res://tests/HandHoverRenderChecks.gd").new().run(self)
+
 func _smoke() -> void:
 	# The headless display has no native window rectangle; give the UI a logical viewport.
 	set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	size = Vector2(1600, 1000)
 	await get_tree().create_timer(0.2).timeout
+	var layout_checks := preload("res://tests/LayoutLoopChecks.gd").new()
+	await layout_checks.run(self)
+	if layout_checks.failed:
+		get_tree().quit(1)
+		return
 	await preload("res://tests/HandPickingChecks.gd").new().run(self)
 	await preload("res://tests/ZoneBrowserChecks.gd").new().run(self)
 	await preload("res://tests/GameplayCleanupChecks.gd").new().run(self)

@@ -1,22 +1,21 @@
 extends RefCounted
 
 func run(path: String) -> void:
-	var store = preload("res://scripts/app/RemoteSession.gd").new()
-	store.path = path
-	assert(store.read().is_empty(), "No saved credentials means no recovery disk")
-	var saved := {"url": "ws://127.0.0.1:36743/ws", "token": "test-seat", "session_id": "original-match", "deck": {"name": "Test deck"}, "info": {"turn": 4}}
-	assert(store.save(saved) == OK, "Seat credentials can be persisted")
+	var helper = preload("res://scripts/app/RemoteSession.gd").new()
+	helper.path = path
+	helper.clear()
+	assert(helper.read().is_empty(), "Absent seat files are ignored")
+	var value := {"url": "ws://127.0.0.1:36743/ws", "token": "fixture-only", "session_id": "", "deck": {"id": "fixture", "name": "Fixture deck"}, "info": {"reconnect": true}}
+	assert(helper.save(value) == OK, "Seat save succeeds")
 	var fresh = preload("res://scripts/app/RemoteSession.gd").new()
 	fresh.path = path
-	assert(fresh.read() == saved, "A new store instance recovers credentials from disk")
-	saved.info.turn = 5
-	assert(fresh.save(saved) == OK and store.read().info.turn == 5, "Atomic replacement updates an existing save")
-	assert(not FileAccess.file_exists(path + ".tmp"), "Completed writes leave no temporary credential copy")
+	assert(fresh.read() == value, "Fresh helpers read saved seats")
+	value.session_id = "fixture-match"
+	assert(fresh.save(value) == OK and helper.read() == value, "Replacing an existing file works on this platform")
+	assert(not FileAccess.file_exists(path + ".tmp"), "Successful replacement leaves no temp file")
 	fresh.clear()
-	assert(store.read().is_empty(), "Leaving or ending removes recovery across instances")
-	var invalid := ConfigFile.new()
-	invalid.set_value("seat", "version", 1)
-	invalid.set_value("seat", "resume", {"url": "file://not-a-host", "token": "test-seat"})
-	assert(invalid.save(path) == OK and store.read().is_empty(), "Invalid saved endpoints are ignored")
-	store.clear()
-	print("PASS: persisted remote-seat recovery, replacement, cleanup and invalid data")
+	assert(helper.read().is_empty(), "Deletion is visible across instances")
+	value.url = "https://invalid.example"
+	assert(helper.save(value) == OK and fresh.read().is_empty(), "Invalid endpoints are ignored")
+	helper.clear()
+	print("PASS: remote session persistence")

@@ -238,10 +238,14 @@ func _build() -> void:
 	workspace.offset_top = workspace_top
 	workspace.offset_bottom = -20
 	add_child(workspace)
+	var workspace_scroll := ScrollContainer.new()
+	workspace_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	workspace.add_child(workspace_scroll)
 	var main := VBoxContainer.new()
 	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_theme_constant_override("separation", 10)
-	workspace.add_child(main)
+	workspace_scroll.add_child(main)
 	var name_row := HBoxContainer.new()
 	main.add_child(name_row)
 	name_edit = LineEdit.new()
@@ -264,7 +268,7 @@ func _build() -> void:
 	status_label.hide()
 	name_row.add_child(status_label)
 	name_row.add_child(connection_label)
-	var actions := HBoxContainer.new()
+	var actions := HFlowContainer.new()
 	main.add_child(actions)
 	deck_button = _button("DECK", func(): _set_mode(false), true)
 	catalog_button = _button("+ ADD CARDS", func(): _set_mode(true))
@@ -298,10 +302,11 @@ func _build() -> void:
 	actions.add_child(_button("Deck actions", _show_actions))
 	save_button = _button("Save deck", _save, true)
 	actions.add_child(save_button)
-	var filters := HBoxContainer.new()
+	var filters := HFlowContainer.new()
 	main.add_child(filters)
 	search = LineEdit.new()
 	search.placeholder_text = "Search cards or rules text…"
+	search.custom_minimum_size.x = 200
 	search.clear_button_enabled = true
 	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	search.text_changed.connect(func(_text): search_timer.start())
@@ -328,6 +333,7 @@ func _build() -> void:
 	filters.add_child(density_slider)
 	filters.add_child(density_value)
 	card_scroll = ScrollContainer.new()
+	card_scroll.custom_minimum_size.y = 160
 	card_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	card_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
@@ -350,7 +356,7 @@ func _build() -> void:
 	overlay.hide()
 	add_child(overlay)
 	context_menu = PopupMenu.new()
-	context_menu.id_pressed.connect(_card_action)
+	context_menu.id_pressed.connect(_card_action, CONNECT_DEFERRED)
 	add_child(context_menu)
 	_render_decks()
 
@@ -663,7 +669,8 @@ func _render_cards(append_from: int = 0, keep_scroll: bool = false) -> void:
 		if reused: tile.texture = images.request_texture(card)
 		tile.tooltip_text = card.name + "\n" + card.get("section", card.typeLine)
 		if not reused:
-			tile.chosen.connect(_inspect)
+			tile.chosen.connect(func(card):
+				if not overlay.visible and not context_menu.visible: _inspect(card))
 			tile.context_requested.connect(_card_context)
 		card_grid.add_child(tile)
 		tile.show()
@@ -1106,7 +1113,9 @@ func _printing_choices(cards: Array) -> void:
 				else: duplicate[0].quantity += printing.quantity
 			printing.section = inspect_card.section
 			_changed(true, true)
-		_inspect(printing))
+		# Let the embedded OptionButton popup finish handling its click before
+		# rebuilding the dialog and removing the popup owner.
+		_inspect.call_deferred(printing))
 	dialog_body.add_child(option)
 
 func _adjust(card: Dictionary, section: String, delta: int, keep_open: bool = false) -> void:
@@ -1179,6 +1188,10 @@ func _assign_commander(card: Dictionary, second: bool = false) -> void:
 
 func set_workspace_top(value: float) -> void:
 	workspace_top = value
+	if app_host != null and is_instance_valid(app_host.editor_surface):
+		app_host.editor_surface.set_workspace_top(value)
+		if workspace != null: workspace.offset_top = value / 2.0
+		return
 	if workspace != null: workspace.offset_top = value
 
 func set_darkness(value: float) -> void:
@@ -1205,8 +1218,8 @@ func set_darkness(value: float) -> void:
 	validation_reason.add_theme_color_override("font_color", Color("8a651e").lerp(Color("e6c878"), value))
 
 func _style_workbench(node: Node, ink: Color, muted: Color, fill: Color, edge: Color) -> void:
-	if node == overlay or node is Window: return
 	if node == validate_button or node == validation_reason: return
+	if node == overlay or node is Window: return
 	if node is Tile:
 		node.ink = ink
 		node.queue_redraw()
@@ -1297,9 +1310,9 @@ func _render_artwork() -> void:
 		tile.card = printing
 		tile.custom_minimum_size = Vector2(164, 258)
 		tile.ink = Color("304a55").lerp(Color("d5e6e3"), darkness)
-		tile.chosen.connect(func(selected):
-			if catalog_mode: _inspect(selected)
-			else: _replace_printing(selected); overlay.hide())
+		# Keep the modal in place until the selecting click has finished routing.
+		tile.choose_on_release = true
+		tile.chosen.connect(_choose_artwork, CONNECT_DEFERRED)
 		group.add_child(tile)
 		group.add_child(_label(str(printing.edition) + " / #" + str(printing.collectorNumber), 12))
 	images.prioritize(visible_cards)
@@ -1321,6 +1334,14 @@ func _render_artwork() -> void:
 		all_copies.button_pressed = apply_art_to_all
 		all_copies.toggled.connect(func(on): apply_art_to_all = on)
 		pages.add_child(all_copies)
+
+func _choose_artwork(selected: Dictionary) -> void:
+	if not overlay.visible or not artwork_mode or busy or loading_deck: return
+	if catalog_mode: _inspect(selected)
+	else:
+		_replace_printing(selected)
+		artwork_mode = false
+		overlay.hide()
 
 func _replace_printing(value: Dictionary) -> void:
 	var printing := value.duplicate(true)

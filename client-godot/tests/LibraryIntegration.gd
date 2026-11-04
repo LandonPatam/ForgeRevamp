@@ -88,7 +88,7 @@ func run(table: Control) -> void:
 	await capture("library-collection-1600")
 	ui.card_grid.get_child(0).hovered.emit(ui.shown_cards[0])
 	await ui.get_tree().create_timer(0.5).timeout
-	if not check(not ui.overlay.visible, "Hovering cards leaves the editor unobstructed"): return
+	if not check(not ui.overlay.visible, "Hover leaves the editor grid unobstructed"): return
 	await capture("library-card-hover")
 	ui.card_grid.get_child(0).mouse_exited.emit()
 	ui.get_window().size = Vector2i(1280, 800)

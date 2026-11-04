@@ -26,3 +26,6 @@ desktop.ini
 .godot/
 .m2/
 export_credentials.cfg
+
+/client-godot/.export-templates/
+__pycache__/

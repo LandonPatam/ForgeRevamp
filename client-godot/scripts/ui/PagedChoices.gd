@@ -54,8 +54,12 @@ func refresh() -> void:
 	var count := matching.size()
 	var pages := maxi(1, ceili(float(count) / page_size))
 	page = clampi(page, 0, pages - 1)
-	for child in grid.get_children(): child.visible = false
-	for index in range(count): matching[index].visible = index / page_size == page
+	# Assign only the final visibility. Hiding then re-showing every choice
+	# needlessly invalidates container sizing on every layout refresh.
+	var shown := {}
+	for index in range(count):
+		if index / page_size == page: shown[matching[index]] = true
+	for child in grid.get_children(): child.visible = shown.has(child)
 	navigation.visible = pages > 1 or count == 0
 	previous.disabled = page == 0
 	next.disabled = page == pages - 1

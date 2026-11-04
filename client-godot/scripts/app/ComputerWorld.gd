@@ -527,9 +527,10 @@ func wait_for_key_feedback(is_play: bool) -> void:
 func _play_led(lit: bool) -> void:
 	var material := play_activity_led.material_override as StandardMaterial3D
 	material.albedo_color = KEY_LED if lit else Color("263035")
-	material.emission_enabled = lit
+	# Keep one shader variant while blinking; change only its light output.
+	material.emission_enabled = true
 	material.emission = KEY_LED
-	material.emission_energy_multiplier = 0.12
+	material.emission_energy_multiplier = 0.12 if lit else 0.0
 
 func settings_button_rect() -> Rect2:
 	return _key_rect(SETTINGS_CENTER, Vector2(0.26, KEY_HEIGHT))
@@ -1221,6 +1222,6 @@ func _process(delta: float) -> void:
 		var lit := drive_activity > 0 and sin(drive_activity * 140) > -0.25 if drive_log_active else working and sin(Time.get_ticks_msec() * 0.014) > 0
 		var activity_color := Color("ffb44f") if drive_format_active else Color("84e3ce")
 		material.albedo_color = activity_color if lit else (Color("80572d") if drive_format_active else Color("46585e"))
-		material.emission_enabled = lit
+		material.emission_enabled = true
 		material.emission = activity_color
-		material.emission_energy_multiplier = 0.35
+		material.emission_energy_multiplier = 0.35 if lit else 0.0

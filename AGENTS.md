@@ -53,6 +53,14 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Bridge `OnlineOpeningHands.java` and the bridge-local `forge/game/mulligan/MulliganService.java` override — concurrent human opening-hand input collection, with keeps, bottom choices and redraws on Forge's game thread. The existing London override also stays ahead of the Forge JARs on the classpath.
 - Bridge `BridgeGuiGame.java`, `GameStateJson.java`, `BridgeProtocol.java`, `StackInteractionPolicy.java` — GUI callbacks, visibility-filtered state, request validation and response policy.
 
+- `app/ScaledSurface.gd` — native-resolution 2× editor/game/settings viewport and input mapping; editor input passes through above its workspace except during dialogs. While an editor dialog is open, raise its outer surface above the carousel; restore the normal layer on dismissal so header input stays available. Internal popup z-order cannot escape its viewport texture. The game stays in its surface across reveal, park/resume and engine cleanup. Application confirmations use a separate modal 2× surface so Quit and parked-game prompts match the active UI.
+
+- `app/RemoteSession.gd` — atomic joining-seat credential/public-metadata persistence; restores an idle Rejoin disk and a fresh adapter pinned to the original match. Never persist snapshots, hidden cards or actions. Recovery requires the host engine to remain running; no solo or host recovery.
+
+- `ui/LayoutLoopGuard.gd` — watches every table ScrollContainer, including dynamically added dialogs. After 64 sorts of one scroller in a frame, suspend automatic scroll-content sizing and presentation, preserve the same polling adapter/latest snapshot, and show Retry display / Return to main menu. Retry restores original sizing/visibility/process modes and presents the newest snapshot. Do not solve UI queue exhaustion by increasing its memory limit.
+
+- `app/ClientDiagnostics.gd` — optional bounded local state/layout capture for diagnostic packages; normal source defaults off.
+
 ## Design rules
 
 - Preserve gray matte plastic hardware, colorful floppies, teal CRT terminals, purple UI accents and digital HP. Physical PLAY/SETTINGS glyphs are charcoal, not purple/glowing; keys match case plastic.
@@ -83,6 +91,14 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Dropping battlefield equipment on a controlled creature requests Forge's legal equip ability and that target. Spend floating mana first; incomplete payments offer battlefield sources and Cancel. Preserve real response windows and engine resolution.
 - Forge's bundled Commander precons are listed as read-only `precon:` decks after saved decks; edits save as a new custom copy, never overwrite or delete them. The ALL/CUSTOM/PRECONS header filter is shared by home and editor. Carousel floppies build faces lazily when first visible.
 - Artwork changes retain editor scroll. Validation is inline; cached image requests need stale-response guards. Saved decks preserve exact quantities/printings and accented names.
+
+- Home outer controls and carousel scale with the viewport, including Retina windows; keep the physical computer/CRT size unchanged, preserve access to Play/Settings, and use the dedicated 2× editor/game surfaces. Physical keys must follow the shelf in GUI sibling order, since visual z-order does not govern picking. Settings keeps a visible roster and scrolls the page in short 2× windows.
+
+- Hidden scaled UI surfaces suspend rendering; keep their source texture rendering explicitly enabled while the CRT zoom borrows it. Visible animations retain full-resolution continuous rendering. Hand/hover mirroring runs once before drawing; lifted hand cards share the original cached face texture instead of painting a second hidden viewport. Stationary combat arrows retain their geometry until endpoints change.
+
+- Open card context menus on right-button release, so the menu cannot steal the release and leave the card holding mouse capture. Editor dialogs and embedded popup menus must own the full scaled input surface; background deck cards cannot open details while a popup is active.
+
+- macOS build: `python3 client-godot/tools/package-macos.py` creates a universal DMG with separate Temurin 17 arm64/x86_64 runtimes. See `docs/macos-build.md`. On macOS, `BundledService` resolves payloads under `Contents/Resources`, selects Java by executable architecture and uses `:` in the classpath. Builds are ad-hoc signed unless Developer ID signing/notarization is added separately.
 
 ## Working rules
 

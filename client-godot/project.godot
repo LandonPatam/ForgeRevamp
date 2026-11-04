@@ -23,6 +23,7 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.032, 0.052, 0.065, 1)
 textures/default_filters/use_nearest_mipmap_filter=false
+textures/vram_compression/import_etc2_astc=true
 
 [debug]
 gdscript/warnings/untyped_declaration=0

@@ -3,7 +3,7 @@ import {spawn,spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {join} from 'node:path';
+import {join,delimiter} from 'node:path';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const artifacts=join(root,'client-godot/artifacts');
 mkdirSync(artifacts,{recursive:true});writeFileSync(join(artifacts,'.gdignore'),'');
@@ -25,13 +25,13 @@ const nightCinematics=process.argv.includes('--night-cinematics');
 let log='',godot,bridge;const childPids=new Set();
 const startBridge=()=>{
   if(bridge)return;
-  bridge=spawn(join(home,'bin/java.exe'),['-Xmx4g','-cp','target/classes;target/lib/*','forgeui.bridge.LibraryMain','--assets','../forge/forge-gui','--port',String(port),'--library-root',startupFailure?join(fixture,'Atraxa.dck'):fixture,'--startup-status',startupFile],{cwd:join(root,'bridge'),windowsHide:true});
+  bridge=spawn(join(home,'bin',process.platform==='win32'?'java.exe':'java'),['-Xmx4g','-cp',['target/classes','target/lib/*'].join(delimiter),'forgeui.bridge.LibraryMain','--assets','../forge/forge-gui','--port',String(port),'--library-root',startupFailure?join(fixture,'Atraxa.dck'):fixture,'--startup-status',startupFile],{cwd:join(root,'bridge'),windowsHide:true});
   for(const stream of [bridge.stdout,bridge.stderr])stream.on('data',b=>{log+=b;writeFileSync(join(artifacts,startupFailure?'app-startup-failure-bridge.log':'app-bridge.log'),log)});
 };
 try {
   const render=process.argv.includes('--render');
   // FORGE_EXPORTED_EXE checks a packaged build; release binaries refuse --path and carry the project inside.
-  godot=spawn(process.env.FORGE_EXPORTED_EXE||process.env.FORGE_GODOT_PATH||join(root,'.tools/godot/Godot_v4.7.2-stable_win64.exe'),[...(process.env.FORGE_EXPORTED_EXE?[]:['--path',join(root,'client-godot')]),...(render?['--resolution','1600x1000','--position','-20000,-20000']:['--headless']),'--',`--library-url=ws://127.0.0.1:${port}/ws`,'--app-check',...(startupFailure?['--app-startup-failure']:[]),...(menuPreview?['--app-menu-preview']:[]),...(editorPreview?['--app-editor-preview']:[]),...(nightBaseline?['--app-night-baseline']:[]),...(nightReview?['--app-night-review']:[]),...(nightCinematics?['--app-night-cinematics']:[]),`--startup-status=${startupFile}`,`--library-fixture=${fixture}`,`--app-capture=${render?artifacts:''}`],{cwd:root,windowsHide:true});
+  godot=spawn(process.env.FORGE_EXPORTED_EXE||process.env.FORGE_GODOT_PATH||join(root,process.platform==='darwin'?'.tools/godot/Godot.app/Contents/MacOS/Godot':'.tools/godot/Godot_v4.7.2-stable_win64.exe'),[...(process.env.FORGE_EXPORTED_EXE?[]:['--path',join(root,'client-godot')]),...(render?['--resolution','1600x1000',...(process.platform==='darwin'?[]:['--position','-20000,-20000'])]:['--headless']),'--',`--library-url=ws://127.0.0.1:${port}/ws`,'--app-check',...(startupFailure?['--app-startup-failure']:[]),...(menuPreview?['--app-menu-preview']:[]),...(editorPreview?['--app-editor-preview']:[]),...(nightBaseline?['--app-night-baseline']:[]),...(nightReview?['--app-night-review']:[]),...(nightCinematics?['--app-night-cinematics']:[]),`--startup-status=${startupFile}`,`--library-fixture=${fixture}`,`--app-capture=${render?artifacts:''}`],{cwd:root,windowsHide:true});
   let output='',errors='';
   godot.stdout.on('data',b=>{output+=b;process.stdout.write(b);if(output.includes('APP STARTUP VISIBLE'))startBridge();for(const m of output.matchAll(/APP MATCH PID: (\d+)/g))childPids.add(Number(m[1]))});
   godot.stderr.on('data',b=>{errors+=b;process.stderr.write(b);if(/SCRIPT ERROR:|Parse Error:|Failed to load script/.test(errors))godot.kill()});

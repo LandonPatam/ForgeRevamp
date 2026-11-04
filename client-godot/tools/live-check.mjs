@@ -3,7 +3,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {resolve, join} from 'node:path';
+import {resolve, join, delimiter} from 'node:path';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const artifacts = join(root, 'client-godot/artifacts');
 mkdirSync(artifacts, {recursive:true});
@@ -28,7 +28,7 @@ const scenario = process.argv.find(arg => arg.startsWith('--scenario='))?.slice(
 if (scenario && !['reported-interactions', 'wakanda', 'panther-claws', 'hand-reveal', 'smith-artifact', 'smith-empty', 'proliferate', 'tokens', 'reanimate', 'protection', 'blink', 'combat', 'triland', 'blocking', 'equipment', 'insights', 'stack-auto', 'stack-response', 'stack-unaffordable', 'stack-ability', 'stack-free-response'].includes(scenario)) throw Error('Unknown prepared scenario');
 const logPrefix = scenario ? 'scenario-' + scenario : interactions ? 'interactions' : mulligan ? 'mulligan' : colorlessPayment ? 'colorless-payment' : landReturn ? 'land-return' : takeback ? 'takeback' : manaChoices ? 'mana-choices' : decisions ? 'decisions' : wrongColor ? 'wrong-color' : 'live';
 const fixture = interactions ? 'engine-interactions.dck' : colorlessPayment ? 'engine-colorless-payment.dck' : landReturn ? 'engine-land-return.dck' : takeback ? 'engine-takeback.dck' : manaChoices ? 'engine-mana-choices.dck' : decisions ? 'engine-decisions.dck' : artifact ? 'engine-artifact.dck' : wrongColor ? 'engine-wrong-color.dck' : 'engine-commander.dck';
-const bridge = spawn(join(home, 'bin/java.exe'), ['-Xmx4g', '-cp', 'target/classes;target/lib/*', 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', String(port), '--opponents', '2', '--deck-file', '../client-godot/tests/' + fixture, ...(scenario ? ['--test-state', '../client-godot/tests/scenarios/' + scenario + '.state'] : [])], {cwd:join(root, 'bridge'), windowsHide:true});
+const bridge = spawn(join(home, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'), ['-Xmx4g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', String(port), '--opponents', '2', '--deck-file', '../client-godot/tests/' + fixture, ...(scenario ? ['--test-state', '../client-godot/tests/scenarios/' + scenario + '.state'] : [])], {cwd:join(root, 'bridge'), windowsHide:true});
 let bridgeLog = '', ready = false, godot;
 for (const stream of [bridge.stdout, bridge.stderr]) stream.on('data', b => {bridgeLog += b; ready ||= bridgeLog.includes('Bridge ready:'); writeFileSync(join(artifacts, logPrefix + '-bridge.log'), bridgeLog);});
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -37,7 +37,7 @@ try {
   while (!ready && Date.now() < deadline && bridge.exitCode === null) await pause(200);
   if (!ready) throw Error('Bridge startup failed');
   const rendered = process.argv.includes('--render');
-  const args = ['--path', join(root, 'client-godot'), ...(rendered ? ['--resolution', '1600x1000', '--position', '-20000,-20000'] : ['--headless']), '--', `--live=ws://127.0.0.1:${port}/ws`, '--live-check'];
+  const args = ['--path', join(root, 'client-godot'), ...(rendered ? ['--resolution', '1600x1000', ...(process.platform === 'darwin' ? [] : ['--position', '-20000,-20000'])] : ['--headless']), '--', `--live=ws://127.0.0.1:${port}/ws`, '--live-check'];
   if (rendered) args.push(`--live-capture=${join(artifacts, scenario ? logPrefix + '-1600.png' : 'live-table-1600.png')}`);
   if (scenario) args.push('--expect-scenario=' + scenario);
   if (process.argv.includes('--token-online-images')) args.push('--token-online-images');
@@ -50,7 +50,7 @@ try {
   if (colorlessPayment) args.push('--expect-colorless-payment');
   if (mulligan) args.push('--expect-mulligan');
   if (interactions) args.push('--expect-interactions');
-  godot = spawn(process.env.FORGE_GODOT_PATH || join(root, '.tools/godot/Godot_v4.7.2-stable_win64.exe'), args, {cwd:root, windowsHide:true});
+  godot = spawn(process.env.FORGE_GODOT_PATH || join(root, process.platform === 'darwin' ? '.tools/godot/Godot.app/Contents/MacOS/Godot' : '.tools/godot/Godot_v4.7.2-stable_win64.exe'), args, {cwd:root, windowsHide:true});
   let output = '', errors = '';
   godot.stdout.on('data', b => {output += b; process.stdout.write(b);});
   godot.stderr.on('data', b => {errors += b; process.stderr.write(b); if (/SCRIPT ERROR:|Parse Error:|Failed to load script/.test(errors)) godot.kill();});

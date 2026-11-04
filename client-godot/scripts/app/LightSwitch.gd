@@ -25,6 +25,7 @@ func _ready() -> void:
 	focus_exited.connect(queue_redraw)
 
 func _draw() -> void:
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE * (size.y / 34.0))
 	var ink := Color("455f6a").lerp(Color("b8cecb"), darkness)
 	var plate := StyleBoxFlat.new()
 	plate.bg_color = Color("ccd3d5").lerp(Color("41494b"), darkness)

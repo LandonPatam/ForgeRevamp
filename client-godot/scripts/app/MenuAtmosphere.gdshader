@@ -30,6 +30,10 @@ float clouds(vec2 p) {
 
 void fragment() {
     vec3 source = texture(scene_texture, SCREEN_UV).rgb;
+    // Skip the grain pass once the room finish has faded out for the table.
+    if (strength * home_visibility <= 0.0) {
+        COLOR = vec4(source, 1.0);
+    } else {
     // Grain belongs to the home-room layer, so it travels with that layer
     // instead of being regenerated at fixed window coordinates in the editor.
     vec2 pixels = UV / SCREEN_PIXEL_SIZE;
@@ -66,4 +70,5 @@ void fragment() {
     }
     float layer_fade = 1.0 - smoothstep(0.84, 1.0, UV.y);
     COLOR = vec4(mix(source, clamp(treated, vec3(0.0), vec3(1.0)), strength * layer_fade * home_visibility), 1.0);
+    }
 }
