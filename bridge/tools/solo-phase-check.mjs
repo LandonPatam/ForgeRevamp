@@ -3,6 +3,7 @@
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import {fileURLToPath} from 'node:url';
+import {delimiter} from 'node:path';
 import assert from 'node:assert/strict';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -10,7 +11,7 @@ const probe = createServer();
 await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
 const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
-const child = spawn('java', ['-Xmx3g', '-cp', 'target/classes;target/lib/*', 'forgeui.bridge.BridgeMain',
+const child = spawn('java', ['-Xmx3g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain',
   '--assets', '../forge/forge-gui', '--port', String(port), '--opponents', '2'], {cwd: root, windowsHide: true});
 let tail = '', ready = false, state, ws, counter = 0;
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => {

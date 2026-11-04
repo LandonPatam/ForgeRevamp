@@ -75,7 +75,7 @@ final class OnlineLobby implements AutoCloseable {
 
     private synchronized JsonObject host(JsonObject request, Channel caller) throws Exception {
         BridgeProtocol.require(server == null, "You are already hosting a session");
-        readConfig(request.getAsJsonObject("config"));
+        config = readConfig(request.getAsJsonObject("config"));
         port = FModel.getNetPreferences().getPrefInt(ForgeNetPreferences.FNetPref.NET_PORT);
         var candidate = BridgeServer.exposed(port, this::onMessage, this::onConnect, this::onDisconnect);
         try { candidate.start(); }
@@ -101,10 +101,10 @@ final class OnlineLobby implements AutoCloseable {
 
     private synchronized JsonObject configure(JsonObject request) {
         BridgeProtocol.require(server != null, "You are not hosting a session");
-        JsonObject input = request.getAsJsonObject("config");
-        BridgeProtocol.require(input != null && input.has("bots") && input.getAsJsonArray("bots").size() + joined.size() < MAX_PLAYERS, "Every seat is taken");
-        if (!config.equals(input)) {
-            readConfig(input);
+        JsonObject candidate = readConfig(request.getAsJsonObject("config"));
+        BridgeProtocol.require(candidate.getAsJsonArray("bots").size() + joined.size() < MAX_PLAYERS, "Every seat is taken");
+        if (!config.equals(candidate)) {
+            config = candidate;
             resetReady();
         }
         broadcast();
@@ -129,9 +129,10 @@ final class OnlineLobby implements AutoCloseable {
         if (server != null) BridgeProtocol.require(allReady(), "Every player must press PLAY to ready up before the game starts");
     }
 
-    private void readConfig(JsonObject input) {
+    private JsonObject readConfig(JsonObject input) {
         BridgeProtocol.require(input != null && input.has("human") && input.get("bots") != null && input.get("bots").isJsonArray(), "Missing lobby settings");
-        config = input.deepCopy();
+        BridgeProtocol.require(input.getAsJsonArray("bots").size() < MAX_PLAYERS, "Every seat is taken");
+        return input.deepCopy();
     }
 
     private synchronized JsonObject kick(JsonObject request) {
@@ -330,7 +331,9 @@ final class OnlineLobby implements AutoCloseable {
     private synchronized void changeDeck(Channel channel, JsonObject message) throws Exception {
         Joined player = joined.get(channel);
         BridgeProtocol.require(player != null, "Join the session first");
-        joined.put(channel, readDeck(player.id(), channel, player.profile(), message));
+        Joined replacement = readDeck(player.id(), channel, player.profile(), message);
+        joined.put(channel, replacement);
+        player.deckFile().toFile().delete();
         resetReady();
         broadcast();
     }
@@ -348,17 +351,24 @@ final class OnlineLobby implements AutoCloseable {
         try { bytes = Base64.getDecoder().decode(DeckLibrary.string(message, "deckData", "")); }
         catch (IllegalArgumentException e) { throw new IllegalArgumentException("That deck could not be read."); }
         BridgeProtocol.require(bytes.length > 0 && bytes.length <= MAX_DECK_BYTES, "That deck could not be read.");
-        Path file = deckDirectory.resolve("player-" + id + ".dck");
-        Files.write(file, bytes);
-        Deck deck;
-        try { deck = DeckFiles.read(file.toFile()); }
-        catch (RuntimeException e) { throw new IllegalArgumentException("That deck could not be read."); }
-        BridgeProtocol.require(deck != null, "That deck could not be read.");
-        String problem = DeckFormat.Commander.getDeckConformanceProblem(deck);
-        BridgeProtocol.require(problem == null, "The host's Forge rejected your deck: " + problem);
-        String commander = String.join(" / ", deck.getCommanders().stream().map(card -> card.getName()).toList());
-        String name = deck.getName() == null || deck.getName().isBlank() ? commander : deck.getName();
-        return new Joined(id, channel, profile, file, name.length() > 80 ? name.substring(0, 80) : name, commander);
+        // Validate a separate copy so a rejected change cannot overwrite the accepted deck.
+        Path file = Files.createTempFile(deckDirectory, "player-" + id + "-", ".dck");
+        boolean accepted = false;
+        try {
+            Files.write(file, bytes);
+            Deck deck;
+            try { deck = DeckFiles.read(file.toFile()); }
+            catch (RuntimeException e) { throw new IllegalArgumentException("That deck could not be read."); }
+            BridgeProtocol.require(deck != null, "That deck could not be read.");
+            String problem = DeckFormat.Commander.getDeckConformanceProblem(deck);
+            BridgeProtocol.require(problem == null, "The host's Forge rejected your deck: " + problem);
+            String commander = String.join(" / ", deck.getCommanders().stream().map(card -> card.getName()).toList());
+            String name = deck.getName() == null || deck.getName().isBlank() ? commander : deck.getName();
+            accepted = true;
+            return new Joined(id, channel, profile, file, name.length() > 80 ? name.substring(0, 80) : name, commander);
+        } finally {
+            if (!accepted) Files.deleteIfExists(file);
+        }
     }
 
     private int openSeats() {

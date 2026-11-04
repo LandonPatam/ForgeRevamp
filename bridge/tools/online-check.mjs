@@ -2,8 +2,8 @@
 // match and checks seat isolation, hidden information, tokens, reconnect and leaving. Stops only its own processes.
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { join, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
@@ -16,13 +16,25 @@ await new Promise(resolve => probe.close(resolve));
 const fixture = mkdtempSync(join(bridgeRoot, 'target', 'online-fixture-'));
 // No affordable off-turn spells or abilities: idle seats must never gate these turns.
 writeFileSync(join(fixture, 'Priority.dck'), "[metadata]\nName=Online priority fixture\n[Commander]\n1 Atraxa, Praetors' Voice|PF26|1\n[Main]\n99 Forest|SOS|1\n");
-const javaSettings = spawnSync('java', ['-XshowSettings:properties', '-version'], {encoding: 'utf8', windowsHide: true});
-const javaHome = javaSettings.stderr?.match(/^\s*java.home = (.+)$/m)?.[1].trim();
+// --mac-app exercises the exact shipped service/classes/assets and bundled JVM, with isolated test data.
+const option = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
+const macApp = option('--mac-app');
+const architecture = option('--arch') || (process.arch === 'arm64' ? 'arm64' : 'x86_64');
+if (!['arm64', 'x86_64'].includes(architecture)) throw Error('Unsupported Mac architecture');
+const payload = macApp ? resolve(macApp, 'Contents/Resources') : null;
+const javaSettings = payload ? null : spawnSync('java', ['-XshowSettings:properties', '-version'], {encoding: 'utf8', windowsHide: true});
+const javaHome = payload ? join(payload, 'runtime', architecture, 'Contents/Home') : javaSettings.stderr?.match(/^\s*java.home = (.+)$/m)?.[1].trim();
+if (!javaHome) throw Error('Cannot locate Java');
+const classpath = payload ? [join(payload, 'service/classes'), join(payload, 'service/lib/*')].join(delimiter) : ['target/classes', 'target/lib/*'].join(delimiter);
 const child = spawn(join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'),
-  ['-Xmx4g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.LibraryMain', '--assets', '../forge/forge-gui', '--port', libraryPort, '--library-root', fixture],
+  ['-Xmx4g', '-cp', classpath, 'forgeui.bridge.LibraryMain', '--assets', payload ? join(payload, 'forge-gui') : '../forge/forge-gui',
+    '--port', libraryPort, '--library-root', fixture, '--data-dir', fixture, '--parent-pid', String(process.pid)],
   {cwd: bridgeRoot, windowsHide: true});
 let tail = '';
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { tail = (tail + data).slice(-6000); });
+child.on('error', error => { tail += String(error); });
+const remoteAddress = option('--host-address') || '127.0.0.1';
+console.log(`Online check: ${payload || 'source classes'}; Java ${architecture}; online address ${remoteAddress}`);
 
 let passed = 0;
 const check = (value, message) => { assert.ok(value, message); passed++; console.log(`  ok - ${message}`); };
@@ -155,7 +167,7 @@ try {
   check((await call('lobby.status')).hosting === false, 'Not hosting before asked to');
   const hosted = await call('lobby.host', {discover: false, config: {human, bots: [bot]}});
   check(hosted.hosting && hosted.port > 0, `Hosting opens the online port (${hosted.port})`);
-  const onlineUrl = `ws://127.0.0.1:${hosted.port}/ws`;
+  const onlineUrl = `ws://${remoteAddress}:${hosted.port}/ws`;
   check((await callRejected('lobby.host', {discover: false, config: {human, bots: [bot]}}))?.includes('already hosting'), 'A second host request is refused, not duplicated');
 
   // The exposed port serves no files and refuses browsers.
@@ -187,33 +199,67 @@ try {
   const secondLobby = await second.wait(m => m.type === 'lobby', 'second lobby update');
   check(secondLobby.roster.at(-1).name === 'Friend 2', 'A duplicate name is made unique');
   check(secondLobby.open === 0, 'The last seat is now taken');
+  check((await callRejected('lobby.config', {config: {human, bots: [bot, {...bot, name: 'Extra bot'}]}}))?.includes('taken'), 'Adding a bot to a full table is refused');
   const third = await open(onlineUrl);
   third.send(joinMessage('Too many'));
   check((await third.wait(m => m.type === 'rejected', 'full rejection')).message.includes('full'), 'A full lobby refuses another player');
+  friend.messages.length = 0;
   second.ws.close();
-  await friend.wait(m => m.type === 'lobby' && m.open === 1, 'seat reopening');
+  await friend.wait(m => m.type === 'lobby' && m.open === 1, 'seat reopening', 5000);
   check(true, 'A player leaving reopens their seat');
+
+  const kicked = await open(onlineUrl);
+  kicked.send(joinMessage('Removed player'));
+  const kickedLobby = await kicked.wait(m => m.type === 'lobby', 'kick test lobby');
+  friend.messages.length = 0;
+  await call('lobby.kick', {id: kickedLobby.you});
+  check((await kicked.wait(m => m.type === 'rejected', 'kick notice')).message.includes('removed'), 'The host can remove a player');
+  await friend.wait(m => m.type === 'lobby' && m.open === 1, 'seat reopening after kick');
+  check(true, 'Removing a player frees their seat');
+
+  // Windows decks use CRLF; the wire format must preserve UTF-8 names and deck bytes.
+  const windowsText = Buffer.from(deckData, 'base64').toString('utf8').replace(/^Name=.*$/m, 'Name=Windows CRLF – Zoë').replace(/\r?\n/g, '\r\n');
+  const windowsData = Buffer.from(windowsText, 'utf8').toString('base64');
+  friend.send({type: 'deck', deckData: windowsData});
+  await friend.wait(m => m.type === 'lobby' && m.roster.some(p => p.deck === 'Windows CRLF – Zoë'), 'Windows-style deck change');
+  check((await call('lobby.status')).players[0].deck === 'Windows CRLF – Zoë', 'Deck changes accept Windows CRLF and UTF-8 names');
+  friend.send({type: 'deck', deckData: Buffer.from('[metadata]\nName=Invalid replacement\n[Main]\n1 Mountain\n').toString('base64')});
+  await friend.wait(m => m.type === 'rejected', 'invalid replacement rejection');
+  check((await call('lobby.status')).players[0].deck === 'Windows CRLF – Zoë', 'An invalid replacement keeps the accepted deck in the roster');
+
+  const fourth = await open(onlineUrl);
+  fourth.send(joinMessage('Fourth seat'));
+  await fourth.wait(m => m.type === 'lobby' && m.roster.length === 4, 'four-seat roster');
+  check(true, 'A four-player roster contains the host, a bot and two joined people');
 
   // Starting: the online port is handed to the match process.
   const startArgs = {owner, id: deck.id, launchKey: 'online-check-launch-key', setup: {human, bots: [bot]}};
   check((await callRejected('match.start', startArgs))?.includes('press PLAY'), 'Starting is refused while players are not ready');
   await call('lobby.ready', {ready: true});
   check((await callRejected('match.start', startArgs))?.includes('press PLAY'), 'The host cannot start without the friend pressing PLAY');
+  friend.messages.length = 0;
   friend.send({type: 'ready', ready: true});
-  await friend.wait(m => m.type === 'lobby' && m.allReady, 'both players ready');
+  await friend.wait(m => m.type === 'lobby' && m.roster.some(p => p.name === 'Friend' && p.ready), 'friend ready before fourth seat');
+  check((await callRejected('match.start', startArgs))?.includes('press PLAY'), 'Every joined human must ready, including the fourth seat');
+  fourth.send({type: 'ready', ready: true});
+  await friend.wait(m => m.type === 'lobby' && m.allReady, 'all three humans ready');
   check((await call('lobby.status')).players[0].ready, 'The host sees the friend ready');
   check((await call('lobby.config', {config: {human, bots: [bot]}})).allReady, 'Unchanged settings preserve readiness during polling');
   friend.messages.length = 0;
-  friend.send({type: 'deck', deckData});
+  friend.send({type: 'deck', deckData: windowsData});
   await friend.wait(m => m.type === 'lobby' && !m.allReady && m.roster.every(p => !p.ready), 'deck resets readiness');
   check(!(await call('lobby.status')).hostReady, 'Changing a deck resets everyone, including the host');
   friend.messages.length = 0;
   friend.send({type: 'ready', ready: true});
   await friend.wait(m => m.type === 'lobby' && !m.allReady && m.roster.some(p => p.kind === 'player' && p.ready), 'friend readies first');
   check((await callRejected('match.start', startArgs))?.includes('press PLAY'), 'A ready friend cannot bypass an unready host');
+  fourth.messages.length = 0;
+  fourth.send({type: 'ready', ready: true});
+  await fourth.wait(m => m.type === 'lobby' && m.roster.filter(p => p.kind === 'player').every(p => p.ready), 'both friends ready before host');
   check((await call('lobby.ready', {ready: true})).allReady, 'Either readiness order works; bots need no confirmation');
   await call('match.start', {owner, id: deck.id, launchKey: 'online-check-launch-key', setup: {human, bots: [bot]}});
   const start = await friend.wait(m => m.type === 'start', 'start message');
+  const fourthStart = await fourth.wait(m => m.type === 'start', 'fourth seat start');
   check(start.token?.length === 64 && start.port === hosted.port, 'The joined player receives a seat token');
   check((await call('lobby.status')).hosting === false, 'The lobby closes once the match starts');
   let ready;
@@ -223,6 +269,8 @@ try {
     if (state.state === 'ready') ready = state; else await pause(300);
   }
   check(ready, 'Forge reports the online match ready');
+  const setup = JSON.parse(readFileSync(join(fixture, 'app-sessions', `${ready.session}.setup.json`), 'utf8'));
+  check(readFileSync(setup.remotes[0].deckFile, 'utf8') === windowsText, 'Rejecting a replacement preserves the accepted deck bytes used by the match');
 
   // Seat access
   const seatDeadline = Date.now() + 30000;
@@ -240,9 +288,13 @@ try {
   const host = await open(ready.url);
   let player = await open(onlineUrl);
   player.send({type: 'auth', token: start.token});
-  const isGame = m => m.type === 'state' && !m.loading && m.players?.length === 3;
+  const fourthPlayer = await open(onlineUrl);
+  fourthPlayer.send({type: 'auth', token: fourthStart.token});
+  const isGame = m => m.type === 'state' && !m.loading && m.players?.length === 4;
   const hostState = await host.wait(isGame, 'host game state');
   const playerState = await player.wait(isGame, 'player game state');
+  const fourthState = await fourthPlayer.wait(isGame, 'fourth seat game state');
+  check(fourthState.me !== playerState.me && fourthState.me !== hostState.me, 'The fourth seat connects to its own player in a real four-player match');
   check(hostState.me !== playerState.me, 'Each seat is its own player');
   const name = (state, id) => state.players.find(p => p.id === id).name;
   check(name(hostState, hostState.me) === 'Host Player' && name(playerState, playerState.me) === 'Friend', 'Seats map to the right names');
@@ -252,8 +304,8 @@ try {
   // Forge can warn about a generated bot deck before it performs the toss.
   // Resolve only those information messages; leave the actual starting choice open.
   const tossDeadline = Date.now() + 15000;
-  while (Date.now() < tossDeadline && ![host, player].every(peer => peer.messages.findLast(isGame)?.startingToss)) {
-    for (const peer of [host, player]) {
+  while (Date.now() < tossDeadline && ![host, player, fourthPlayer].every(peer => peer.messages.findLast(isGame)?.startingToss)) {
+    for (const peer of [host, player, fourthPlayer]) {
       if (peer.messages.findLast(isGame)?.asks?.some(ask => ask.kind === 'message')) step(peer);
       if (peer.messages.at(-1)?.type === 'error') peer.lastRevision = undefined;
     }
@@ -273,7 +325,7 @@ try {
     bothHands = a.players.find(p => p.id === a.me).zones.Hand.some(c => !c.hidden) && b.players.find(p => p.id === b.me).zones.Hand.some(c => !c.hidden);
     if (!bothHands) {
       // Only the coin-toss choice may be made here; mulligans stay open so a hand remains on show.
-      for (const peer of [host, player]) {
+      for (const peer of [host, player, fourthPlayer]) {
         const state = peer.messages.findLast(isGame);
         if (state.prompt?.inputKind === 'InputSelectEntitiesFromList' || state.asks?.some(ask => ask.kind === 'message')) step(peer);
       }
@@ -298,7 +350,7 @@ try {
   }
   check(player.messages.findLast(isGame).openingHandComplete && host.messages.findLast(isGame).prompt.inputKind === 'InputConfirmMulligan', 'The friend finishes Keep and leaves the opening screen while the host is still choosing');
   // Exercise the opening for both seats, so the checks below run against a game in progress.
-  check(await drive([host, player], 1), 'Both seats can play through the opening decisions');
+  check(await drive([host, player, fourthPlayer], 1), 'Both seats can play through the opening decisions');
 
   // Another seat's decisions and stale identities are refused.
   const before = player.messages.findLast(isGame);
@@ -337,7 +389,7 @@ try {
   const lost = await host.wait(m => isGame(m) && m.players.find(p => p.id === playerState.me).lost === true || (isGame(m) && m.absentPlayers?.length === 0 && m.revision > resumed.revision), 'seat release', 20000);
   check(lost, 'The table carries on after a player leaves');
   const startTurn = host.messages.findLast(isGame).game.turn;
-  check(await drive([host], startTurn + 2), 'The host plays on through later turns, so the engine is not stuck on the empty seat');
+  check(await drive([host, fourthPlayer], startTurn + 2), 'The host plays on through later turns, so the engine is not stuck on the empty seat');
 
   await call('match.stop', {owner, session: ready.session});
   check((await call('match.status', {owner})).state === 'stopped', 'Stopping the match ends it for the host');
@@ -454,10 +506,22 @@ try {
   await call('match.stop', {owner, session: live.session});
   const ended = await finalFriend.wait(m => m.type === 'sessionEnded', 'terminal session-ended notice', 5000);
   check(ended.sessionId === finalFriend.messages.findLast(isDuel).sessionId && ended.message.includes('host'), 'Host End Game delivers a session-scoped terminal event to the friend');
+  await call('lobby.host', {discover: false, config: {human, bots: []}});
+  const cancelWaiting = await open(onlineUrl);
+  cancelWaiting.send(joinMessage('Waiting friend'));
+  await cancelWaiting.wait(m => m.type === 'lobby', 'cancelled lobby');
+  await call('lobby.stop');
+  check((await cancelWaiting.wait(m => m.type === 'closed', 'host cancellation')).message.includes('closed'), 'Cancelling hosting tells joined players');
+  check((await call('lobby.status')).hosting === false, 'Cancelling hosting closes the lobby');
+  await call('lobby.host', {discover: false, config: {human, bots: []}});
+  library.ws.close();
+  library = await open(`ws://127.0.0.1:${libraryPort}/ws`);
+  for (let i = 0; i < 40 && (await call('lobby.status')).hosting; i++) await pause(100);
+  check((await call('lobby.status')).hosting === false, 'Losing the host application closes its lobby');
 
   console.log(`\nonline-check: ${passed} checks passed`);
 } catch (error) {
-  console.error(`\nonline-check FAILED after ${passed} checks: ${error.message}\n--- service log tail ---\n${tail}`);
+  console.error(`\nonline-check FAILED after ${passed} checks: ${error.message}\n--- service log tail ---\n${tail}\n${existsSync(join(fixture, 'service.log')) ? readFileSync(join(fixture, 'service.log'), 'utf8').slice(-6000) : ''}`);
   process.exitCode = 1;
 } finally {
   for (const ws of sockets) { try { ws.close(); } catch {} }

@@ -7,7 +7,7 @@
 //                                  [--decks "Abzan Armor,Ahoy Mateys"] [--parallel 1] [--trace] [--out DIR]
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { join, dirname } from 'node:path';
+import { join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 
@@ -42,7 +42,7 @@ async function freePort() {
 
 async function launch(deckFile) {
   const port = await freePort();
-  const child = spawn(javaExe, ['-Xmx3g', '-cp', 'target/classes;target/lib/*', 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', String(port), '--deck-file', deckFile, '--opponents', '2'], { cwd: bridgeRoot, windowsHide: true });
+  const child = spawn(javaExe, ['-Xmx3g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', String(port), '--deck-file', deckFile, '--opponents', '2'], { cwd: bridgeRoot, windowsHide: true });
   const host = { child, port, tail: '', ready: false, log: [] };
   for (const stream of [child.stdout, child.stderr]) stream.on('data', data => {
     const text = data.toString();

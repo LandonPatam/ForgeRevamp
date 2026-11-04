@@ -1,7 +1,7 @@
 // Starts an isolated three-player AI match, checks the real WebSocket protocol, then stops only that process.
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const bridgeRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -14,7 +14,7 @@ const url = `ws://127.0.0.1:${port}/ws`;
 const javaSettings = spawnSync('java', ['-XshowSettings:properties', '-version'], {encoding: 'utf8', windowsHide: true});
 const javaHome = javaSettings.stderr?.match(/^\s*java.home = (.+)$/m)?.[1].trim();
 if (!javaHome) throw new Error('Could not locate the JVM home');
-const child = spawn(join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'), ['-Xmx4g', '-cp', 'target/classes;target/lib/*', 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', port, '--opponents', '2'], {cwd: bridgeRoot, windowsHide: true});
+const child = spawn(join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'), ['-Xmx4g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain', '--assets', '../forge/forge-gui', '--port', port, '--opponents', '2'], {cwd: bridgeRoot, windowsHide: true});
 let tail = '', startupFailure, ready = false;
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { const text = data.toString(); ready ||= text.includes('Bridge ready:'); tail = (tail + text).slice(-4000); });
 child.on('error', error => { startupFailure = error; });
