@@ -102,7 +102,7 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 
 ## Working rules
 
-- Windows and Mac share https://github.com/LandonPatam/ForgeRevamp and one `main` branch; use short-lived feature/fix branches, not permanent platform branches. See `docs/development-workflow.md`. The initial Windows baseline still needs Mac reconciliation and validation. Preserve the old Mac checkout while importing its unique changes.
+- Windows and Mac share https://github.com/LandonPatam/ForgeRevamp and one `main` branch; use short-lived feature/fix branches, not permanent platform branches. See `docs/development-workflow.md`. Mac reconciliation and verification are recorded in `docs/mac-reconciliation.md`; keep the old Mac checkout and require affected Windows checks before merging the reconciliation branch.
 - At task start inspect Git status, branch and commit. Coordinate one writer at a time on a shared feature branch; use separate branches for concurrent tasks. Handoffs reference a pushed branch/commit, checks and remaining issues instead of asking another agent to recreate code. Commit/push when authorized by the task; do not auto-switch dirty worktrees or force-push shared history.
 - Don't scan the whole codebase. Start from this map and open only task-relevant files; ask if unsure where something lives.
 - Ask before large refactors or renaming files. Keep diffs focused on the request.

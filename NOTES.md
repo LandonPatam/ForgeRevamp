@@ -1,20 +1,21 @@
-﻿# Session notes - 2026-11-04
+# Session notes - 2026-11-04
 
 ## Current state
 
-- Windows source baseline prepared for publication on `main` at https://github.com/LandonPatam/ForgeRevamp. Client, bridge, tests, required assets and Forge patches are included; builds, caches, captures, backups and handoff ZIPs stay local.
-- Shared workflow: one `main`, short-lived feature/fix branches and commit-based handoffs with Windows/Mac checks. See `docs/development-workflow.md` and AGENTS.md. Mac consolidation is still pending.
-- ForgeUI supports host-authoritative online play and joining-player reconnect persistence; see current source and `docs/online-play.md`. Older notes claiming online play is absent are obsolete. Solo/host crash recovery is not requested.
-- Tapped pile members shift down to expose the card behind, including dragged piles. Anchors and neighbors stay fixed. The rendered UI suite passed and the pile capture was inspected before repository setup.
-- Baseline checks: Godot 4.7.2 import and all 12 browser protocol checks passed; the recorded Forge patch passes reverse-application validation against the local patched dependency checkout. Mac checks remain pending.
+- `chore/mac-reconciliation` consolidates Windows baseline `434c14b` with unique Mac work. Implementation commits: `824ce26` (lobby/portable bridge checks), `23380b5` (Mac UI/runtime/packaging), `f4fae0e` (opening-hand layout for short 2x viewports). See `docs/mac-reconciliation.md` for decisions, artifacts and checks.
+- Original Mac project remains intact at `../ForgeUI`; full verified backup is `../mac-backups/ForgeUI-pre-reconciliation-20261104.tar.gz` with SHA-256 sidecar. This new sibling clone contains the shared source; caches, builds and credentials remain untracked.
+- Imported 2x UI surfaces, editor artwork/input fixes, render optimizations, layout-loop recovery, remote-seat recovery improvements and lobby validation. Retained Windows downward pile tap behavior, solo phase stops, protocol protections, Windows scripts and export preset.
+- Forge stays pinned to `84f4983`; all 15 local upstream modifications exactly match the existing tracked patch. No additional Mac patch was required. Full Forge/bridge build, 445 Java checks, 12 browser checks, 73 source online checks, 8 four-seat turn checks, repeated solo bot phase stops, library and Retina integration passed.
+- Universal Mac DMG built and verified at `dist/ForgeUI-mac-reconciliation-universal.dmg`, from clean implementation commit `23380b5`; a final rebuild is pending after the verified short-viewport opening-hand fix. Apple Silicon and Intel/Rosetta bundled real-match launch/cleanup passed; packaged Intel runtime passed all 73 online checks.
 
 ## Known issues
 
-- The existing Mac checkout contains platform work unavailable here. Current baseline launchers include Windows-specific commands. Preserve the Mac copy; the baseline is not Mac-validated.
-- Forge can occasionally reject a generated Talrand bot deck before readiness (previously observed). The 900-frame smoke wrapper can expire early; see CLAUDE_HANDOFF.txt for the extended command.
-- Historical handoffs may be outdated. Prefer current source, AGENTS.md and the shared workflow.
+- Source smoke still fails existing attacker-scroll containment at 1280x800 and hand drag reorder assertions. Both reproduce in an isolated original Mac source copy; attacker-scroll also fails on untouched Windows baseline on Mac. Release smoke disables assertions, so its pass does not resolve these source failures.
+- Native Intel hardware, physical Mac-to-Windows play and outside-network/router behavior remain unverified. Mac signing is ad hoc, without Developer ID/notarization.
+- Historical handoffs and original Mac NOTES are outdated; use current source and the reconciliation record.
 
 ## Next steps
 
-- Mac: preserve the old project, clone into a new sibling directory and create `chore/mac-reconciliation`. Compare/import unique fixes, launchers, export presets and packaging; reconcile unique Forge patches.
-- Push Mac reconciliation, test affected Windows behavior, then merge after both platforms pass. Future handoffs report branch, commit, checks and remaining issues.
+- Windows: fetch `chore/mac-reconciliation`; run affected import/UI/library/pile, Java/browser/online/solo phase, and Windows packaging/launch checks. Report the tested commit.
+- Resolve or explicitly triage source smoke issues. Merge into `main` only after Windows checks pass; this session does not merge.
+- Keep the original Mac project and backup until consolidation is accepted on both platforms.

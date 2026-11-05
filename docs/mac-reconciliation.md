@@ -25,6 +25,9 @@ were imported into tracked source. Local tools/dependencies were copied for test
   expanded four-seat/CRLF/UTF-8/readiness coverage. No wire protocol change.
 - Reconciled remote-seat persistence and normalized die engine IDs, adding the Mac
   integration checks without discarding Windows' existing protocol protections.
+- Added a short-viewport opening-hand layout after rendered verification exposed
+  overlapping cards/decisions at 2x. Full-size layouts retain their original sizing.
+  The focused opening-hand suite passes at 800x500 and 640x400 logical sizes.
 - Retained Windows' newer downward pile-tap offset in both automatic/manual piles,
   its regression checks, stable solo phase-stop implementation and broader Java tests.
   The older Mac sideways nudge and alternate implementations of equivalent solo
@@ -41,4 +44,54 @@ were imported into tracked source. Local tools/dependencies were copied for test
 
 ## Verification
 
-Mac verification is in progress. Final results are recorded below before handoff.
+Verified on Apple M2 / macOS 26.3.1 / Godot 4.7.2 / JDK 17.
+Implementation commits: `23380b5` (Mac reconciliation) and `f4fae0e`
+(short opening-hand viewport layout and related checks). Final package verification
+is pending; each package records its exact source commit and dirty state.
+
+- Full Forge reactor and bridge Maven package: passed; Java regression harness:
+  **445 checks passed** after rebuilding the pinned, patched Forge modules.
+- Browser protocol/recovery: **12 checks passed**.
+- Real source lobby/seats/privacy/reconnect/leave: **73 checks passed**.
+- Four-seat online turn/combat: **8 checks passed**.
+- Real solo phase runner: both bots paused at M1/M2 over repeated turns.
+- Godot import: passed with no script errors.
+- Retina UI integration: passed settings, portraits, online field, editor/artwork
+  mouse input, import dialogs, real match, park/resume and end cleanup; captures
+  of the table, small settings and editor were inspected.
+- Library integration: passed catalog, printing selection, import/export, undo/redo,
+  quantities, metadata and conflict guards.
+- Packaged Intel JVM under Rosetta: **73 online checks passed**.
+- Exported Intel Godot plus bundled Intel JVM under Rosetta: real-match startup,
+  hidden information and owned-process cleanup passed.
+- Universal export, signature, DMG checksum verification, release smoke and bundled
+  Apple Silicon real-match startup/cleanup: passed. Release exports disable GDScript assertions; this is
+  separate from the source assertion failures below.
+
+The initial local artifact (before the short opening-hand layout fix) is
+`dist/ForgeUI-mac-reconciliation-universal.dmg` (615 MiB),
+SHA-256 `f2a746a90b0154c6c59a17b9fe1319f6416d55b4a3250b3bc7fb18c9b0d17d6d`.
+Backup SHA-256: `510cc69ef805d596346666a89ec7b1d2157ec0336afd11f57fb97d1fed9ed6e8`
+(archive integrity and checksum verified).
+
+Local logs and captures are retained under `artifacts/mac-reconciliation/` and
+`client-godot/artifacts/`. Build logs are under `dist/`.
+
+## Remaining issues and Windows gate
+
+- Source `bash client-godot/tools/run.sh -Check` correctly fails on two existing
+  assertions: attacker controls inside the scroll viewport at 1280x800, and hand
+  drag reordering. Both reproduce in an isolated copy of the preserved original
+  Mac source. The attacker-scroll assertion also reproduces on untouched Windows
+  `434c14b` on Mac; that baseline additionally halts on opponent-card size bounds.
+  These failures have not been hidden or weakened. The preserved Mac's failing
+  sideways moved-pile assertion is superseded by the retained Windows downward
+  pile implementation/checks.
+- Physical Mac-to-Windows play, external internet/router behavior and native Intel
+  hardware still require verification. Rosetta checks do not establish those.
+- Builds are ad-hoc signed; Developer ID/notarization remains separate.
+- Windows must fetch this branch and run import, rendered app/library/UI scale,
+  Java/browser/online/solo phase checks, downward pile capture checks, and its
+  `package.ps1` export/launch. Review source smoke failures on Windows too.
+- Do not merge `main` before the Windows checks pass; resolve or explicitly triage
+  the source smoke issues before treating this as a fully green release.
