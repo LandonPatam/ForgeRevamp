@@ -1271,12 +1271,38 @@ final class BridgeGuiGame extends AbstractGuiGame {
         super.setSelection(selection);
         listener.stateChanged();
     }
+    /** Stack item whose actionable scan was last recorded, and whether a response can target it. */
+    private volatile int respondScanStackId = -1;
+    private volatile boolean respondScanCanTarget = true;
+
+    /** Unknown/stale scans conservatively report that the item can be answered. */
+    boolean canTargetStackItem(int stackId) {
+        return respondScanStackId != stackId || respondScanCanTarget;
+    }
+
     @Override public void setWeaklySelectable(Iterable<CardView> cards) {
         super.setWeaklySelectable(cards);
+        // Forge pushes its game-thread actionable scan at each priority prompt; record
+        // whether any of it can answer the top item itself (counterspell, Stifle).
+        if (getGameController() instanceof PlayerControllerHuman human) {
+            var top = human.getGame().getStack().peek();
+            if (top == null || human.getInputQueue().getInput() instanceof forge.gamemodes.match.input.InputPayMana) {
+                respondScanStackId = -1; // Payment pushes mana sources, not responses.
+            } else {
+                var actionable = new ArrayList<forge.game.card.Card>();
+                for (CardView view : cards) {
+                    var card = human.getGame().findByView(view);
+                    if (card != null) actionable.add(card);
+                }
+                respondScanCanTarget = StackInteractionPolicy.canTargetStackItem(human.getPlayer(), actionable, top.getSpellAbility());
+                respondScanStackId = top.getId();
+            }
+        }
         listener.stateChanged();
     }
     @Override public void clearWeaklySelectable() {
         super.clearWeaklySelectable();
+        respondScanStackId = -1;
         listener.stateChanged();
     }
 }

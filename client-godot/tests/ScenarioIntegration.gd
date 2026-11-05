@@ -493,16 +493,16 @@ func combat() -> bool:
 	return true
 
 func stack_priority() -> bool:
-	if scenario in ["stack-response", "stack-ability", "stack-free-response"]:
-		if not check(not ui.snapshot.stack.is_empty() and int(ui.snapshot.get("autoPassStackId", -1)) == -1, "An affordable spell or activated ability must preserve the opponent creature's response window"): return false
+	if scenario in ["stack-response", "stack-free-response"]:
+		if not check(not ui.snapshot.stack.is_empty() and int(ui.snapshot.get("autoPassStackId", -1)) == -1, "A counterspell that can target the opponent creature must preserve its response window"): return false
 		var creature: Dictionary = ui.snapshot.stack[0].duplicate(true)
 		await ui.get_tree().create_timer(0.5).timeout
 		if not check(ui.snapshot.stack.any(func(item): return item.id == creature.id) and not ui.incoming_effect.panel.visible, "A legal response pauses without a forced informational popup"): return false
-		if scenario in ["stack-ability", "stack-free-response"]:
+		if scenario == "stack-free-response":
 			ui._primary_action()
 			if not await settle(): return false
 			await capture("result")
-			return check(ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears"), "Declining an available activated response resolves the opponent creature")
+			return check(ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears"), "Declining an available counter resolves the opponent creature")
 		if not await tap("Island", 2) or not await cast("Counterspell"): return false
 		if not ui.snapshot.asks.is_empty():
 			if not await choose_named("Grizzly Bears"): return false
@@ -515,7 +515,7 @@ func stack_priority() -> bool:
 	else:
 		for index in range(60):
 			if ui.snapshot.stack.is_empty(): break
-			if not check(not ui.incoming_effect.panel.visible and not ui.modal.visible, "An unrelated creature needs no acknowledgment"): return false
+			if not check(not ui.incoming_effect.panel.visible and not ui.modal.visible, "An unrelated creature needs no acknowledgment, even with an unrelated activated ability available"): return false
 			await ui.get_tree().create_timer(0.1).timeout
 		if not check(ui.snapshot.stack.is_empty() and ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears"), "The opponent creature must enter without a manual priority click"): return false
 		if not check(ui.adapter.auto_priority_passes > 0, "The adapter must pass the routine item automatically"): return false

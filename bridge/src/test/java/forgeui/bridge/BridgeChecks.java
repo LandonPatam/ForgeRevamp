@@ -311,37 +311,62 @@ public final class BridgeChecks {
     }
 
     private static void stackInteractionPolicy() {
+        var api = (java.util.function.Function<forge.game.ability.ApiType, SpellAbility>) type -> stackAbility(type, false, false);
         var creature = stackAbility(forge.game.ability.ApiType.PermanentCreature, true, false);
-        check(StackInteractionPolicy.mayAutoPass(creature, false, false, false), "An opponent's normal creature resolves without a response or local impact");
-        check(!StackInteractionPolicy.mayAutoPass(creature, false, true, false), "A legal counterspell or activated response preserves priority");
-        check(!StackInteractionPolicy.mayAutoPass(creature, false, false, true), "Direct local impact preserves attention even without a response");
-        check(StackInteractionPolicy.mayAutoPass(creature, true, true, false), "Own routine casts keep their existing automatic commit");
-        for (var api : List.of(forge.game.ability.ApiType.Draw, forge.game.ability.ApiType.GainLife,
-                forge.game.ability.ApiType.Scry, forge.game.ability.ApiType.Surveil, forge.game.ability.ApiType.Token)) {
-            var ability = stackAbility(api, false, false);
-            check(StackInteractionPolicy.mayAutoPass(ability, false, false, false), "Opponent self-only " + api + " should proceed");
-            ability.getMapParams().put("Defined", "Each");
-            check(!StackInteractionPolicy.mayAutoPass(ability, false, false, false), "Untargeted " + api + " affecting everyone must not be treated as self-only");
+        check(StackInteractionPolicy.mayAutoPass(creature, false, false, false, false), "An opponent's normal creature resolves without a response");
+        check(StackInteractionPolicy.mayAutoPass(creature, false, true, false, false), "An unrelated instant must not hold an opponent's creature or commander cast");
+        check(!StackInteractionPolicy.mayAutoPass(creature, false, true, true, false), "A counterspell that can target the creature preserves the window");
+        check(StackInteractionPolicy.mayAutoPass(creature, true, true, false, false), "Own routine casts keep their existing automatic commit");
+        check(!StackInteractionPolicy.mayAutoPass(null, false, false, false, false), "An unknown stack item must never auto-pass");
+        for (var type : List.of(forge.game.ability.ApiType.Draw, forge.game.ability.ApiType.GainLife,
+                forge.game.ability.ApiType.Scry, forge.game.ability.ApiType.Surveil, forge.game.ability.ApiType.Token,
+                forge.game.ability.ApiType.Discard, forge.game.ability.ApiType.Pump, forge.game.ability.ApiType.Mill)) {
+            var ability = api.apply(type);
+            check(StackInteractionPolicy.mayAutoPass(ability, false, true, false, false), "Opponent self-only " + type + " should proceed even when we hold an unrelated response");
+            ability.getMapParams().put("Defined", "You");
+            check(StackInteractionPolicy.isSelfContained(ability), "Explicit controller recipients remain self-only for " + type);
+            ability.getMapParams().put("Defined", "Player");
+            check(!StackInteractionPolicy.isSelfContained(ability), "Untargeted " + type + " affecting everyone must not be treated as self-only");
         }
-        var counters = stackAbility(forge.game.ability.ApiType.PutCounter, false, false);
+        // Monarch end-step draw, Kindred Discovery and Spellbound Dragon / The Ur-Dragon attack triggers.
+        var monarch = api.apply(forge.game.ability.ApiType.Draw);
+        monarch.getMapParams().put("Defined", "You");
+        check(StackInteractionPolicy.mayAutoPass(monarch, false, true, false, false), "The monarch draw must not hold other seats");
+        check(!StackInteractionPolicy.mayAutoPass(monarch, false, true, true, false), "Holding Stifle-like responses keeps the trigger window");
+        var spellbound = api.apply(forge.game.ability.ApiType.Draw);
+        var discard = new forge.game.spellability.AbilitySub(forge.game.ability.ApiType.Discard, null, null, new java.util.HashMap<>(Map.of("Mode", "TgtChoose")));
+        discard.setSubAbility(new forge.game.spellability.AbilitySub(forge.game.ability.ApiType.Pump, null, null, new java.util.HashMap<>(Map.of("NumAtt", "+X"))));
+        spellbound.setSubAbility(discard);
+        check(StackInteractionPolicy.mayAutoPass(spellbound, false, true, false, false), "Draw/discard/self-pump attack triggers must not hold defenders");
+        var urDragon = api.apply(forge.game.ability.ApiType.Draw);
+        urDragon.setSubAbility(new forge.game.spellability.AbilitySub(forge.game.ability.ApiType.ChangeZone, null, null,
+                new java.util.HashMap<>(Map.of("Origin", "Hand", "Destination", "Battlefield", "ChangeType", "Permanent"))));
+        check(StackInteractionPolicy.isSelfContained(urDragon), "Putting a permanent from your own hand onto the battlefield is self-only");
+        var bounce = api.apply(forge.game.ability.ApiType.ChangeZone);
+        bounce.getMapParams().putAll(Map.of("Origin", "Battlefield", "Destination", "Hand", "ChangeType", "Creature", "Hidden", "True"));
+        check(!StackInteractionPolicy.isSelfContained(bounce), "Untargeted battlefield choices can reach other players' permanents");
+        var counters = api.apply(forge.game.ability.ApiType.PutCounter);
         counters.getMapParams().put("Defined", "Self");
-        check(StackInteractionPolicy.isRoutineOpponentEffect(counters), "Counters on the opponent's source can proceed");
+        check(StackInteractionPolicy.isSelfContained(counters), "Counters on the opponent's source can proceed");
         counters.getMapParams().put("Choices", "Card");
-        check(!StackInteractionPolicy.isRoutineOpponentEffect(counters), "Broad counter choices can affect local permanents");
-        check(!StackInteractionPolicy.isRoutineOpponentEffect(stackAbility(forge.game.ability.ApiType.Proliferate, false, false)), "Opponent proliferate can include our counters");
-        check(!StackInteractionPolicy.isRoutineOpponentEffect(stackAbility(forge.game.ability.ApiType.DamageAll, true, false)), "Mass damage retains its response window");
-        check(!StackInteractionPolicy.isRoutineOpponentEffect(stackAbility(null, false, false)), "Unknown effects remain reviewable");
+        check(!StackInteractionPolicy.isSelfContained(counters), "Broad counter choices can affect local permanents");
+        check(!StackInteractionPolicy.isSelfContained(api.apply(forge.game.ability.ApiType.Proliferate)), "Opponent proliferate can include our counters");
+        var wipe = stackAbility(forge.game.ability.ApiType.DestroyAll, true, false);
+        check(!StackInteractionPolicy.mayAutoPass(wipe, false, true, false, false), "Board wipes keep a response window when we can respond");
+        check(StackInteractionPolicy.mayAutoPass(wipe, false, false, false, false), "Board wipes resolve without a pause when we have no response");
+        var edict = stackAbility(forge.game.ability.ApiType.Sacrifice, true, false);
+        edict.getMapParams().put("Defined", "Player");
+        check(!StackInteractionPolicy.mayAutoPass(edict, false, true, false, false), "Each-player sacrifice keeps a response window");
+        check(!StackInteractionPolicy.isSelfContained(stackAbility(null, false, false)), "Unknown effects remain reviewable");
         var removal = stackAbility(forge.game.ability.ApiType.Destroy, true, true);
-        check(StackInteractionPolicy.mayAutoPass(removal, false, false, false), "Removal aimed entirely at another player can proceed without a local response");
-        check(!StackInteractionPolicy.mayAutoPass(removal, false, true, false), "A legal response still pauses removal involving other players");
-        check(!StackInteractionPolicy.mayAutoPass(removal, false, false, true), "Removal of our permanent always retains attention");
-        check(StackInteractionPolicy.mayAutoPass(removal, true, false, true), "Our completed target choice proceeds when Forge finds no legal response");
-        check(!StackInteractionPolicy.mayAutoPass(removal, true, true, true), "Our targeted effect still preserves a legal response window");
-        removal.getMapParams().put("Radiance", "True");
-        check(!StackInteractionPolicy.mayAutoPass(removal, false, false, false), "Effects extending beyond explicit targets remain reviewable");
+        check(StackInteractionPolicy.mayAutoPass(removal, false, false, false, false), "Removal proceeds when we have no response");
+        check(!StackInteractionPolicy.mayAutoPass(removal, false, true, false, false), "A legal response still pauses targeted removal");
+        check(!StackInteractionPolicy.mayAutoPass(removal, false, true, false, true), "Removal of our permanent retains the window when we can respond");
+        check(StackInteractionPolicy.mayAutoPass(removal, true, false, false, true), "Our completed target choice proceeds when Forge finds no legal response");
+        check(!StackInteractionPolicy.mayAutoPass(removal, true, true, false, true), "Our targeted effect still preserves a legal response window");
         var token = stackAbility(forge.game.ability.ApiType.Token, true, false);
         token.getMapParams().put("TokenOwner", "Opponent");
-        check(!StackInteractionPolicy.isRoutineOpponentEffect(token), "Token effects giving another player permanents must not be classified as self-only");
+        check(!StackInteractionPolicy.isSelfContained(token), "Token effects giving another player permanents must not be classified as self-only");
         var local = new forge.game.player.PlayerView(81, null);
         var opponent = new forge.game.player.PlayerView(82, null);
         var card = new CardView(83, null, "Target");

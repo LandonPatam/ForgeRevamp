@@ -112,6 +112,7 @@ final class GameStateJson {
                     && StackInteractionPolicy.mayAutoPass(top.getSpellAbility(),
                             top.getSpellAbility().getActivatingPlayer() == human.getPlayer(),
                             human.getPlayer().getView().hasAvailableActions(),
+                            gui.canTargetStackItem(top.getId()),
                             StackInteractionPolicy.targetsLocal(stackItems.get(top.getId()), me))) {
                 autoPassStackId = top.getId();
             }

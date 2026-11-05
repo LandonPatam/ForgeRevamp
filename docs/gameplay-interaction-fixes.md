@@ -8,17 +8,14 @@ Created tokens now carry artwork URLs resolved from Forge's token key, edition a
 
 Popup inspection artwork preserves its proportions even if a container allocates extra space. The selection gallery's right preview has fixed card proportions and reserves width when computing its page columns, including on resize; distribution-row previews also avoid vertical stretching. Rendered regression captures cover multi-row galleries at 1600×1000 and 1280×800, alongside async token repaint/deduplication/privacy checks.
 
-The intended interaction policy is now: show decisions and effects that concern the local player; advance unrelated routine stack items automatically when that player has no legal response. Forge still creates, orders, responds to and resolves the real stack. This changes presentation and priority passing, not casting rules or resolution order.
+The intended interaction policy is now: show decisions and effects that concern the local player; advance stack items automatically when that player has no legal response, and advance self-contained opposing effects even when the player holds an unrelated response. Forge still creates, orders, responds to and resolves the real stack. This changes presentation and priority passing, not casting rules or resolution order.
 
 | Interaction | Behavior |
 | --- | --- |
-| Opponent casts an ordinary creature/artifact and you have no response | Pass automatically; the routine item is omitted from the actionable rail while resolving. |
-| You hold an affordable counterspell, free alternate-cost response, or usable activated ability | Keep the response window; **Let resolve** declines it. |
-| You only have mana abilities, wrong-color mana, or an instant without legal targets | Those alone do not hold routine opponent actions. |
-| Opponent draws, gains life, scries, surveils, creates tokens for themselves, or searches for a land | Proceed automatically with no local response. Actual engine choices still appear when required. |
-| A known single-target effect concerns other players' cards/players/spells | No forced local popup; proceed automatically when there is no local response. Manual review remains available. |
-| A spell targets you, your controlled/owned cards, or your spell | Retain attention and the response window. |
-| Board wipes, broad effects such as opponent proliferate, unknown APIs or recipient definitions | Retain attention conservatively. |
+| You have no legal response (only mana abilities, wrong-color mana, or nothing affordable) | Every opposing item passes automatically; targeted/board-wide notices still appear. |
+| Opponent casts a permanent (including a commander) or a self-contained effect: draw/discard/loot, life, scry/surveil/explore, their own tokens/counters/pumps, own-zone moves (monarch draw, Kindred Discovery, Spellbound Dragon, The Ur-Dragon) | Pass automatically even if you hold an unrelated instant or activated ability. |
+| You hold something that can target that item itself (Counterspell, Force of Will, Stifle) | Keep the response window; **Let resolve** declines it. |
+| Board wipes, each-player sacrifice/discard/life loss, effects targeting you or your cards/spells, opponent proliferate, unknown APIs or recipient definitions | Keep the response window when you hold any response. |
 | Targeting, mana payment, optional choices, sacrifice/discard, or pending draws | Always keep the actual decision; an automatic priority pass cannot answer it. |
 
 `StackInteractionPolicy` classifies effects and every sub-ability. The bridge enables Forge's available-action scan on its game thread using per-controller overrides, with no persistent preference changes. The scanner accounts for timing, targets, alternate costs, available mana and non-mana activated abilities, and conservatively reports available actions if its budget expires. Snapshot construction only reads that result. Forge's generic yield suggestions and unconditional no-actions yielding are disabled for this bridge controller so they cannot bypass the local-impact policy. Existing automation for your own routine actions remains.

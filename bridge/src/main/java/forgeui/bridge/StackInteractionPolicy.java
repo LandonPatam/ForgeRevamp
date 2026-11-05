@@ -1,13 +1,32 @@
 package forgeui.bridge;
 
 import forge.game.ability.ApiType;
+import forge.game.card.Card;
+import forge.game.player.Player;
 import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbility;
 import forge.game.spellability.StackItemView;
+import forge.game.zone.ZoneType;
+
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
 
 /** Presentation policy only: Forge still puts spells on the stack and owns every decision. */
 final class StackInteractionPolicy {
     private StackInteractionPolicy() { }
+
+    /** Recipient parameters that may name players/cards other than the effect's controller. */
+    private static final List<String> RECIPIENTS = List.of("Defined", "DefinedPlayer", "DefinedCards", "Chooser",
+            "OptionalDecider", "TokenOwner", "TokenController", "TokenAttachTo", "AttachedTo", "AttachedToPlayer");
+    private static final Set<String> SELF = Set.of("You", "Self", "SourceController");
+    /** Effects that, with no foreign recipients and no targets, only touch their controller's own
+     *  library, hand, graveyard, life, permanents or tokens. */
+    private static final Set<ApiType> SELF_APIS = EnumSet.of(ApiType.Draw, ApiType.Discard, ApiType.GainLife,
+            ApiType.LoseLife, ApiType.Scry, ApiType.Surveil, ApiType.Explore, ApiType.Connive, ApiType.Token,
+            ApiType.Investigate, ApiType.Pump, ApiType.Animate, ApiType.Tap, ApiType.Untap, ApiType.Mill,
+            ApiType.Dig, ApiType.DigUntil, ApiType.RearrangeTopOfLibrary, ApiType.Shuffle, ApiType.Sacrifice,
+            ApiType.Discover, ApiType.Cleanup, ApiType.StoreSVar);
 
     static boolean targetsLocal(StackItemView item, PlayerView local) {
         if (item == null || local == null) return false;
@@ -23,38 +42,80 @@ final class StackInteractionPolicy {
         return targetsLocal(item.getSubInstance(), local);
     }
 
-    static boolean mayAutoPass(SpellAbility ability, boolean ownEffect, boolean hasResponse, boolean targetsLocal) {
-        if (ownEffect) return GameStateJson.isRoutineInteraction(ability) || (ability != null && !hasResponse);
-        return !hasResponse && !targetsLocal && isRoutineOpponentEffect(ability);
+    /**
+     * @param hasResponse    Forge found any affordable non-mana spell/ability for this player
+     * @param canTargetItem  one of those can target this stack item itself (counterspell, Stifle)
+     */
+    static boolean mayAutoPass(SpellAbility ability, boolean ownEffect, boolean hasResponse,
+                               boolean canTargetItem, boolean targetsLocal) {
+        if (ability == null) return false;
+        if (!hasResponse) return true;
+        if (ownEffect) return GameStateJson.isRoutineInteraction(ability) || isSelfContained(ability);
+        // Effects that only touch their controller's own cards never hold other seats,
+        // even when those seats hold an unrelated instant. A response that can answer the
+        // item itself keeps the window; harmful, targeted or unknown effects keep it too.
+        return !targetsLocal && !canTargetItem && isSelfContained(ability);
     }
 
-    static boolean isRoutineOpponentEffect(SpellAbility ability) {
+    /** True when the effect and every sub-ability only involve their controller's own things. */
+    static boolean isSelfContained(SpellAbility ability) {
         if (ability == null || ability.getApi() == null) return false;
-        if (ability.getSubAbility() != null && !isRoutineOpponentEffect(ability.getSubAbility())) return false;
-        if (ability.hasParam("Radiance")) return false;
-        // Unknown recipient definitions can include us even without explicit targets.
-        for (String key : java.util.List.of("Defined", "DefinedPlayer", "Chooser", "OptionalDecider", "TokenOwner", "TokenController", "TokenAttachTo")) {
-            if (ability.hasParam(key) && !java.util.Set.of("You", "Self", "SourceController").contains(ability.getParam(key))) return false;
+        if (ability.usesTargeting() || ability.hasParam("Radiance")) return false;
+        for (String key : RECIPIENTS) {
+            if (ability.hasParam(key) && !SELF.contains(ability.getParam(key))) return false;
         }
-        if (ability.usesTargeting()) {
-            // The frozen stack view has already excluded local cards, players and
-            // spells. Only explicit-target effects qualify; mass/unknown APIs don't.
-            return java.util.Set.of(ApiType.Draw, ApiType.GainLife, ApiType.PutCounter,
-                    ApiType.Destroy, ApiType.ChangeZone, ApiType.DealDamage, ApiType.Pump,
-                    ApiType.Tap, ApiType.Untap, ApiType.Counter).contains(ability.getApi())
-                    && !ability.hasParam("Choices") && !ability.hasParam("EachFromSource")
-                    && !ability.hasParam("PutOnDefined") && !ability.hasParam("PutOnEachOther");
-        }
-        // Proliferate and broad counter-placement choices can affect our permanents.
-        if (ability.getApi() == ApiType.PutCounter) {
-            if (!ability.getParamOrDefault("Defined", "").equals("Self")) return false;
-            for (String key : java.util.List.of("Choices", "EachFromSource", "PutOnDefined", "PutOnEachOther")) {
+        if (ability.getSubAbility() != null && !isSelfContained(ability.getSubAbility())) return false;
+        ApiType api = ability.getApi();
+        if (api == ApiType.PermanentCreature || api == ApiType.PermanentNoncreature) return ability.isSpell();
+        if (api == ApiType.PutCounter) {
+            // Proliferate-like choices can reach other players' permanents.
+            for (String key : List.of("Choices", "EachFromSource", "PutOnDefined", "PutOnEachOther")) {
                 if (ability.hasParam(key)) return false;
             }
             return true;
         }
-        if (java.util.Set.of(ApiType.Draw, ApiType.GainLife, ApiType.Scry, ApiType.Surveil,
-                ApiType.Explore, ApiType.Token).contains(ability.getApi())) return true;
-        return GameStateJson.isRoutineCast(ability);
+        if (api == ApiType.ChangeZone) return isOwnZoneChange(ability);
+        return SELF_APIS.contains(api);
+    }
+
+    private static boolean isOwnZoneChange(SpellAbility ability) {
+        String origin = ability.getParamOrDefault("Origin", "");
+        if (origin.isEmpty()) return false;
+        String type = ability.getParamOrDefault("ChangeType", "");
+        for (String zone : origin.split(",")) {
+            switch (zone.trim()) {
+                // Hidden zones are the controller's own unless DefinedPlayer says otherwise.
+                case "Hand", "Library", "Sideboard", "Command", "Graveyard", "Exile" -> { }
+                case "Battlefield" -> {
+                    boolean onlySource = type.isEmpty() && !ability.hasParam("Hidden");
+                    if (!onlySource && !type.contains("YouCtrl") && !type.contains("YouOwn")) return false;
+                }
+                default -> { return false; }
+            }
+        }
+        return true;
+    }
+
+    /** Whether any of the player's actionable cards has a spell/ability that could target the top stack item. */
+    static boolean canTargetStackItem(Player player, Iterable<Card> actionable, SpellAbility top) {
+        if (player == null || top == null) return false;
+        for (Card card : actionable) {
+            try {
+                for (SpellAbility sa : card.getAllPossibleAbilities(player, true)) {
+                    if (sa.isManaAbility()) continue;
+                    for (SpellAbility part = sa; part != null; part = part.getSubAbility()) {
+                        var restrictions = part.getTargetRestrictions();
+                        if (restrictions != null && restrictions.getZone() != null
+                                && restrictions.getZone().contains(ZoneType.Stack)
+                                && top.canBeTargetedBy(part)) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (RuntimeException unknown) {
+                return true; // Keep the response window when Forge cannot answer cleanly.
+            }
+        }
+        return false;
     }
 }
