@@ -2,6 +2,7 @@ extends RefCounted
 const LibraryTile = preload("res://scripts/library/LibraryCard.gd")
 const CoinTossDialog = preload("res://scripts/ui/CoinTossPanel.gd")
 var app: Control
+var active_scale: float = preload("res://scripts/app/DisplayPreferences.gd").current()
 var deadline := 0
 var capture_directory := "res://artifacts"
 
@@ -24,13 +25,13 @@ func capture(name: String) -> void:
 	app.get_window().grab_focus()
 	await app.get_tree().process_frame
 	RenderingServer.force_draw()
-	app.get_viewport().get_texture().get_image().save_png(capture_directory.path_join("ui2x-" + name + ".png"))
+	app.get_viewport().get_texture().get_image().save_png(capture_directory.path_join("ui-scale-%d-%s.png" % [roundi(active_scale * 100), name]))
 
-func click(surface: Control, button: Control, factor: float = 2.0) -> void:
+func click(surface: Control, button: Control, factor: float = 0.0) -> void:
 	if button is BaseButton:
 		if not await until(func(): return not button.disabled, "button becomes enabled: " + button.text): return
 	app.get_window().grab_focus()
-	var point := surface.global_position + button.get_global_rect().get_center() * factor
+	var point := surface.global_position + button.get_global_rect().get_center() * (active_scale if factor == 0 else factor)
 	app.get_viewport().warp_mouse(point)
 	await app.get_tree().create_timer(0.15).timeout
 	var motion := InputEventMouseMotion.new()
@@ -74,7 +75,7 @@ func run(root: Control) -> void:
 			app.get_window().position = Vector2i.ZERO
 			await app.get_tree().create_timer(0.4).timeout
 			if not await _artwork_gallery_check(): return
-		print("PASS: 2x editor/game artwork mouse input")
+		print("PASS: scaled editor/game artwork mouse input")
 		app.get_tree().quit()
 		return
 	var home_size: Vector2i = app.computer.world_view.size
@@ -82,7 +83,7 @@ func run(root: Control) -> void:
 	if not await until(func(): return app.view == "settings" and not app.busy, "PC cog settings zoom"): return
 	# Windows may fit the native window to odd pixel dimensions; logical viewports
 	# use whole pixels, so a half pixel rounds down rather than changing the scale.
-	if not check(app.match_settings.get_viewport_rect().size.is_equal_approx((app.size / 2.0).floor()), "PC settings use the same 2x scale: viewport=%s app=%s surface=%s" % [app.match_settings.get_viewport_rect().size, app.size, app.settings_surface.size]): return
+	if not check(app.match_settings.get_viewport_rect().size.is_equal_approx((app.size / active_scale).floor()), "PC settings use the selected scale: viewport=%s app=%s surface=%s" % [app.match_settings.get_viewport_rect().size, app.size, app.settings_surface.size]): return
 	if not check(app.settings_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS and not app.settings_surface.render_when_hidden, "Visible settings render continuously after the CRT zoom"): return
 	await capture("settings")
 	await click(app.settings_surface, app.match_settings.names[0])
@@ -104,7 +105,7 @@ func run(root: Control) -> void:
 	print("UI SCALE: opening editor")
 	await app.open_editor()
 	print("UI SCALE: editor opened ", app.editor.get_viewport_rect())
-	if not check(app.editor.get_viewport_rect().size.is_equal_approx((app.editor_surface.size / 2.0).floor()), "Editor gets a half-size logical viewport"): return
+	if not check(app.editor.get_viewport_rect().size.is_equal_approx((app.editor_surface.size / active_scale).floor()), "Editor gets the selected logical viewport size"): return
 	if not await until(func(): return not app.editor.draft.is_empty() and app.editor.card_grid.get_child_count() > 0, "editor deck"): return
 	if not check(app.editor_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS, "The visible editor keeps every animation frame"): return
 	print("UI SCALE: editor deck loaded")
@@ -119,7 +120,7 @@ func run(root: Control) -> void:
 	# window against the editor texture to catch cross-viewport occlusion.
 	if DisplayServer.get_name() != "headless":
 		RenderingServer.force_draw()
-		var sample := Vector2i(app.editor.card_search.query.get_global_rect().get_center() * 2.0)
+		var sample := Vector2i(app.editor.card_search.query.get_global_rect().get_center() * active_scale)
 		var actual: Color = app.get_viewport().get_texture().get_image().get_pixelv(sample)
 		var expected: Color = app.editor_surface.viewport.get_texture().get_image().get_pixelv(sample)
 		if not check(Vector3(actual.r, actual.g, actual.b).distance_to(Vector3(expected.r, expected.g, expected.b)) < 0.03, "Add Cards draws above the selected floppy"): return
@@ -135,7 +136,8 @@ func run(root: Control) -> void:
 	app.editor.close_transient_ui()
 	app.get_window().size = Vector2i(1600, 1000)
 	await app.get_tree().create_timer(0.5).timeout
-	if not check(app.editor.get_viewport_rect().size == Vector2(800, 500), "Resizing preserves the 2x editor scale"): return
+	if not check(app.editor.get_viewport_rect().size == (Vector2(1600, 1000) / active_scale).floor(), "Resizing preserves the selected editor scale"): return
+	if not check(app.editor.size == app.editor.get_viewport_rect().size, "Resized editor content fills its logical viewport"): return
 	await capture("editor-small")
 	deadline = Time.get_ticks_msec() + 20000
 	if not await _artwork_input_check(): return
@@ -152,7 +154,7 @@ func run(root: Control) -> void:
 	if not await until(func(): return app.selected_deck.get("legal", false) and not app.busy, "home deck readiness"): return
 	app.start_game()
 	if not await until(func(): return app.view == "game" and not app.busy, "real match reveal"): return
-	if not check(app.game.get_viewport_rect().size.is_equal_approx((app.game_surface.size / 2.0).floor()), "Battlefield gets a half-size logical viewport"): return
+	if not check(app.game.get_viewport_rect().size.is_equal_approx((app.game_surface.size / active_scale).floor()), "Battlefield gets the selected logical viewport size"): return
 	if not check(app.game_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS and not app.game_surface.render_when_hidden, "The revealed table resumes continuous drawing after its live CRT preview"): return
 	await capture("opening-hand")
 	var opening_deadline := Time.get_ticks_msec() + 45000
@@ -176,9 +178,15 @@ func run(root: Control) -> void:
 	await app.request_leave_game()
 	if not check(app.parked and not app.game_surface.visible and app.view == "menu", "Parking a game restores home input"): return
 	if not check(app.game_surface.viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "Parking a game suspends its hidden renderer"): return
+	var parked_adapter = app.game.adapter
+	var parked_session: String = app.session
+	app.game_surface.ui_scale = 1.5
+	await app.get_tree().process_frame
+	if not check(app.game.size == app.game.get_viewport_rect().size and app.game.adapter == parked_adapter and app.session == parked_session and app.parked, "Rescaling a parked table fits its viewport without replacing the engine or adapter"): return
+	app.game_surface.ui_scale = active_scale
 	await click(app, app.computer.quit_button, 1.0)
 	if not await until(func(): return is_instance_valid(app.confirm) and app.confirm.visible, "main-menu Quit confirmation"): return
-	if not check(app.confirm.get_viewport_rect().size.is_equal_approx((app.size / 2.0).floor()), "Main-menu Quit confirmation uses the shared 2x scale"): return
+	if not check(app.confirm.get_viewport_rect().size.is_equal_approx((app.size / active_scale).floor()), "Main-menu Quit confirmation uses the selected scale"): return
 	await capture("quit")
 	await click(app.confirm.get_parent().get_parent(), app.confirm.cancel)
 	if not await until(func(): return not is_instance_valid(app.confirm), "Keep Open dismisses Quit"): return
@@ -189,7 +197,24 @@ func run(root: Control) -> void:
 	await capture("resumed")
 	await app._end_confirmed_session()
 	if not await until(func(): return app.game == null and not app.busy, "owned engine cleanup"): return
-	print("PASS: 2x editor/game sizing, real mouse input, import dialog, home, real match, park/resume and end cleanup")
+	if not Array(OS.get_cmdline_user_args()).any(func(argument): return argument.begins_with("--ui-scale=")):
+		await app.open_match_settings()
+		if not await until(func(): return app.view == "settings" and not app.busy, "display preference settings"): return
+		app.match_settings.display_scale_picker.select(3)
+		app.match_settings.display_scale_picker.item_selected.emit(3)
+		await click(app.settings_surface, app.match_settings.save_button)
+		if not await until(func(): return app.view == "menu" and not app.busy and is_equal_approx(app.computer.ui_scale, 1.5), "Save applies the local 150% preference"): return
+		active_scale = 1.5
+		if not check(is_equal_approx(preload("res://scripts/app/DisplayPreferences.gd").read(), 1.5), "Display choice survives a new preference read"): return
+		await app.open_match_settings()
+		if not await until(func(): return app.view == "settings" and not app.busy, "reopen scaled settings"): return
+		if not check(app.match_settings.display_scale_picker.selected == 3 and app.settings_viewport.size_2d_override == Vector2i((app.settings_surface.size / 1.5).floor()), "Reopened settings use the saved scale and selection"): return
+		await capture("saved-150-percent")
+		app.match_settings.display_scale_picker.select(0)
+		app.match_settings.display_scale_picker.item_selected.emit(0)
+		await click(app.settings_surface, app.match_settings.save_button)
+		if not await until(func(): return app.view == "menu" and not app.busy and preload("res://scripts/app/DisplayPreferences.gd").read() == 0, "Restore automatic device sizing"): return
+	print("PASS: scaled editor/game sizing, real mouse input, import dialog, home, real match, park/resume and end cleanup")
 	app.get_tree().quit()
 
 func _artwork_input_check() -> bool:
@@ -215,7 +240,7 @@ func _artwork_input_check() -> bool:
 	var popup := picker.get_popup()
 	var panel := popup.get_theme_stylebox("panel")
 	var row_height: float = popup.get_theme_font("font").get_height(popup.get_theme_font_size("font_size")) + popup.get_theme_constant("v_separation")
-	var point: Vector2 = app.editor_surface.global_position + (Vector2(popup.position) + Vector2(30, panel.get_margin(SIDE_TOP) + row_height * (target + 0.5))) * 2.0
+	var point: Vector2 = app.editor_surface.global_position + (Vector2(popup.position) + Vector2(30, panel.get_margin(SIDE_TOP) + row_height * (target + 0.5))) * active_scale
 	await _artwork_click_point(point)
 	await app.get_tree().process_frame
 	await capture("artwork-variant-selected")
@@ -231,11 +256,19 @@ func _artwork_gallery_check() -> bool:
 	var editor: Control = app.editor
 	# Gallery choices must change the deck and dismiss, without opening details.
 	var deck_tile: Control = editor.card_grid.get_children().filter(func(value): return value is LibraryTile)[0]
-	editor.card_scroll.ensure_control_visible(deck_tile)
+	# Intermediate scales can wrap toolbars enough to scroll the outer workspace
+	# too. Bring the fixture through every clipping ancestor before clicking it.
+	var ancestor := deck_tile.get_parent()
+	while ancestor != null and ancestor != editor:
+		if ancestor is ScrollContainer:
+			ancestor.ensure_control_visible(deck_tile)
+			await app.get_tree().process_frame
+			await app.get_tree().process_frame
+		ancestor = ancestor.get_parent()
 	await app.get_tree().process_frame
 	var visible_deck_rect: Rect2 = deck_tile.get_global_rect().intersection(editor.card_scroll.get_global_rect()).intersection(editor.get_viewport_rect())
 	if not check(visible_deck_rect.has_area(), "The right-click fixture uses a visible deck card"): return false
-	var deck_point: Vector2 = app.editor_surface.global_position + visible_deck_rect.get_center() * 2.0
+	var deck_point: Vector2 = app.editor_surface.global_position + visible_deck_rect.get_center() * active_scale
 	# The short fixture clips the deck grid to a thin strip. The large
 	# fixture reproduces the complete native press/release capture sequence.
 	if app.get_window().size.x < 2000: editor._card_context(editor.shown_cards[0])
@@ -247,7 +280,7 @@ func _artwork_gallery_check() -> bool:
 	# matching separators. Keep it inside the physical Retina test display.
 	menu.position = Vector2i(120, 120)
 	await app.get_tree().process_frame
-	var menu_point: Vector2 = app.editor_surface.global_position + (Vector2(menu.position) + Vector2(24, menu.size.y * 0.5)) * 2.0
+	var menu_point: Vector2 = app.editor_surface.global_position + (Vector2(menu.position) + Vector2(24, menu.size.y * 0.5)) * active_scale
 	await _artwork_click_point(menu_point)
 	if not check(not menu.visible, "Change artwork releases the context popup before thumbnail selection"): return false
 	if not await until(func(): return not editor.artwork_cards.is_empty() and editor.dialog_body.get_child(0) is GridContainer, "artwork gallery input"): return false
@@ -257,7 +290,15 @@ func _artwork_gallery_check() -> bool:
 	var chosen_key: String = tile.card.key
 	var section: String = editor.inspect_card.section
 	var quantity: int = editor.inspect_card.quantity
-	await _artwork_click_point(app.editor_surface.global_position + tile.get_global_rect().get_center() * 2.0, MOUSE_BUTTON_LEFT, editor)
+	var gallery_parent := tile.get_parent()
+	while gallery_parent != null and gallery_parent != editor:
+		if gallery_parent is ScrollContainer:
+			gallery_parent.ensure_control_visible(tile)
+			await app.get_tree().process_frame
+			await app.get_tree().process_frame
+		gallery_parent = gallery_parent.get_parent()
+	await capture("artwork-thumbnail-before-click")
+	await _artwork_click_point(app.editor_surface.global_position + tile.get_global_rect().get_center() * active_scale, MOUSE_BUTTON_LEFT, editor)
 	await app.get_tree().process_frame
 	if not check(editor.draft.sections[section].any(func(value): return value.key == chosen_key and int(value.quantity) == quantity), "A thumbnail click applies the chosen artwork with its original quantity and section"): return false
 	if not check(not editor.overlay.visible, "Artwork thumbnail click dismisses the gallery without opening card details"): return false

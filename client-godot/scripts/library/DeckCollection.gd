@@ -1190,7 +1190,7 @@ func set_workspace_top(value: float) -> void:
 	workspace_top = value
 	if app_host != null and is_instance_valid(app_host.editor_surface):
 		app_host.editor_surface.set_workspace_top(value)
-		if workspace != null: workspace.offset_top = value / 2.0
+		if workspace != null: workspace.offset_top = value / app_host.editor_surface.ui_scale
 		return
 	if workspace != null: workspace.offset_top = value
 

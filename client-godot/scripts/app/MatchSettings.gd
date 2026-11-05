@@ -55,6 +55,8 @@ var host_button: Button
 var join_button: Button
 var kick_buttons: Array[Button] = []
 var net_signature := ""
+var display_scale_choice: float = preload("res://scripts/app/DisplayPreferences.gd").read()
+var display_scale_picker: OptionButton
 
 func _ready() -> void:
 	get_window().gui_embed_subwindows = true
@@ -152,6 +154,17 @@ func _ready() -> void:
 	column.add_child(online_body)
 	column.add_child(HSeparator.new())
 	var footer := HBoxContainer.new()
+	var display_row := HBoxContainer.new()
+	display_row.add_child(_text("UI SIZE", 15))
+	display_scale_picker = OptionButton.new()
+	var display_choices := [0.0, 1.0, 1.25, 1.5, 1.75, 2.0]
+	for choice in display_choices:
+		display_scale_picker.add_item("Automatic (200% on Mac, 100% on Windows)" if choice == 0 else "%d%%" % roundi(choice * 100))
+		if is_equal_approx(choice, display_scale_choice): display_scale_picker.select(display_scale_picker.item_count - 1)
+	display_scale_picker.item_selected.connect(func(index): display_scale_choice = display_choices[index])
+	display_row.add_child(display_scale_picker)
+	column.add_child(display_row)
+	column.add_child(_text("Saved for this device. Applies after Save & Return.", 13, DIM))
 	column.add_child(footer)
 	shortcut_hint = _text("[UP/DN] SELECT  [F2] ADD  [DEL] REMOVE  [TAB] NAME", 12, DIM)
 	shortcut_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL

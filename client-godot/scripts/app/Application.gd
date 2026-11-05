@@ -462,8 +462,12 @@ func open_match_settings() -> void:
 			match_settings.error_label.text = "Could not save match settings. Try again."
 			return
 		match_preferences = value.duplicate(true)
+		if preload("res://scripts/app/DisplayPreferences.gd").save(match_settings.display_scale_choice) != OK:
+			match_settings.error_label.text = "Could not save the display setting. Try again."
+			return
 		net.configure(match_preferences)
-		close_match_settings())
+		await close_match_settings()
+		_apply_display_scale())
 	match_settings.canceled.connect(func():
 		net.configure(match_preferences)
 		close_match_settings())
@@ -500,6 +504,14 @@ func close_match_settings() -> void:
 	match_settings = null
 	busy = false
 	show_menu()
+
+func _apply_display_scale() -> void:
+	var scale_value := preload("res://scripts/app/DisplayPreferences.gd").current()
+	for surface in [editor_surface, game_surface]:
+		if is_instance_valid(surface): surface.ui_scale = scale_value
+	if is_instance_valid(computer):
+		computer.ui_scale = scale_value
+		computer._layout()
 
 func _table_size() -> int:
 	if net.is_joined(): return net.roster.size()
@@ -969,7 +981,7 @@ func _update_status() -> void:
 
 func _show_confirmation() -> void:
 	# Confirmations can open over home, the editor, settings or a parked game.
-	# Give them a modal surface of their own so they always use the same 2x UI.
+	# Give them a modal surface of their own using this device's selected scale.
 	var surface := ScaledSurface.new()
 	surface.z_index = 500
 	surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

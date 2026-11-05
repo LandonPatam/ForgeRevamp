@@ -23,7 +23,7 @@ var outcome_marks: Array[String] = []
 var winner_index := 0
 
 func _ready() -> void:
-	# The Mac table uses a 2x UI viewport; keep the full panel inside short windows.
+	# UI scaling reduces logical space; keep the full panel inside short windows.
 	layout_scale = clampf((get_viewport_rect().size.y - 80.0) / 760.0, 0.42, 1.0)
 	P.style_popup(self, roundi(28 * layout_scale))
 	custom_minimum_size.x = 520 * layout_scale

@@ -1184,7 +1184,7 @@ func run(root: Control) -> void:
 	await app.get_tree().create_timer(0.3).timeout
 	await capture("app-deck-editor-1280")
 	if not check(_room_above_editor(), "The enlarged computer also clears the editor at 1280x800"): return
-	var physical_card_scroll: Vector2 = app.editor.card_scroll.size * app.editor_surface.UI_SCALE
+	var physical_card_scroll: Vector2 = app.editor.card_scroll.size * app.editor_surface.ui_scale
 	if not check(physical_card_scroll.x > 900 and physical_card_scroll.y > 240, "The editor keeps cards readable below the carousel at 1280x800"): return
 	app.computer.set_dark_mode(true, true, false)
 	await app.get_tree().process_frame

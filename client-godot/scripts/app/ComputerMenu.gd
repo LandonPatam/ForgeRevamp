@@ -1,4 +1,5 @@
 extends Control
+var ui_scale: float = preload("res://scripts/app/DisplayPreferences.gd").current()
 signal commander_requested
 signal editor_requested
 signal home_requested
@@ -509,10 +510,10 @@ func _layout() -> void:
 	if shelf == null: return
 	# Size the surrounding controls for the actual viewport, including Retina
 	# windows, while leaving the physical computer and CRT projection alone.
-	var ui_scale := lerpf(clampf(size.x / 1500.0, 1.6, 2.2), 2.0, editor_progress)
-	var margin := 24.0 * ui_scale
+	var large := ui_scale - 1.0
+	var margin := lerpf(34.0, 48.0, large)
 	var top := 13.0 * ui_scale
-	var compact := size.x < lerpf(1600.0, 1800.0, editor_progress)
+	var compact := size.x < lerpf(900.0, lerpf(1600.0, 1800.0, editor_progress), large)
 	forge_badge.position = Vector2(margin, top)
 	forge_badge.size = Vector2(88, 26) * ui_scale
 	var badge_row: HBoxContainer = forge_badge.get_child(0)
@@ -536,28 +537,28 @@ func _layout() -> void:
 		filter_button.position = Vector2(filter_x, top + (36 * ui_scale if compact else 0.0))
 		filter_x += filter_button.size.x + 4 * ui_scale
 	menu_frame.align_header([forge_badge, editor_button, quit_button, light_switch] + filter_buttons.values(), editor_button.get_rect().get_center().y)
-	var editor_height := clampf(size.y * 0.38, 290, 780)
-	var home_height := clampf(size.y * 0.42, 340, 820)
+	var editor_height := clampf(size.y * 0.38, 290, 390 * ui_scale)
+	var home_height := clampf(size.y * lerpf(0.38, 0.42, large), lerpf(290, 340, large), lerpf(390, 820, large))
 	var height := lerpf(home_height, editor_height, editor_progress)
 	var home_top := size.y-height-10
 	var travel := (home_top-70)*editor_progress
 	shelf.night_visibility = 1.0 - smoothstep(0.2, 0.85, editor_progress)
 	# Clear the closer-framed case and its contact shadow above the editor.
-	world_container.position.y = -travel-400*editor_progress
+	world_container.position.y = -travel-200*ui_scale*editor_progress
 	if is_instance_valid(atmosphere):
 		atmosphere.position.y = world_container.position.y
 		atmosphere.material.set_shader_parameter("home_visibility",1.0-smoothstep(0.25,0.85,editor_progress))
 		atmosphere.visible = editor_progress < 1.0
 	shelf.position = Vector2(0, home_top-travel)
-	shelf.minimum_disk_height = lerpf(250, 210, editor_progress)
-	shelf.maximum_disk_height = lerpf(680, 630, editor_progress)
-	shelf.selection_lift = lerpf(0.04, 0.20, editor_progress)
+	shelf.minimum_disk_height = lerpf(lerpf(210, 250, large), 210, editor_progress)
+	shelf.maximum_disk_height = lerpf(315, lerpf(680, 630, editor_progress), large)
+	shelf.selection_lift = lerpf(0.20, lerpf(0.04, 0.20, editor_progress), large)
 	shelf.size = Vector2(size.x, height)
 	if is_instance_valid(editor_surface):
 		editor_surface.set_workspace_top(shelf.position.y+shelf.size.y+6)
 		editor_surface.modulate.a = smoothstep(0.3, 0.85, editor_progress)
 	if is_instance_valid(session_disk):
-		var disk_size := clampf(size.y * 0.235, 180, 470)
+		var disk_size := clampf(size.y * 0.235, 180, 235 * ui_scale)
 		session_disk.position = Vector2(minf(size.x * 0.82 - disk_size * 0.5, size.x - disk_size - 24), size.y * 0.22-travel)
 		session_disk.size = Vector2(disk_size, disk_size + 126 * maxf(1.0, disk_size / 235.0))
 		session_disk.modulate.a = 0.0 if phase == "formatting" else 1.0-editor_progress

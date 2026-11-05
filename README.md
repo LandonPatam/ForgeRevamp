@@ -6,6 +6,10 @@ Native Godot Commander frontend using Forge for game rules, with local bots and 
 
 Source lives in [LandonPatam/ForgeRevamp](https://github.com/LandonPatam/ForgeRevamp). Both platforms share one main branch; features and platform fixes use short-lived branches. See [the development workflow](docs/development-workflow.md). Mac support is reconciled with the Windows source; the [Mac](docs/mac-reconciliation.md) and [Windows](docs/windows-reconciliation.md) acceptance records describe the checks and remaining live cross-platform verification.
 
+Both platforms share an adjustable UI size: **Settings → UI SIZE → Save & Return**.
+Automatic uses 100% on Windows and 200% on Mac; either can choose 100–200%.
+See [display scaling](docs/display-scaling.md).
+
 ## macOS app
 
 `python3 client-godot/tools/package-macos.py` builds a universal app and DMG with separate Apple Silicon and Intel Java 17 runtimes. Drag ForgeUI.app to Applications. See [build setup and signing](docs/macos-build.md).

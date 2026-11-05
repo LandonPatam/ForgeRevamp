@@ -1,7 +1,10 @@
 extends SubViewportContainer
-## Render a 2x interface at the window's native resolution. The viewport owns
+## Render the selected UI scale at the window's native resolution. The viewport owns
 ## logical coordinates and input conversion, including its embedded dialogs.
-const UI_SCALE := 2.0
+var ui_scale: float = preload("res://scripts/app/DisplayPreferences.gd").current():
+	set(value):
+		ui_scale = clampf(value, 1.0, 2.0)
+		if viewport != null: sync_size()
 var viewport: SubViewport
 var input_top := 0.0
 var full_input := false
@@ -34,13 +37,21 @@ func _sync_rendering() -> void:
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if render_when_hidden or is_visible_in_tree() else SubViewport.UPDATE_DISABLED
 
 func sync_size() -> void:
-	viewport.size_2d_override = Vector2i((size / UI_SCALE).floor()).max(Vector2i.ONE)
+	viewport.size_2d_override = Vector2i((size / ui_scale).floor()).max(Vector2i.ONE)
+	for child in viewport.get_children():
+		if child is Control: _fit_content(child)
+
+func _fit_content(control: Control) -> void:
+	# Full-rect anchors plus a deferred size can retain negative offsets when
+	# native allocation and logical sizing arrive in different resize frames.
+	# Own the root size explicitly; its descendants retain normal Control layout.
+	control.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_KEEP_SIZE)
+	control.size = Vector2(viewport.size_2d_override)
 
 func attach(control: Control) -> void:
 	sync_size()
-	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fit_content(control)
 	viewport.add_child(control)
-	control.set_deferred("size", Vector2(viewport.size_2d_override))
 
 func set_workspace_top(value: float) -> void:
 	input_top = value

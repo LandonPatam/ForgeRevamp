@@ -213,7 +213,7 @@ func reset() -> void:
 func _layout() -> void:
 	if fan == null:
 		return
-	# ScaledSurface halves logical window dimensions. Keep the whole fan and
+	# Larger UI scales reduce logical window dimensions. Keep the whole fan and
 	# required decisions inside short viewports, preserving the original large layout.
 	layout_scale = clampf(size.y / 800.0, 0.4, 1.0)
 	heading.add_theme_font_size_override("font_size", roundi(clampf(size.y * 0.064, 52 * layout_scale, 72 * layout_scale)))
