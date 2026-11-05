@@ -759,7 +759,7 @@ public final class BridgeMain {
     private void dispatchAction(Seat seat, Channel channel, String requestId, JsonObject msg) {
         BridgeGuiGame gui = seat.gui; // This seat's own controller and permissions, never the host's.
         String action = BridgeProtocol.string(msg, "action");
-        BridgeProtocol.require(List.of("ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "concede").contains(action), "Unknown action");
+        BridgeProtocol.require(List.of("ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "concede", "pass_turn").contains(action), "Unknown action");
         int id = msg.has("id") ? BridgeProtocol.integer(msg.get("id")) : -1;
         int target = List.of("attack", "equip").contains(action) ? BridgeProtocol.integer(msg.get("target")) : -1;
         long expectedRevision = BridgeProtocol.revision(msg.get("revision"));
@@ -822,6 +822,8 @@ public final class BridgeMain {
                 BridgeProtocol.require(defender != null && combat != null && combat.getDefenders().contains(defender), "That player cannot be attacked");
                 BridgeProtocol.require(forge.game.combat.CombatUtil.canAttack(attacker, defender), "That creature cannot attack that player");
             }
+            if (action.equals("pass_turn")) BridgeProtocol.require(c instanceof PlayerControllerHuman human
+                    && human.getInputQueue().getInput() instanceof forge.gamemodes.match.input.InputPassPriority, "You can only pass the turn while holding priority");
             if (action.equals("ok") || action.equals("cancel")) {
                 synchronized (gui.prompt) {
                     BridgeProtocol.require(gui.prompt.get(action.equals("ok") ? "okEnabled" : "cancelEnabled").getAsBoolean(), "Button is disabled");
@@ -844,6 +846,12 @@ public final class BridgeMain {
             if (clicked != null && clicked.getController() != null && clicked.getController().equals(gui.getCurrentPlayer())) gui.noteSpellAttempt(clicked);
             switch (action) {
                 case "ok" -> c.selectButtonOk();
+                case "pass_turn" -> {
+                    // Forge's own End Turn yield: required declarations, targets and
+                    // payments still prompt, and its interrupts end the yield early.
+                    ((PlayerControllerHuman)c).autoPassUntilEndOfTurn();
+                    c.selectButtonOk();
+                }
                 case "cancel" -> c.selectButtonCancel();
                 case "card" -> {
                     CardView cv = current.cards().get(id);

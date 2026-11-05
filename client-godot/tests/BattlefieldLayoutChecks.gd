@@ -138,7 +138,7 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(ui.cards[9191].data.stackCount == 1 and ui.cards[9192].data.stackCount == 1 and ui.manual_positions.has(9191) and ui.manual_positions.has(9192), "Local duplicates must retain their manual placements without unsolicited stacking")
 	ui._clean_up_board()
 	assert(ui.cards.has(9191) and ui.cards.has(9192) and ui.cards[9192].data.stackCount == 2, "Explicit cleanup keeps both creature instances and adds a quantity badge")
-	assert(not ui.manual_positions.has(9191) and not ui.manual_positions.has(9192), "Explicit cleanup arranges matching cards into a pile")
+	assert(ui.pile_anchors.size() == 1 and is_equal_approx(ui.pile_anchors.values()[0].x, 0.3) and abs(ui.manual_positions[9191].x - 0.3) < 0.05 and abs(ui.manual_positions[9192].x - 0.3) < 0.05, "Explicit cleanup forms the pile where its first card was, not in the automatic rows")
 	var added_card: Dictionary = local_pile.duplicate(true)
 	var newcomer: Dictionary = added_card.players[0].zones.Battlefield[0].duplicate(true)
 	newcomer.id = 9193
@@ -146,6 +146,20 @@ func run(ui: Control, directory: String = "") -> void:
 	ui.manual_positions[9193] = Vector2(0.7, 600)
 	ui._apply_state(added_card)
 	assert(ui.cards[9193].data.stackCount == 1 and ui.manual_positions.has(9193) and ui.cards[9192].data.stackCount == 2, "A newly played matching card must stay separate from a previously cleaned-up pile")
+	ui._apply_state(local_pile)
+	await ui.get_tree().create_timer(0.25).timeout
+	# Dropping one card onto its identical twin forms the pile at the twin's spot.
+	ui.pile_anchors.clear()
+	ui.local_pile_members.clear()
+	ui.manual_positions[9191] = Vector2(0.25, 600)
+	ui.manual_positions[9192] = Vector2(0.65, 600)
+	ui.manual_positions.erase(9193)
+	ui._apply_state(local_pile)
+	await ui.get_tree().create_timer(0.4).timeout
+	var twin: Control = ui.cards[9192]
+	ui._drag_card(9191, twin.get_global_transform() * (twin.size * 0.5) - ui.cards[9191].get_global_transform() * (ui.cards[9191].size * 0.5))
+	assert(ui.cards[9192].data.stackCount == 2 or ui.cards[9191].data.stackCount == 2, "Dropping a card onto an identical one forms a pile")
+	assert(abs(ui.manual_positions[9191].x - 0.65) < 0.05 and abs(ui.manual_positions[9192].x - 0.65) < 0.05, "A pile formed by dropping stays where the target card was, not in the middle rows: %s %s" % [ui.manual_positions.get(9191), ui.manual_positions.get(9192)])
 	ui._apply_state(local_pile)
 	await ui.get_tree().create_timer(0.25).timeout
 	await _check_pile_drag(ui, local_pile, directory)

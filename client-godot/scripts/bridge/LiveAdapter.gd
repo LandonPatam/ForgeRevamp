@@ -329,7 +329,7 @@ func send_intent(intent: Dictionary) -> void:
 		request.merge({"type": "answer", "id": int(intent.id), "value": intent.get("value")})
 		pending_answer = int(intent.id)
 	else:
-		if (not state.asks.is_empty() and action != "phase_stop") or not action in ["ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack"]:
+		if (not state.asks.is_empty() and action != "phase_stop") or not action in ["ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "pass_turn"]:
 			return
 		if action in ["ok", "cancel"] and not state.prompt.get(action + "Enabled", false):
 			return

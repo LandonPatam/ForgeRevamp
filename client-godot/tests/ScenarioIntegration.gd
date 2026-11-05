@@ -522,6 +522,57 @@ func stack_priority() -> bool:
 	await capture("result")
 	return true
 
+func greater_good() -> bool:
+	var source := find_card("Greater Good", "Battlefield")
+	if not check(not source.is_empty(), "Greater Good must be on the battlefield"): return false
+	ui._click_card(source.id)
+	var sacrificed := false
+	var discarded := 0
+	for index in range(80):
+		if not await wait_ready(): return false
+		var state: Dictionary = ui.snapshot
+		var kind: String = state.prompt.get("inputKind", "")
+		print("SCENARIO greater-good: ", kind, " asks=", state.asks.size(), " stack=", state.stack.size(), " phase=", state.game.phase, " msg=", state.prompt.get("message", ""), " modal=", ui.modal.visible, " rail=", ui.interaction_panel.panel.visible)
+		var selectable: Array = state.prompt.get("selectable", []).map(func(id): return int(id))
+		if not sacrificed and selectable.size() > 0 and kind != "InputPassPriority":
+			var bears := find_card("Grizzly Bears", "Battlefield")
+			if not check(not bears.is_empty() and selectable.has(int(bears.id)), "The sacrifice cost must offer Grizzly Bears: " + str(state.prompt)): return false
+			await capture("sacrifice")
+			ui._click_card(bears.id)
+			sacrificed = true
+			if not await wait_ready(): return false
+			if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
+			continue
+		if sacrificed and kind != "InputPassPriority":
+			var hand_ids: Array = zone("Hand").map(func(card): return int(card.id))
+			var choices: Array = selectable.filter(func(id): return hand_ids.has(id))
+			if choices.size() > 0 and discarded == 0:
+				await capture("discard")
+				for id in choices.slice(0, 3):
+					ui._click_card(id)
+					if not await wait_ready(): return false
+				discarded = 3
+				if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
+				continue
+		if sacrificed and state.stack.is_empty() and state.asks.is_empty() and kind == "InputPassPriority" and not find_card("Grizzly Bears", "Graveyard").is_empty():
+			await capture("result")
+			if not check(state.game.phase == "Main 1", "Resolving Greater Good must leave you in Main 1, not skip to " + state.game.phase): return false
+			return check(discarded == 3 and zone("Hand").size() == 3 and zone("Graveyard").size() == 4, "Greater Good must draw two and ask for three discards (hand %d, graveyard %d, discarded %d)" % [zone("Hand").size(), zone("Graveyard").size(), discarded])
+		if not await step(): return false
+	return check(false, "Greater Good did not finish")
+
+func pass_turn() -> bool:
+	if not check(int(ui.snapshot.game.activePlayer) == 0 and ui.snapshot.game.phase == "Main 1", "Pass turn starts in your own main phase"): return false
+	# Prepared boards keep the setup overlays that swallow keys; drive the Space handler directly.
+	ui._pass_turn()
+	for index in range(150):
+		await ui.get_tree().create_timer(0.1).timeout
+		var state: Dictionary = ui.snapshot
+		if int(state.game.turn) > 5 or int(state.game.activePlayer) != 0:
+			await capture("result")
+			return check(not find_card("Llanowar Elves").is_empty(), "Passing the turn must not play anything for you")
+	return check(false, "Space did not pass the turn without further clicks: " + str(ui.snapshot.game) + " " + str(ui.snapshot.prompt))
+
 func run_scenario(table: Control, name: String) -> void:
 	ui = table
 	scenario = name
@@ -549,6 +600,8 @@ func run_scenario(table: Control, name: String) -> void:
 		"protection": passed = await protection()
 		"blink": passed = await blink()
 		"combat": passed = await combat()
+		"greater-good": passed = await greater_good()
+		"pass-turn": passed = await pass_turn()
 		_: passed = check(false, "Scenario driver not implemented: " + name)
 	if not passed: return
 	print("PASS: Godot live integration (prepared ", name, " card-combination scenario; UI choices and exact resulting game state)")

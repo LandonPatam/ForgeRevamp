@@ -65,6 +65,12 @@ final class BridgeGuiGame extends AbstractGuiGame {
             yields.setPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, "false");
             yields.setPref(FPref.YIELD_DECLINE_SCOPE_STACK_YIELD, "NEVER");
             yields.setPref(FPref.YIELD_DECLINE_SCOPE_NO_ACTIONS, "NEVER");
+            // Pass turn (Space) uses Forge's end-of-turn yield. It stops when this seat is
+            // attacked, targeted or facing a board wipe, not for every opposing spell.
+            yields.setPref(FPref.YIELD_INTERRUPT_ON_ATTACKERS, "true");
+            yields.setPref(FPref.YIELD_INTERRUPT_ON_TARGETING, "true");
+            yields.setPref(FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL, "true");
+            yields.setPref(FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL, "false");
         }
         super.setOriginalGameController(player, controller);
         if (controller instanceof PlayerControllerHuman human) {

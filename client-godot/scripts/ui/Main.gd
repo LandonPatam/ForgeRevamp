@@ -458,7 +458,7 @@ func _build_shell() -> void:
 	var note := Control.new()
 	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(note)
-	footer.add_child(_label("SPACE  Pass    T  Tap / attack    H  Help", 10, P.MUTED))
+	footer.add_child(_label("SPACE  Pass turn    Q  Advance    D  Draw    T  Tap / attack    H  Help", 10, P.MUTED))
 	hand_root = Control.new()
 	hand_root.mouse_filter = Control.MOUSE_FILTER_PASS
 	hand_root.z_index = 20
@@ -1903,7 +1903,8 @@ func _finish_card_drag(view: Control, cancelled: bool) -> void:
 		view.reparent(drag_origin_parent)
 		view.settle(drag_origin, TABLE_CARD_SIZE)
 	elif _stack_drop_target(view, view.last_pointer) >= 0:
-		# Dropping a permanent onto an identical one joins it to that pile.
+		# Dropping a permanent onto an identical one joins it to that pile, where that card sits.
+		_anchor_pile_at(_stack_drop_target(view, view.last_pointer))
 		for id in [int(view.data.id), _stack_drop_target(view, view.last_pointer)]:
 			local_pile_members[id] = true
 			split_pile_cards.erase(id)
@@ -1934,6 +1935,7 @@ func _finish_pile_drag(view: Control, cancelled: bool) -> void:
 	else:
 		var target := _stack_drop_target(view, view.last_pointer)
 		if target >= 0 and not members.has(target):
+			_anchor_pile_at(target)
 			local_pile_members[target] = true
 			split_pile_cards.erase(target)
 			manual_positions.erase(target)
@@ -1962,11 +1964,25 @@ func _clean_up_board() -> void:
 	for card in snapshot.players[0].zones.Battlefield:
 		var key: String = FieldLayout.stack_key(card)
 		if key.is_empty() or int(counts[key]) < 2: continue
+		# A new pile forms where its first card already is instead of jumping into the rows.
+		if not pile_anchors.has(_pile_anchor_key(card)): _anchor_pile_at(int(card.id))
 		local_pile_members[card.id] = true
 		split_pile_cards.erase(card.id)
 		manual_positions.erase(card.id)
 		play_positions.erase(card.id)
 	_layout_board()
+
+## Keep a forming pile at the current on-table spot of one of its cards.
+func _anchor_pile_at(id: int) -> void:
+	if id < 0 or not cards.has(id) or not is_instance_valid(cards[id]): return
+	var view: Control = cards[id]
+	var key := _pile_anchor_key(view.data)
+	if key.is_empty(): return
+	if manual_positions.has(id):
+		pile_anchors[key] = manual_positions[id] # Its saved spot, even mid-animation.
+		return
+	var center: Vector2 = board.get_global_transform().affine_inverse() * (view.get_global_transform() * (view.size * 0.5))
+	pile_anchors[key] = Vector2(center.x / board.size.x, center.y)
 
 ## The identical controlled permanent under the pointer, or -1.
 func _stack_drop_target(view: Control, pointer: Vector2) -> int:
@@ -2703,7 +2719,7 @@ func _show_table_settings() -> void:
 
 func _show_help() -> void:
 	if live:
-		_information("Forge controls", "Follow Forge's prompt on the right. Click cards, players, and stack entries to select them for the current action. Space presses Forge's primary button. Click lands to generate mana before playing a spell.\n\nDuring Declare attackers, click your creature to start an arrow, then click an opponent's avatar. Escape or Cancel target dismisses the arrow. Choose your attackers, then use OK to commit them.\n\nDrag a hand card onto your field to play it. Hold and drag battlefield cards to move them. Click a card in Command, Graveyard, or Exile to select it in Forge. Right-click cards to read their rules.\n\nForge controls costs, tap state, targeting, combat, automatic draws, and undo. Live phase stops follow Forge preferences. Refresh reconnects without restarting the match. Atraxa and Doom decks include complete card images.")
+		_information("Forge controls", "Follow Forge's prompt on the right. Click cards, players, and stack entries to select them for the current action. Q presses Forge's primary button (advance phase / resolve). Space passes the rest of the turn using Forge's End Turn: it still stops for your required choices and when you are attacked, targeted or facing a board wipe. D takes a pending draw. Click lands to generate mana before playing a spell.\n\nDuring Declare attackers, click your creature to start an arrow, then click an opponent's avatar. Escape or Cancel target dismisses the arrow. Choose your attackers, then use OK to commit them.\n\nDrag a hand card onto your field to play it. Hold and drag battlefield cards to move them. Click a card in Command, Graveyard, or Exile to select it in Forge. Right-click cards to read their rules.\n\nForge controls costs, tap state, targeting, combat, automatic draws, and undo. Live phase stops follow Forge preferences. Refresh reconnects without restarting the match. Atraxa and Doom decks include complete card images.")
 		return
 	_information("A table to explore", "This is a visual prototype, using original placeholder cards. Forge is not connected; no Magic legality, costs or rules are simulated.\n\nHover · inspect / right-click · enlarge\nClick your battlefield card: tap / untap; in Declare attackers choose a defender\nHold + drag your card · move / Escape · cancel\nClick a hand card · select / double-click · play\nSpace · advance phase or resolve a demo spell\nT: selected card tap / attack action\nDeclare attackers: click an untapped creature, then an opponent\nD · draw / C · toggle a crowded battlefield\n1–5 · try each fallback decision\nR · reset / Escape · cancel targeting or close a browser\n\nCrowded battlefields wrap and overlap at full card size. The table can be moved vertically with the mouse wheel. Keyboard focus remains inside active decisions.")
 
@@ -2914,7 +2930,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if live:
 		match event.keycode:
-			KEY_SPACE: _primary_action()
+			KEY_SPACE: _pass_turn()
+			KEY_Q: _primary_action()
+			KEY_D: _intent("draw")
 			KEY_T: _tap(true)
 			KEY_H: _show_help()
 			KEY_R: _intent("refresh")
@@ -2922,7 +2940,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	match event.keycode:
-		KEY_SPACE: _primary_action()
+		KEY_SPACE, KEY_Q: _primary_action()
 		KEY_T: _tap(true)
 		KEY_D: _intent("draw")
 		KEY_C: _intent("crowd")
@@ -2937,6 +2955,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_intent("prompt", {"kind": ["choose", "order", "distribute", "input", "message"][event.keycode - KEY_1]})
 	_update_lines()
 	get_viewport().set_input_as_handled()
+
+func _pass_turn() -> void:
+	# Pass turn only applies while Forge is waiting on this seat's priority.
+	if snapshot.is_empty() or not snapshot.get("asks", []).is_empty() or not snapshot.get("pendingDraws", []).is_empty() or snapshot.get("prompt", {}).get("inputKind", "") != "InputPassPriority":
+		return
+	_intent("pass_turn")
+	toast.text = "Passing until end of turn. Your required choices, attacks, targets and board wipes still stop you."
+	toast.modulate.a = 1
+	if toast_tween != null: toast_tween.kill()
+	toast_tween = create_tween()
+	toast_tween.tween_interval(2.4)
+	toast_tween.tween_property(toast, "modulate:a", 0.0, 0.3)
 
 func _capture(path: String) -> void:
 	await get_tree().process_frame
