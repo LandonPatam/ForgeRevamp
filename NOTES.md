@@ -16,6 +16,7 @@
 
 ## Next steps
 
+- Shared workflow: Windows implements/tests and pushes short-lived branches; Mac pulls the exact commit, rebuilds/tests and pushes compatibility fixes during its coordinated turn. Online hosting/protocol changes also require both cross-platform host/join directions.
 - Windows: fetch `chore/mac-reconciliation`; run affected import/UI/library/pile, Java/browser/online/solo phase, and Windows packaging/launch checks. Report the tested commit.
 - Resolve or explicitly triage source smoke issues. Merge into `main` only after Windows checks pass; this session does not merge.
 - Keep the original Mac project and backup until consolidation is accepted on both platforms.
