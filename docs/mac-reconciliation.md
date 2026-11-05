@@ -46,8 +46,9 @@ were imported into tracked source. Local tools/dependencies were copied for test
 
 Verified on Apple M2 / macOS 26.3.1 / Godot 4.7.2 / JDK 17.
 Implementation commits: `23380b5` (Mac reconciliation) and `f4fae0e`
-(short opening-hand viewport layout and related checks). Final package verification
-is pending; each package records its exact source commit and dirty state.
+(short opening-hand viewport layout and related checks). Final package source: clean `b6b61b4`. The final branch also incorporates the
+documentation-only upstream commit `8f915d8`; runtime source is unchanged from
+`b6b61b4`. Each package records its exact source commit and dirty state.
 
 - Full Forge reactor and bridge Maven package: passed; Java regression harness:
   **445 checks passed** after rebuilding the pinned, patched Forge modules.
@@ -59,20 +60,34 @@ is pending; each package records its exact source commit and dirty state.
 - Retina UI integration: passed settings, portraits, online field, editor/artwork
   mouse input, import dialogs, real match, park/resume and end cleanup; captures
   of the table, small settings and editor were inspected.
+- Full rendered application integration after the short-viewport fix: passed
+  navigation, settings/profiles, saved/generated decks, two/three/four-player
+  Commander, retained drafts, session ownership, park/resume, end and quit cleanup.
+  The corrected opening-hand capture was inspected: cards and all three decisions
+  are visible without overlap.
+- Focused opening-hand suite: passed short viewport geometry, hover, decision and
+  bottom-selection/hidden-hand guards.
 - Library integration: passed catalog, printing selection, import/export, undo/redo,
   quantities, metadata and conflict guards.
 - Packaged Intel JVM under Rosetta: **73 online checks passed**.
-- Exported Intel Godot plus bundled Intel JVM under Rosetta: real-match startup,
+- Final exported Intel Godot plus bundled Intel JVM under Rosetta: real-match startup,
   hidden information and owned-process cleanup passed.
 - Universal export, signature, DMG checksum verification, release smoke and bundled
   Apple Silicon real-match startup/cleanup: passed. Release exports disable GDScript assertions; this is
   separate from the source assertion failures below.
 
-The initial local artifact (before the short opening-hand layout fix) is
-`dist/ForgeUI-mac-reconciliation-universal.dmg` (615 MiB),
-SHA-256 `f2a746a90b0154c6c59a17b9fe1319f6416d55b4a3250b3bc7fb18c9b0d17d6d`.
+The final local artifact is `dist/ForgeUI-mac-reconciliation-final-universal.dmg`
+(601.6 MiB), SHA-256
+`27e846c907945b5a24b2655763c67d9c141378bc975f2fcba3d1c4cbc82ff979`.
+Its app, source archive, build receipt and installation notes are in
+`dist/ForgeUI-mac-reconciliation-final/`. The earlier candidate remains local.
 Backup SHA-256: `510cc69ef805d596346666a89ec7b1d2157ec0336afd11f57fb97d1fed9ed6e8`
 (archive integrity and checksum verified).
+
+The source launcher passes Bash/Python syntax checks and native help dispatch.
+Windows PowerShell scripts, Windows export preset, downward pile implementation
+and its tests, and solo phase-stop Java implementation remain unchanged from
+`434c14b`.
 
 Local logs and captures are retained under `artifacts/mac-reconciliation/` and
 `client-godot/artifacts/`. Build logs are under `dist/`.
