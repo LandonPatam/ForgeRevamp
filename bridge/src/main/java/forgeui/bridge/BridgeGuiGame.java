@@ -222,7 +222,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
             for (PhaseType phase : PhaseType.values()) {
                 if (phase == PhaseType.UNTAP) continue;
                 // Report preferences, not the transient no-legal-action yield policy.
-                stops.addProperty(phase.name(), configuredPhaseStop(player, phase));
+                stops.addProperty(phase.name(), displayedPhaseStop(player, phase));
             }
             result.add(String.valueOf(player.getId()), stops);
         }
@@ -231,6 +231,17 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     boolean configuredPhaseStop(PlayerView player, PhaseType phase) {
         return phaseStopOverrides.getOrDefault(player.getId() + ":" + phase.name(), defaultPhaseStop(phase));
+    }
+
+    /** Online, another player's turn stops this seat only where it was explicitly checked. */
+    private boolean displayedPhaseStop(PlayerView player, PhaseType phase) {
+        if (!onlineMatch || isOwnTurn(player)) return configuredPhaseStop(player, phase);
+        return phaseStopOverrides.getOrDefault(player.getId() + ":" + phase.name(), false);
+    }
+
+    private boolean isOwnTurn(PlayerView playerTurn) {
+        return !(getGameController() instanceof PlayerControllerHuman human)
+                || playerTurn.equals(human.getPlayer().getView());
     }
 
     boolean mayReturnToHand(CardView card) {
@@ -1076,13 +1087,13 @@ final class BridgeGuiGame extends AbstractGuiGame {
         if (!onlineMatch) return !configuredPhaseStop(playerTurn, phase);
         Boolean enabled = phaseStopOverrides.get(playerTurn.getId() + ":" + phase.name());
         if (enabled != null) return !enabled;
-        if (getGameController() instanceof PlayerControllerHuman human
-                && !playerTurn.equals(human.getPlayer().getView())) {
-            // Forge refreshes this on its game thread before consulting phase stops.
-            // Keep instant/activated response windows, but don't make idle seats
-            // approve every phase of somebody else's turn. Stack decisions and
-            // combat/target/payment inputs are separate and never skipped here.
-            return !human.getPlayer().getView().hasAvailableActions();
+        if (!isOwnTurn(playerTurn)) {
+            // Another person's (or bot's) turn flows without this seat approving each
+            // empty-stack step, even when it holds an instant: otherwise the table waits on
+            // a nonactive seat at every phase. Checking a phase on that player's row restores
+            // the window. Stack responses and blocker/target/payment inputs are separate
+            // and never skipped here.
+            return true;
         }
         if (getGameController() instanceof PlayerControllerHuman human
                 && (phase == PhaseType.COMBAT_DECLARE_ATTACKERS || phase == PhaseType.COMBAT_DECLARE_BLOCKERS)

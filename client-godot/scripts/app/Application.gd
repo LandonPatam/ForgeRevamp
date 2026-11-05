@@ -523,7 +523,8 @@ func _net_changed() -> void:
 	if net.all_ready(): _launch_ready_online_match.call_deferred()
 
 func _launch_ready_online_match() -> void:
-	if not net.all_ready() or busy or game != null or parked or view != "menu": return
+	# The selected-disk ("commander") view is still home: PLAY readies from it, so it must launch too.
+	if not net.all_ready() or busy or game != null or parked or view not in ["menu", "commander"]: return
 	if not selected_deck.get("legal", false): return
 	if match_preferences.bots.is_empty() and net.players().is_empty(): return
 	_launch_game(false)

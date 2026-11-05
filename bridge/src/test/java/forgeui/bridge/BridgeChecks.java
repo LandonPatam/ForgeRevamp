@@ -407,17 +407,17 @@ public final class BridgeChecks {
                     || phase == forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS;
             check(gui.isUiSetToSkipPhase(defender.getView(), phase) == (declarationPriority || !BridgeGuiGame.defaultPhaseStop(phase)), "Own-turn stops skip redundant combat priority without a response: " + phase);
             defender.getView().setHasAvailableActions(true);
-            check(!gui.isUiSetToSkipPhase(attackerPlayer.getView(), phase), "A legal nonactive action retains its priority window: " + phase);
+            check(gui.isUiSetToSkipPhase(attackerPlayer.getView(), phase), "A nonactive seat holding a response still lets another turn flow without a stop: " + phase);
             check(gui.isUiSetToSkipPhase(defender.getView(), phase) == !BridgeGuiGame.defaultPhaseStop(phase), "A legal active-player response retains the default combat window: " + phase);
             if (phase != forge.game.phase.PhaseType.UNTAP) {
                 for (boolean available : List.of(false, true, false)) {
                     defender.getView().setHasAvailableActions(available);
                     var stops = gui.phaseStops();
-                    for (var player : game.getPlayers()) {
-                        check(stops.getAsJsonObject(String.valueOf(player.getId())).get(phase.name()).getAsBoolean()
-                                        == BridgeGuiGame.defaultPhaseStop(phase),
-                                "Displayed defaults stay stable for every player as legal actions change: " + phase);
-                    }
+                    check(stops.getAsJsonObject(String.valueOf(defender.getId())).get(phase.name()).getAsBoolean()
+                                    == BridgeGuiGame.defaultPhaseStop(phase),
+                            "Displayed own-turn defaults stay stable as legal actions change: " + phase);
+                    check(!stops.getAsJsonObject(String.valueOf(attackerPlayer.getId())).get(phase.name()).getAsBoolean(),
+                            "Another player's turn shows no default stop online, matching its behavior: " + phase);
                 }
             }
         }
@@ -429,9 +429,13 @@ public final class BridgeChecks {
             check(gui.phaseStops().getAsJsonObject(String.valueOf(attackerPlayer.getId())).get("UPKEEP").getAsBoolean(),
                     "An enabled opponent stop remains displayed across action changes");
         }
-        gui.setPhaseStop(attackerPlayer.getView(), forge.game.phase.PhaseType.MAIN1, false);
-        check(!gui.phaseStops().getAsJsonObject(String.valueOf(attackerPlayer.getId())).get("MAIN1").getAsBoolean(),
-                "An explicitly disabled default remains off even when a response is available");
+        gui.setPhaseStop(defender.getView(), forge.game.phase.PhaseType.MAIN1, false);
+        defender.getView().setHasAvailableActions(true);
+        check(!gui.phaseStops().getAsJsonObject(String.valueOf(defender.getId())).get("MAIN1").getAsBoolean()
+                        && gui.isUiSetToSkipPhase(defender.getView(), forge.game.phase.PhaseType.MAIN1),
+                "An explicitly disabled own default remains off even when a response is available");
+        gui.setPhaseStop(defender.getView(), forge.game.phase.PhaseType.MAIN1, true);
+        defender.getView().setHasAvailableActions(false);
         gui.setPhaseStop(defender.getView(), forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS, true);
         check(!gui.isUiSetToSkipPhase(defender.getView(), forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS), "An explicit own-turn blocker stop still pauses with no legal response");
         var attacker = testCreature(attackerPlayer, "Attacker");

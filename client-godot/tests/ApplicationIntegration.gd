@@ -852,7 +852,17 @@ func online_join_check() -> bool:
 	await capture("app-online-host-ready-settings")
 	app.match_settings.page_scroll.scroll_vertical = int(app.match_settings.page_scroll.get_v_scroll_bar().max_value)
 	await capture("app-online-host-ready-settings-footer")
-	await app.close_match_settings()
+	# Add a bot the way a host does, through Settings and Save & Return. The changed
+	# table clears readiness; a bot needs none, so the two people alone launch it.
+	app.match_settings._add_bot()
+	app.match_settings.save_button.pressed.emit()
+	if not await until(func(): return app.view == "menu" and not app.busy and app.net.host_status.get("hostReady", true) == false, "saving the bot returns home and clears readiness"): return false
+	if not check(app.match_preferences.bots.size() == 1 and app.net.players().size() == 1, "The host table now holds a bot and the friend"): return false
+	# Picking a disk on the carousel opens the selected-deck view; readying from there must still launch.
+	app.computer.deck_selected.emit(app.computer.decks.map(func(deck): return deck.id).find(app.selected_id))
+	if not await until(func(): return app.view == "commander" and not app.busy, "the host opens the selected-disk view"): return false
+	await click_control(app.start_button)
+	if not await until(func(): return app.net.is_ready(), "the host readies from the selected-disk view with a bot seated"): return false
 	hosting.set_ready(true)
 	if not await until(func(): return not remote_start.is_empty(), "the last ready player automatically launches the host"): return false
 	var hosted_status: Dictionary = {}
