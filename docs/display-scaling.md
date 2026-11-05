@@ -37,12 +37,19 @@ add `--ui-scale=1.5 --artwork-only` for fractional input/printing-gallery covera
 The shared surface checks cover every supported factor at odd window dimensions
 and preserve visible render textures across live scale changes.
 
-Mac must pull the pushed feature branch and verify its 13-inch display at Automatic,
+For Mac regression testing, pull the feature branch and verify the 13-inch display at Automatic,
 intermediate sizes and 100%, including settings, home/header/carousel, editor
 dialogs/artwork, opening hands, gameplay and park/resume. Check saving, canceling,
 restarting, and any external monitor. Preserve Mac packaging/runtime support.
 Merge only after Mac validation; Windows rendering at 200% does not establish
 physical Mac/Retina results.
+
+On November 4, 2026 the user reported that Mac tests passed for the pushed
+`fix/display-ui-scale` implementation (`e3cda90`). Fetching confirmed that no
+additional Mac code changes were pushed. This user-reported pass completes the
+UI-scaling merge gate alongside the Windows checks below; individual Mac test
+commands/results were not supplied. Live cross-platform online play and the
+separately reported in-game online issue remain outside this acceptance.
 
 Windows verification on November 4, 2026 passed the full integration at 100% and
 200%, the 150% artwork flow at both window sizes, every supported factor's root
