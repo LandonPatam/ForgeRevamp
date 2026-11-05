@@ -47,6 +47,8 @@ var resting_z := 0
 var hand_hover_amount := 0.0
 var press_pending := false
 var pile_gesture := false
+## Mouse button that started the current press (right-drag or Shift + left-drag move piles).
+var press_button := MOUSE_BUTTON_LEFT
 var drag_active := false
 var press_pointer := Vector2.ZERO
 var last_pointer := Vector2.ZERO
@@ -315,8 +317,9 @@ func _gui_input(event: InputEvent) -> void:
 	if inspection:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+		press_button = event.button_index
+		pile_gesture = event.button_index == MOUSE_BUTTON_RIGHT or (event.shift_pressed and _pile_movable())
 		press_pending = true
-		pile_gesture = event.button_index == MOUSE_BUTTON_RIGHT
 		press_pointer = event.global_position
 		last_pointer = press_pointer
 		held_seconds = 0.0
@@ -326,7 +329,10 @@ func _gui_input(event: InputEvent) -> void:
 
 ## Right-dragging an untapped pile moves all of it; a plain right-click still inspects.
 func _can_drag_pile() -> bool:
-	return not inspection and not zone_browser and not press_pending and can_drag() and data.get("zone", "") == "Battlefield" and int(data.get("pileSize", 1)) > 1 and not data.get("tapped", false)
+	return not press_pending and _pile_movable()
+
+func _pile_movable() -> bool:
+	return not inspection and not zone_browser and can_drag() and data.get("zone", "") == "Battlefield" and int(data.get("pileSize", 1)) > 1 and not data.get("tapped", false)
 
 func can_drag() -> bool:
 	return not data.get("hidden", false) and data.get("owner", -1) == 0 and (data.get("zone", "") in ["Battlefield", "Hand"] or (zone_browser and data.get("zone", "") in ["Command", "Graveyard", "Exile"]) or (data.get("zone", "") == "Stack" and data.get("pendingCast", false)))
@@ -388,7 +394,7 @@ func _input(event: InputEvent) -> void:
 		if drag_active:
 			drag_moved.emit(self, last_pointer)
 			get_viewport().set_input_as_handled()
-	elif event is InputEventMouseButton and event.button_index == (MOUSE_BUTTON_RIGHT if pile_gesture else MOUSE_BUTTON_LEFT) and not event.pressed:
+	elif event is InputEventMouseButton and event.button_index == press_button and not event.pressed:
 		last_pointer = event.global_position
 		get_viewport().set_input_as_handled()
 		_finish_press(false)
@@ -401,5 +407,5 @@ func _finish_press(cancelled: bool) -> void:
 	if was_drag:
 		drag_finished.emit(self, cancelled)
 	elif not cancelled:
-		if pile_gesture: inspect_requested.emit(data)
+		if press_button == MOUSE_BUTTON_RIGHT: inspect_requested.emit(data)
 		else: picked.emit(data, press_double_click)

@@ -3,7 +3,13 @@ const Attention = preload("res://scripts/ui/StackAttention.gd")
 
 func run(ui: Control, directory: String = "") -> void:
 	var state := {"stack": [{"id": 1}], "connectionReady": true, "asks": [], "game": {}, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true, "cancelEnabled": true}}
-	assert(not Attention.needs_choice(state), "Ordinary priority must not flash")
+	assert(Attention.needs_choice(state), "A stack waiting on this player to resolve or respond must glow")
+	state.autoPassStackId = 1
+	assert(not Attention.needs_choice(state), "An item that passes automatically must not glow")
+	state.autoPassStackId = -1
+	state.prompt.okEnabled = false
+	assert(not Attention.needs_choice(state), "Priority this player cannot act on must not glow")
+	state.prompt.okEnabled = true
 	for kind in ["InputSelectTargets", "InputSelectCardsFromList", "InputSelectStackItems", "InputPayMana", "InputPayManaOfCostPayment", "InputConfirm"]:
 		state.prompt.inputKind = kind
 		state.prompt.okEnabled = kind == "InputConfirm"
@@ -47,4 +53,4 @@ func run(ui: Control, directory: String = "") -> void:
 	ui._apply_state(saved)
 	assert(not ui.stack_attention.attention and not ui.stack_attention.is_processing() and not ui.modal.visible)
 	await ui.get_tree().process_frame
-	print("PASS: stack decision pulse, priority/OK-only exclusions, completed choices, dialogs and lifecycle")
+	print("PASS: stack decision pulse, resolve-window glow, automatic/OK-only exclusions, completed choices, dialogs and lifecycle")

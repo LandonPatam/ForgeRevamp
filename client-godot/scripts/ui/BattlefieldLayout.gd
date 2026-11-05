@@ -1,4 +1,9 @@
 extends RefCounted
+## Table settings: distance between cards in a pile (at a 200px-wide card) and whether a
+## tapped pile card turns aside, uncovering more of the cards behind it.
+static var pile_step := 26.0
+static var tap_aside := false
+
 ## Full-size packing: wrap when useful, then overlap only as much as needed.
 static func arrange(values: Array, bounds: Vector2, card_size: Vector2, gap: float, group_duplicates: bool) -> Dictionary:
 	var units: Array = groups(values, group_duplicates)
@@ -6,19 +11,24 @@ static func arrange(values: Array, bounds: Vector2, card_size: Vector2, gap: flo
 	for unit in units:
 		unit.footprint = _footprint(unit.cards, card_size)
 		var ratio := card_size.x / 200.0
-		unit.offset = minf(14 * ratio, minf(64 * ratio, maxf(0, bounds.x - unit.footprint.x) * 0.5) / maxf(1, unit.cards.size() - 1))
+		unit.offset = minf(pile_step * ratio, minf(pile_reach() * ratio, maxf(0, bounds.x - unit.footprint.x) * 0.5) / maxf(1, unit.cards.size() - 1))
 		unit.width = unit.footprint.x + unit.offset * (unit.cards.size() - 1)
 		height = maxf(height, unit.footprint.y)
 	return pack(units, bounds, card_size, gap, height)
 
 ## A pile reserves room for a sideways card and its small tap offset without moving neighbors.
 static func _footprint(unit_cards: Array, card_size: Vector2) -> Vector2:
-	if unit_cards.size() > 1: return Vector2(card_size.y, card_size.y)
+	if unit_cards.size() > 1: return Vector2(card_size.y + (card_size.x * 0.5 if tap_aside else 0.0), card_size.y)
 	return Vector2(card_size.y, card_size.x) if unit_cards[0].get("tapped", false) else card_size
 
 ## Align sideways cards with the pile's bottom, exposing the upright cards' top edges.
 static func pile_tap_offset(card: Dictionary, count: int, card_size: Vector2) -> Vector2:
-	return Vector2(0, (card_size.y - card_size.x) * 0.5) if count > 1 and card.get("tapped", false) else Vector2.ZERO
+	if count <= 1 or not card.get("tapped", false): return Vector2.ZERO
+	return Vector2(card_size.x * 0.5 if tap_aside else 0.0, (card_size.y - card_size.x) * 0.5)
+
+## Widest a pile may fan before its cards overlap more tightly.
+static func pile_reach() -> float:
+	return maxf(64.0, pile_step * 4.0)
 
 ## Identity of a stackable permanent: matching keys are identical visible game states, apart from
 ## tapping, since a tapped card turns in place within its pile.
@@ -48,7 +58,7 @@ static func fit_card_size(values: Array, bounds: Vector2, base: Vector2, gap: fl
 	var height := 0.0
 	for unit in units:
 		var footprint := _footprint(unit.cards, base)
-		unit.width = footprint.x + minf(64, 14 * (unit.cards.size() - 1))
+		unit.width = footprint.x + minf(pile_reach(), pile_step * (unit.cards.size() - 1))
 		height = maxf(height, footprint.y)
 	var best := 0.0
 	for candidate in range(1, units.size() + 1):

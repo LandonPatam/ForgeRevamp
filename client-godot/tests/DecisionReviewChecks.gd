@@ -97,6 +97,7 @@ func run(ui: Control, directory: String = "") -> void:
 	reveal.board_requested.emit()
 	ui._apply_state(state)
 	assert(ui.decision_board_button.visible and not ui.modal_center.visible and ui.modal_panel == reveal, "Viewing the table must retain the same unanswered engine decision across snapshots")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("return-to-decision.png"))
 	ui.decision_board_button.pressed.emit()
 	assert(ui.modal_center.visible and not ui.decision_board_button.visible)
 	state.revealed = []

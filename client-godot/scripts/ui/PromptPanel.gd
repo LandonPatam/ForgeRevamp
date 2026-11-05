@@ -8,6 +8,8 @@ var ask: Dictionary = {}
 var chosen: Array[int] = []
 var amounts: Array[int] = []
 var spins: Array[SpinBox] = []
+## Redraws each damage column after any amount changes (caps can lower other amounts).
+var amount_refreshers: Array[Callable] = []
 var option_buttons: Array[Button] = []
 var confirm_button: Button
 var hint: Label
@@ -42,6 +44,7 @@ func present(value: Dictionary) -> void:
 			chosen.append(int(index))
 	amounts.clear()
 	spins.clear()
+	amount_refreshers.clear()
 	option_buttons.clear()
 	for child in get_children():
 		remove_child(child)
@@ -241,36 +244,81 @@ func present(value: Dictionary) -> void:
 			search.text_submitted.connect(func(_text: String): _select_top_match())
 			_focus_search.call_deferred()
 	elif ask.kind == "distribute":
+		# One column per recipient: big amount (marked Lethal when it kills) over its card.
+		var lethal: Array = ask.get("lethal", [])
+		var strip := HBoxContainer.new()
+		strip.add_theme_constant_override("separation", 18)
+		strip.alignment = BoxContainer.ALIGNMENT_CENTER
+		var scroller := ScrollContainer.new()
+		scroller.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroller.custom_minimum_size.y = 430 if card_distribution else 200
+		scroller.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroller.add_child(strip)
+		options_column.add_child(scroller)
 		for i in range(options.size()):
-			var row := HBoxContainer.new()
-			if options[i].has("card"):
-				var card = preload("res://scripts/ui/CardView.gd").new()
-				card.inspection = true
-				card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				card.custom_minimum_size = Vector2(200, 280)
-				card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-				row.add_child(card)
-				card.update_card(options[i].card)
-			var label := Label.new()
-			label.text = options[i].label
-			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			label.custom_minimum_size.x = 260 if card_distribution else 200
-			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(label)
+			var target := VBoxContainer.new()
+			target.add_theme_constant_override("separation", 6)
+			target.custom_minimum_size.x = 172
+			var amount_label := Label.new()
+			amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			amount_label.add_theme_font_size_override("font_size", 40)
+			target.add_child(amount_label)
+			var lethal_label := Label.new()
+			lethal_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			lethal_label.add_theme_font_size_override("font_size", 15)
+			lethal_label.add_theme_color_override("font_color", Color("f2a18a"))
+			target.add_child(lethal_label)
 			var spin := SpinBox.new()
 			spin.min_value = 1 if ask.get("atLeastOne", false) else 0
 			spin.max_value = ask.amount
 			spin.step = 1
-			spin.custom_minimum_size = Vector2(100, 40)
+			spin.visible = false # The model behind the big number and its buttons.
 			amounts.append(int(spin.min_value))
 			spin.value = spin.min_value
 			spins.append(spin)
+			target.add_child(spin)
+			var buttons := HBoxContainer.new()
+			buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+			buttons.add_theme_constant_override("separation", 10)
+			for delta in [-1, 1]:
+				var step := Button.new()
+				step.text = "−" if delta < 0 else "+"
+				step.custom_minimum_size = Vector2(56, 40)
+				step.add_theme_font_size_override("font_size", 22)
+				step.focus_mode = Control.FOCUS_NONE
+				step.add_theme_stylebox_override("normal", P.box(Color("0a1e22"), Color("32676c"), 6, 8))
+				step.add_theme_stylebox_override("hover", P.box(Color("1b2032"), Color("bd9bf2"), 6, 8))
+				step.add_theme_stylebox_override("pressed", P.box(Color("1b2032"), Color("bd9bf2"), 6, 8))
+				step.add_theme_stylebox_override("disabled", P.box(Color("081416"), Color("1d3a3d"), 6, 8))
+				step.pressed.connect(func(): spin.value = clampf(spin.value + delta, spin.min_value, spin.max_value))
+				buttons.add_child(step)
+			target.add_child(buttons)
+			var threshold: int = int(lethal[i]) if i < lethal.size() else 0
+			var show_amount := func():
+				amount_label.text = str(amounts[i])
+				lethal_label.text = "(Lethal)" if threshold > 0 and amounts[i] >= threshold else ("%d to kill" % threshold if threshold > 0 else " ")
+			show_amount.call()
 			spin.value_changed.connect(func(n: float):
 				amounts[i] = int(n)
 				_limit_distribution()
-				_validate())
-			row.add_child(spin)
-			options_column.add_child(row)
+				_validate()
+				for refresh in amount_refreshers: refresh.call())
+			amount_refreshers.append(show_amount)
+			if options[i].has("card"):
+				var card = preload("res://scripts/ui/CardView.gd").new()
+				card.inspection = true
+				card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				card.custom_minimum_size = Vector2(160, 224)
+				card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+				target.add_child(card)
+				card.update_card(options[i].card)
+			var label := Label.new()
+			label.text = options[i].label
+			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.custom_minimum_size.x = 160
+			target.add_child(label)
+			strip.add_child(target)
 	elif ask.kind == "input":
 		input = LineEdit.new()
 		input.text = ask.get("initial", "")
@@ -491,7 +539,7 @@ func _validate() -> void:
 			for n in amounts:
 				total += n
 			valid = total == ask.amount
-			hint.text = str(total) + " / " + str(ask.amount) + " assigned"
+			hint.text = str(total) + " / " + str(int(ask.amount)) + " assigned"
 		"input":
 			valid = not ask.get("numeric", false) or input.text.is_valid_int()
 			hint.text = "Enter a whole number." if ask.get("numeric", false) else "Enter your answer."

@@ -33,6 +33,7 @@ const Targets = preload("res://scripts/ui/TargetOverlay.gd")
 const Prompt = preload("res://scripts/ui/PromptPanel.gd")
 const Opening = preload("res://scripts/ui/OpeningHand.gd")
 const StackAttention = preload("res://scripts/ui/StackAttention.gd")
+const NotificationSound = preload("res://scripts/ui/NotificationSound.gd")
 const IncomingEffect = preload("res://scripts/ui/IncomingEffect.gd")
 const ManaCounter = preload("res://scripts/ui/ManaCounter.gd")
 const Mock = preload("res://scripts/bridge/MockAdapter.gd")
@@ -91,8 +92,23 @@ const UI_LAYOUT_SETTINGS := [
 	{"key": "hand_show", "title": "How much of your hand shows", "low": "Less", "high": "More", "min": -90.0, "max": 90.0, "step": 5.0, "default": 0.0},
 	{"key": "library_x", "title": "Library position", "low": "Left", "high": "Right", "min": -800.0, "max": 800.0, "step": 5.0, "default": 0.0},
 	{"key": "library_show", "title": "How much of your library shows", "low": "Less", "high": "More", "min": 0.25, "max": 1.0, "step": 0.01, "default": 0.78},
+	{"key": "hand_spread", "title": "Hand spread", "low": "Tight", "high": "Wide", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0},
+	{"key": "hand_count", "title": "Cards shown in hand at once", "low": "Fewer", "high": "More", "min": 3.0, "max": 14.0, "step": 1.0, "default": 8.0},
+	{"key": "hand_angle", "title": "Hand angle", "low": "Flat", "high": "Curved", "min": 0.0, "max": 25.0, "step": 1.0, "default": 10.0},
+	{"key": "pile_spread", "title": "Space between stacked cards", "low": "Tight", "high": "Wide", "min": 8.0, "max": 60.0, "step": 2.0, "default": 26.0},
+	{"key": "pile_tap", "title": "Tapped cards in a stack", "low": "In place", "high": "Aside", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
+	{"key": "notify_volume", "title": "Notification volume", "low": "Quiet", "high": "Loud", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.6},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78}
+## Built-in library backs: regions of Forge's sleeve atlas. The first is the original back.
+const CARD_BACKS := [
+	{"name": "Black Lotus", "region": Rect2(360, 1500, 360, 500)},
+	{"name": "Classic", "region": Rect2(0, 0, 360, 500)},
+	{"name": "Skyline", "region": Rect2(1080, 1500, 360, 500)},
+	{"name": "Crossed swords", "region": Rect2(1440, 1500, 360, 500)},
+	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
+	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
+]
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -139,6 +155,8 @@ var prompt_body: Label
 var stack_box: VBoxContainer
 var stack_header: Label
 var stack_attention: Control
+var notify_sound: AudioStreamPlayer
+var stack_waiting := false
 var token_artwork: Node
 var stack_scroll: ScrollContainer
 var incoming_effect: Control
@@ -482,6 +500,7 @@ func _build_shell() -> void:
 	library_ghost.size = HAND_CARD_SIZE
 	library_ghost.hide()
 	add_child(library_ghost)
+	_apply_table_style()
 	step_panels[0].panel.reparent(self)
 	step_panels[0].panel.z_index = 25
 	hud[0].reparent(self)
@@ -534,10 +553,17 @@ func _build_shell() -> void:
 	modal_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	modal_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(modal_center)
-	decision_board_button = _terminal_button("Return to decision", _toggle_decision_board)
-	decision_board_button.position = Vector2(24, 24)
+	decision_board_button = _terminal_button("Return to decision", _toggle_decision_board, "Go back to the decision you were making (Escape).", true)
+	decision_board_button.add_theme_font_size_override("font_size", 15)
+	decision_board_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	decision_board_button.autowrap_mode = TextServer.AUTOWRAP_OFF
+	decision_board_button.clip_text = true
 	decision_board_button.hide()
 	modal.add_child(decision_board_button)
+	notify_sound = NotificationSound.new()
+	add_child(notify_sound)
+	if not verification_mode and not get_window().files_dropped.is_connected(_files_dropped):
+		get_window().files_dropped.connect(_files_dropped)
 	stack_attention = StackAttention.new()
 	stack_attention.stack = stack_box
 	add_child(stack_attention)
@@ -616,6 +642,23 @@ func _load_table_settings() -> void:
 func _read_ui_layout(config: ConfigFile) -> void:
 	for setting in UI_LAYOUT_SETTINGS:
 		ui_layout[setting.key] = clampf(float(config.get_value("ui", setting.key, setting.default)), setting.min, setting.max)
+	ui_layout.card_back = float(clampi(int(config.get_value("ui", "card_back", 0)), 0, CARD_BACKS.size() - 1))
+	ui_layout.notify_sound = float(clampi(int(config.get_value("ui", "notify_sound", 0)), 0, NotificationSound.CHOICES.size() - 1))
+	_apply_table_style()
+
+## Pushes pile and card-back preferences to the shared layout and library views.
+func _apply_table_style() -> void:
+	FieldLayout.pile_step = float(ui_layout.pile_spread)
+	FieldLayout.tap_aside = float(ui_layout.pile_tap) >= 0.5
+	if notify_sound != null: notify_sound.configure(int(ui_layout.notify_sound), float(ui_layout.notify_volume))
+	var back := AtlasTexture.new()
+	back.atlas = preload("res://assets/forge-sleeves.png")
+	back.region = CARD_BACKS[clampi(int(ui_layout.card_back), 0, CARD_BACKS.size() - 1)].region
+	back.filter_clip = true
+	for pile in [library_pile, library_ghost]:
+		if pile != null and "back" in pile:
+			pile.back = back
+			pile.queue_redraw()
 
 func _save_table_settings() -> void:
 	if verification_mode:
@@ -810,6 +853,9 @@ func _apply_state(value: Dictionary) -> void:
 	_close_accepted_commander_browser()
 	incoming_effect.present(snapshot)
 	stack_attention.present(snapshot)
+	# Sound once when the stack starts waiting on this player, not on every snapshot.
+	if stack_attention.attention and not stack_waiting and notify_sound != null: notify_sound.play_cue()
+	stack_waiting = stack_attention.attention
 	if live and snapshot.get("connectionReady", false) and snapshot.has("phaseStops"):
 		phase_stops = snapshot.phaseStops.duplicate(true)
 	turn_label.text = "Turn " + str(snapshot.game.turn)
@@ -1027,7 +1073,7 @@ func _place_anchored_piles(values: Array, card_size: Vector2, counts: Dictionary
 		if group.cards.any(func(card): return pile_drag_ids.has(card.id) or pending_returns.has(card.id)): continue
 		var key := _pile_anchor_key(first)
 		if not pile_anchors.has(key): continue
-		var offset: float = 14.0 * card_size.x / 200.0
+		var offset: float = FieldLayout.pile_step * card_size.x / 200.0
 		var anchor: Vector2 = pile_anchors[key]
 		var center_x: float = anchor.x * board.size.x + float(cursors.get(key, 0.0))
 		for i in range(group.cards.size()):
@@ -1324,7 +1370,8 @@ func _layout_hand(instant_id: int = -1) -> void:
 	library_center = clampf(library_center + ui_layout.library_x, library_pile.size.x * 0.5 + 8, maxf(library_pile.size.x * 0.5 + 8, table_right - library_pile.size.x * 0.5))
 	var values: Array = _hand_layout_values()
 	hand_root.visible = not _opening_hand_gated()
-	var capacity := clampi(int(fan_width / 48), 3, 8)
+	var hand_count := int(ui_layout.hand_count)
+	var capacity := clampi(int(fan_width / (48.0 if hand_count <= 8 else 32.0)), 3, hand_count)
 	if hand_focus_id >= 0:
 		var focus_index := hand_order.find(hand_focus_id)
 		if focus_index < hand_offset:
@@ -1342,7 +1389,7 @@ func _layout_hand(instant_id: int = -1) -> void:
 	if gap_visible:
 		visible_count = mini(visible_count, capacity - 1)
 	var slots := visible_count + (1 if gap_visible else 0)
-	var spread := minf(100, (fan_width - HAND_CARD_SIZE.x - 8) / maxf(1, slots - 1))
+	var spread := minf(100.0 * float(ui_layout.hand_spread), (fan_width - HAND_CARD_SIZE.x - 8) / maxf(1, slots - 1))
 	var total := HAND_CARD_SIZE.x + spread * maxf(0, slots - 1)
 	for i in range(values.size()):
 		var view: Control = cards[values[i].id]
@@ -1359,11 +1406,11 @@ func _layout_hand(instant_id: int = -1) -> void:
 		if gap_visible and i >= hand_gap_index:
 			slot += 1
 		var t: float = 0 if slots <= 1 else (slot / (slots - 1) - 0.5) * 2
-		view.base_rotation = deg_to_rad(t * 10)
+		view.base_rotation = deg_to_rad(t * float(ui_layout.hand_angle))
 		view.resting_z = i - hand_offset
 		view.z_index = view.resting_z * 2
 		view._arrange()
-		view.settle(Vector2((fan_width - total) * 0.5 + slot * spread, absf(t) * 15), HAND_CARD_SIZE, false, view.data.id == instant_id)
+		view.settle(Vector2((fan_width - total) * 0.5 + slot * spread, absf(t) * 1.5 * float(ui_layout.hand_angle)), HAND_CARD_SIZE, false, view.data.id == instant_id)
 	hand_previous.visible = hand_offset > 0
 	hand_next.visible = hand_offset + visible_count < values.size()
 	hand_previous.position = hand_root.position + Vector2(-28, 22)
@@ -2499,12 +2546,29 @@ func _modal_covers_table() -> bool:
 func _toggle_decision_board() -> void:
 	_set_decision_board(not decision_board_button.visible)
 
+var decision_board_pulse: Tween
+
 func _set_decision_board(show_board: bool) -> void:
 	if not is_instance_valid(decision_board_button): return
 	modal_center.visible = not show_board
 	modal.get_child(0).visible = not show_board
 	modal.mouse_filter = Control.MOUSE_FILTER_IGNORE if show_board else Control.MOUSE_FILTER_STOP
 	decision_board_button.visible = show_board
+	if decision_board_pulse != null: decision_board_pulse.kill()
+	decision_board_button.modulate = Color.WHITE
+	if not show_board: return
+	# A large, gently pulsing button over the top of the right rail: easy to find, off the field.
+	var title := ""
+	if not snapshot.get("asks", []).is_empty(): title = str(snapshot.asks[0].get("title", ""))
+	if title.is_empty(): title = str(snapshot.get("prompt", {}).get("message", "")).get_slice("\n", 0)
+	decision_board_button.text = "◀  RETURN TO DECISION" + ("\n" + (title.left(23) + ("…" if title.length() > 23 else "")) if not title.is_empty() else "")
+	var rail_rect: Rect2 = rail.get_global_rect() if is_instance_valid(rail) and rail.is_visible_in_tree() else Rect2(Vector2(size.x - 300, 0), Vector2(280, 0))
+	var origin: Vector2 = modal.get_global_transform().affine_inverse() * rail_rect.position
+	decision_board_button.position = origin + Vector2(0, 8)
+	decision_board_button.size = Vector2(maxf(220.0, rail_rect.size.x), 84)
+	decision_board_pulse = create_tween().set_loops()
+	decision_board_pulse.tween_property(decision_board_button, "modulate", Color(1.25, 1.25, 1.25), 0.7)
+	decision_board_pulse.tween_property(decision_board_button, "modulate", Color.WHITE, 0.7)
 
 func _board_ask(ask: Dictionary) -> bool:
 	return ask.get("kind", "") == "choose" and ask.get("bulkSelection", false) and ask.get("options", []).all(func(option): return option.has("playerId") or (cards.has(int(option.get("cardId", -1))) and cards[int(option.cardId)].data.get("zone", "") == "Battlefield"))
@@ -2671,8 +2735,29 @@ func _information(title: String, body: String) -> VBoxContainer:
 
 func _set_ui_layout(key: String, value: float) -> void:
 	ui_layout[key] = value
+	_apply_table_style()
+	if key in ["pile_spread", "pile_tap"] and not snapshot.is_empty(): _layout_board()
 	_layout_hand()
 	_save_table_settings()
+
+var sound_mark: Callable
+
+func _files_dropped(files: PackedStringArray) -> void:
+	for path in files:
+		if not path.to_lower().ends_with(".mp3"): continue
+		if NotificationSound.import_custom(path):
+			_set_ui_layout("notify_sound", 4.0)
+			notify_sound.play_cue()
+			if sound_mark.is_valid(): sound_mark.call()
+			toast.text = "Custom notification sound set."
+		else:
+			toast.text = "That MP3 could not be read."
+		toast.modulate.a = 1
+		if toast_tween != null: toast_tween.kill()
+		toast_tween = create_tween()
+		toast_tween.tween_interval(1.8)
+		toast_tween.tween_property(toast, "modulate:a", 0.0, 0.3)
+		return
 
 func _show_table_settings() -> void:
 	var column := _information("Table settings", "Changes apply right away and save for every game.")
@@ -2681,6 +2766,15 @@ func _show_table_settings() -> void:
 	modal_center.offset_bottom = -200
 	var sliders: Array = []
 	var position_in_column := column.get_child_count() - 1
+	column.add_theme_constant_override("separation", 12)
+	# Two columns keep every setting on screen above the hand and library.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 32)
+	grid.add_theme_constant_override("v_separation", 8)
+	column.add_child(grid)
+	column.move_child(grid, position_in_column)
+	position_in_column += 1
 	for setting in UI_LAYOUT_SETTINGS:
 		var row := VBoxContainer.new()
 		row.add_child(_label(setting.title, 14))
@@ -2706,13 +2800,76 @@ func _show_table_settings() -> void:
 		high.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		line.add_child(high)
 		row.add_child(line)
-		column.add_child(row)
-		column.move_child(row, position_in_column)
-		position_in_column += 1
+		row.custom_minimum_size.x = 380
+		grid.add_child(row)
 		sliders.append(slider)
+	var backs := VBoxContainer.new()
+	backs.add_child(_label("Library card back", 14))
+	var back_row := HBoxContainer.new()
+	back_row.add_theme_constant_override("separation", 8)
+	var back_buttons: Array = []
+	for index in range(CARD_BACKS.size()):
+		var thumb := AtlasTexture.new()
+		thumb.atlas = preload("res://assets/forge-sleeves.png")
+		thumb.region = CARD_BACKS[index].region
+		var choice := TextureButton.new()
+		choice.texture_normal = thumb
+		choice.ignore_texture_size = true
+		choice.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+		choice.custom_minimum_size = Vector2(54, 75)
+		choice.tooltip_text = CARD_BACKS[index].name
+		choice.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		choice.focus_mode = Control.FOCUS_NONE
+		back_row.add_child(choice)
+		back_buttons.append(choice)
+	var mark_back := func():
+		for index in range(back_buttons.size()):
+			back_buttons[index].modulate = Color.WHITE if index == int(ui_layout.card_back) else Color(1, 1, 1, 0.45)
+	for index in range(back_buttons.size()):
+		back_buttons[index].pressed.connect(func():
+			_set_ui_layout("card_back", float(index))
+			mark_back.call())
+	mark_back.call()
+	backs.add_child(back_row)
+	var extras := GridContainer.new()
+	extras.columns = 2
+	extras.add_theme_constant_override("h_separation", 32)
+	extras.add_child(backs)
+	column.add_child(extras)
+	column.move_child(extras, position_in_column)
+	position_in_column += 1
+	var sounds := VBoxContainer.new()
+	sounds.add_child(_label("Sound when the stack needs you", 14))
+	var sound_row := HBoxContainer.new()
+	sound_row.add_theme_constant_override("separation", 6)
+	var sound_buttons: Array = []
+	for index in range(NotificationSound.CHOICES.size()):
+		var option := _button(NotificationSound.CHOICES[index], func(): pass)
+		P.style_popup_button(option)
+		option.disabled = index == 4 and not NotificationSound.has_custom()
+		sound_row.add_child(option)
+		sound_buttons.append(option)
+	var mark_sound := func():
+		for index in range(sound_buttons.size()):
+			sound_buttons[index].modulate = Color.WHITE if index == int(ui_layout.notify_sound) else Color(1, 1, 1, 0.5)
+			if index == 4: sound_buttons[index].disabled = not NotificationSound.has_custom()
+	for index in range(sound_buttons.size()):
+		sound_buttons[index].pressed.connect(func():
+			_set_ui_layout("notify_sound", float(index))
+			notify_sound.play_cue()
+			mark_sound.call())
+	sound_mark = mark_sound
+	mark_sound.call()
+	sounds.add_child(sound_row)
+	sounds.add_child(_label("Drop an MP3 file onto this window to use it as Custom.", 12, Color("bfc4ca")))
+	extras.add_child(sounds)
 	var reset := _button("Reset to default", func():
 		for index in range(sliders.size()):
-			sliders[index].value = UI_LAYOUT_SETTINGS[index].default)
+			sliders[index].value = UI_LAYOUT_SETTINGS[index].default
+		_set_ui_layout("card_back", 0.0)
+		_set_ui_layout("notify_sound", 0.0)
+		mark_sound.call()
+		mark_back.call())
 	P.style_popup_button(reset)
 	column.add_child(reset)
 	column.move_child(reset, position_in_column)
@@ -2908,7 +3065,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if is_instance_valid(dragged_source):
 		return
 	if modal.visible:
-		if event.keycode == KEY_ESCAPE:
+		if event.keycode == KEY_ESCAPE and decision_board_button.visible:
+			_set_decision_board(false)
+		elif event.keycode == KEY_ESCAPE:
 			if open_ask >= 0 and modal_panel != null:
 				modal_panel.cancel_input()
 			elif open_ask == -1:

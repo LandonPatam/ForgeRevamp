@@ -66,6 +66,25 @@ func _check_pile_drag(ui: Control, pile: Dictionary, directory: String) -> void:
 	assert(inspected[0] == 2 and not view.press_pending, "Only an untapped pile moves together")
 	ui._close_modal()
 	ui._apply_state(pile)
+	await ui.get_tree().create_timer(0.25).timeout
+	# Shift + left-drag moves the whole pile too, without inspecting.
+	var shift_start: Vector2 = view.get_global_transform() * (view.size * 0.5)
+	var shift_press := InputEventMouseButton.new()
+	shift_press.button_index = MOUSE_BUTTON_LEFT
+	shift_press.pressed = true
+	shift_press.shift_pressed = true
+	shift_press.global_position = shift_start
+	view._gui_input(shift_press)
+	var shift_motion := InputEventMouseMotion.new()
+	shift_motion.global_position = shift_start + Vector2(-120, 30)
+	view._input(shift_motion)
+	assert(view.drag_active and ui.pile_drag_ids.size() == 2, "Shift-dragging takes the whole pile")
+	var shift_release := InputEventMouseButton.new()
+	shift_release.button_index = MOUSE_BUTTON_LEFT
+	shift_release.global_position = shift_motion.global_position
+	view._input(shift_release)
+	assert(inspected[0] == 2 and ui.dragged_source == null and view.data.stackCount == 2 and other.visible, "A Shift-dragged pile drops as one pile without inspecting")
+	ui._apply_state(pile)
 	view.inspect_requested.disconnect(count_inspection)
 
 ## The hand and library follow the player's offsets, stay on the table and survive a save.

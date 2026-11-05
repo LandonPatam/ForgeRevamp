@@ -4,6 +4,8 @@ signal drag_moved(pointer: Vector2)
 signal drag_finished(pointer: Vector2, cancelled: bool)
 const P = preload("res://scripts/ui/Palette.gd")
 const BACK = preload("res://assets/black-lotus-back.tres")
+## The chosen table-settings back; Black Lotus by default.
+var back: Texture2D = BACK
 var enabled := true
 var ghost := false
 var pressed := false
@@ -42,7 +44,7 @@ func _draw() -> void:
 		var rim := P.box(Color.TRANSPARENT, Color.WHITE, 8, 0)
 		rim.set_border_width_all(4)
 		draw_style_box(rim, Rect2(0, 0, 144, 202).grow(3))
-	draw_texture_rect(BACK, Rect2(0, 0, 144, 202), false)
+	draw_texture_rect(back, Rect2(0, 0, 144, 202), false)
 	draw_set_transform(Vector2.ZERO)
 
 func _gui_input(event: InputEvent) -> void:

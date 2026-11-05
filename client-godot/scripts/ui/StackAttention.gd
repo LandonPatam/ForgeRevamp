@@ -21,6 +21,10 @@ static func needs_choice(state: Dictionary) -> bool:
 		return not prompt.get("okEnabled", false)
 	if kind == "InputConfirm":
 		return prompt.get("cancelEnabled", false)
+	if kind == "InputPassPriority":
+		# The stack is waiting on this player to resolve or respond, unless it passes itself.
+		var top_id := int(state.stack[0].get("id", -1))
+		return prompt.get("okEnabled", false) and int(state.get("autoPassStackId", -1)) != top_id and state.get("takebackCast", {}).is_empty() and state.get("pendingDraws", []).is_empty()
 	return false
 
 func _ready() -> void:
@@ -52,9 +56,14 @@ func _draw() -> void:
 	# A steady accent outline remains between pulses; never blink the stack away.
 	var pulse := (sin(Time.get_ticks_msec() * TAU / 1100.0) + 1.0) * 0.5 if capture_phase < 0 else capture_phase
 	var accent := preload("res://scripts/ui/TerminalStyle.gd").ACCENT
-	var glow := P.box(Color.TRANSPARENT, Color(accent, 0.10 + pulse * 0.22), 10, 0)
+	# Soft outer rings make the waiting stack obvious from across the table.
+	for ring in range(6, 0, -1):
+		var halo := P.box(Color.TRANSPARENT, Color(accent, (0.04 + pulse * 0.10) * (1.0 - ring / 7.0)), 10 + ring * 2, 0)
+		halo.set_border_width_all(4)
+		draw_style_box(halo, rect.grow(4 + ring * 3))
+	var glow := P.box(Color.TRANSPARENT, Color(accent, 0.18 + pulse * 0.30), 10, 0)
 	glow.set_border_width_all(7)
 	draw_style_box(glow, rect.grow(3))
-	var outline := P.box(Color.TRANSPARENT, Color(accent, 0.48 + pulse * 0.52), 7, 0)
-	outline.set_border_width_all(2)
+	var outline := P.box(Color.TRANSPARENT, Color(accent, 0.6 + pulse * 0.4), 7, 0)
+	outline.set_border_width_all(3)
 	draw_style_box(outline, rect)
