@@ -4,7 +4,7 @@ Native Godot Commander frontend using Forge for game rules, with local bots and 
 
 ## Shared Windows and Mac development
 
-Source lives in [LandonPatam/ForgeRevamp](https://github.com/LandonPatam/ForgeRevamp). Both platforms share one main branch; features and platform fixes use short-lived branches. See [the development workflow](docs/development-workflow.md), including the one-time Mac reconciliation instructions. The Windows baseline and Mac compatibility work are reconciled on `chore/mac-reconciliation`; merge after affected checks pass on both platforms.
+Source lives in [LandonPatam/ForgeRevamp](https://github.com/LandonPatam/ForgeRevamp). Both platforms share one main branch; features and platform fixes use short-lived branches. See [the development workflow](docs/development-workflow.md). Mac support is reconciled with the Windows source; the [Mac](docs/mac-reconciliation.md) and [Windows](docs/windows-reconciliation.md) acceptance records describe the checks and remaining live cross-platform verification.
 
 ## macOS app
 

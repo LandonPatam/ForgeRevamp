@@ -1,9 +1,9 @@
 // Real solo match: checked bot phases must wait for the human to pass priority.
 // Only the JVM and sockets created by this check are stopped.
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
 import {fileURLToPath} from 'node:url';
-import {delimiter} from 'node:path';
+import {delimiter, join} from 'node:path';
 import assert from 'node:assert/strict';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -11,7 +11,10 @@ const probe = createServer();
 await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
 const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
-const child = spawn('java', ['-Xmx3g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain',
+const javaSettings = spawnSync('java', ['-XshowSettings:properties', '-version'], {encoding: 'utf8', windowsHide: true});
+const javaHome = javaSettings.stderr?.match(/^\s*java.home = (.+)$/m)?.[1].trim();
+if (!javaHome) throw Error('Cannot locate Java');
+const child = spawn(join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'), ['-Xmx3g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain',
   '--assets', '../forge/forge-gui', '--port', String(port), '--opponents', '2'], {cwd: root, windowsHide: true});
 let tail = '', ready = false, state, ws, counter = 0;
 for (const stream of [child.stdout, child.stderr]) stream.on('data', data => {

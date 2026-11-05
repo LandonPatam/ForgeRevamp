@@ -1,22 +1,21 @@
-# Session notes - 2026-11-04
+﻿# Session notes - 2026-11-04
 
 ## Current state
 
-- `chore/mac-reconciliation` consolidates Windows baseline `434c14b` with unique Mac work. Implementation commits: `824ce26` (lobby/portable bridge checks), `23380b5` (Mac UI/runtime/packaging), `f4fae0e` (opening-hand layout for short 2x viewports). See `docs/mac-reconciliation.md` for decisions, artifacts and checks.
-- Original Mac project remains intact at `../ForgeUI`; full verified backup is `../mac-backups/ForgeUI-pre-reconciliation-20261104.tar.gz` with SHA-256 sidecar. This new sibling clone contains the shared source; caches, builds and credentials remain untracked.
-- Imported 2x UI surfaces, editor artwork/input fixes, render optimizations, layout-loop recovery, remote-seat recovery improvements and lobby validation. Retained Windows downward pile tap behavior, solo phase stops, protocol protections, Windows scripts and export preset.
-- Forge stays pinned to `84f4983`; all 15 local upstream modifications exactly match the existing tracked patch. No additional Mac patch was required. Full Forge/bridge build, 445 Java checks, 12 browser checks, 73 source online checks, 8 four-seat turn checks, repeated solo bot phase stops, library, Retina integration, focused opening-hand and full rendered application suites passed.
-- Universal Mac DMG built and verified at `dist/ForgeUI-mac-reconciliation-final-universal.dmg`, from clean commit `b6b61b4` including the short-viewport opening-hand fix. Apple Silicon and Intel/Rosetta bundled real-match launch/cleanup passed; packaged Intel runtime passed all 73 online checks.
+- Windows and Mac use the consolidated source on shared `main`; reconciliation retains both platforms' launchers, packaging and presets. Mac implementation through `015c08d` and Windows acceptance are recorded in `docs/mac-reconciliation.md` and `docs/windows-reconciliation.md`; use `git log` for the acceptance commit.
+- Windows checks passed: Godot import, 445 Java/12 browser/73 local online/8 four-seat checks, repeated solo bot stops, source smoke, full rendered app/library/2x UI, battlefield/piles and 231 hand-hover frames. Captures were inspected. Added test-only headless/whole-pixel expectations and actual-JVM lookup to prevent Windows Java shim cleanup leaks; game/bridge runtime source was unchanged by Windows acceptance.
+- Windows validation package: `dist/ForgeUI-windows-reconciliation/ForgeUI.exe` with bundled runtime/service/assets. Exported smoke and bundled real-match/hidden-hand/process-cleanup checks passed. Keep the whole folder. Mac universal DMG and original-project backup remain on the Mac as recorded in its reconciliation document.
+- User chose to test physical Windows/Mac play personally AFTER merging, because another in-game online issue needs addressing. That issue is not yet described or fixed; local automated checks do not verify physical cross-platform play.
+- Workflow: Windows implements/tests and pushes a short-lived branch; Mac pulls/rebuilds/tests and pushes compatibility fixes during its turn; Windows pulls/rechecks; merge after affected checks pass. Handoffs give branch/commit and a test prompt. Packages use the same tagged source for Windows `.exe` and Mac `.app`.
 
 ## Known issues
 
-- Source smoke still fails existing attacker-scroll containment at 1280x800 and hand drag reorder assertions. Both reproduce in an isolated original Mac source copy; attacker-scroll also fails on untouched Windows baseline on Mac. Release smoke disables assertions, so its pass does not resolve these source failures.
-- Native Intel hardware, physical Mac-to-Windows play and outside-network/router behavior remain unverified. Mac signing is ad hoc, without Developer ID/notarization.
-- Incorporated upstream documentation-only `8f915d8` during reconciliation. Historical handoffs and original Mac NOTES are outdated; use current source and the reconciliation record.
+- Mac source smoke still has documented pre-existing attacker-scroll and hand-reorder failures; Windows source and rendered suites passed. Native Intel hardware, live host/join in both directions and internet/router behavior remain unverified. Mac signing remains ad hoc.
+- Local lobby suites share Forge's online port and must run serially. Test tools must launch the actual JVM, not the Windows PATH Java shim. Only test-owned orphan JVMs were stopped; pre-existing processes were preserved.
+- Generated Talrand bot decks can occasionally fail Forge validation (previously observed). The 900-frame smoke wrapper can expire early; extended source smoke uses 3600 frames.
 
 ## Next steps
 
-- Shared workflow: Windows implements/tests and pushes short-lived branches; Mac pulls the exact commit, rebuilds/tests and pushes compatibility fixes during its coordinated turn. Online hosting/protocol changes also require both cross-platform host/join directions.
-- Windows: fetch `chore/mac-reconciliation`; run affected import/UI/library/pile, Java/browser/online/solo phase, and Windows packaging/launch checks. Report the tested commit.
-- Resolve or explicitly triage source smoke issues. Merge into `main` only after Windows checks pass; this session does not merge.
-- Keep the original Mac project and backup until consolidation is accepted on both platforms.
+- Both machines should use current `main` and rebuild affected components for the user's live test. Preserve the original Mac project/backup.
+- User will test the merged builds together and describe the additional online issue. Implement that fix once on a new shared branch and test both host/join directions.
+- No GitHub Release was published. Historical handoffs are superseded by current source, AGENTS.md and `docs/development-workflow.md`.

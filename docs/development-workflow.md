@@ -6,7 +6,11 @@ Windows and Mac share source history, with platform launchers, build scripts and
 
 ## Initial Mac consolidation
 
-The first `main` baseline comes from Windows. It includes the client, bridge, tests, required assets and Forge patches, but is not yet a consolidated or Mac-validated release.
+The one-time reconciliation is recorded in [mac-reconciliation.md](mac-reconciliation.md)
+and [windows-reconciliation.md](windows-reconciliation.md). The user chose physical
+cross-platform play after the initial merge; it remains pending. The steps below
+describe the bootstrap process and should not be repeated for routine updates.
+Keep the original Mac checkout and backup until its work is accepted.
 
 1. Preserve and back up the existing Mac project, including untracked source and local Forge edits. Do not reset, clean or overwrite it.
 2. Clone into a NEW sibling directory, leaving the old project intact:
@@ -36,7 +40,9 @@ Keep the old Mac project until its unique changes are accounted for. The existin
 
 The agreed default is to implement and test on Windows, commit/push a feature branch, then have the Mac agent pull that exact implementation, rebuild and test it. Requested game updates include permission to commit and push the focused feature-branch changes unless the user asks for local-only work. Provide the Mac testing handoff after pushing; do not leave completed changes only in the Windows working tree.
 
-Complete the initial Mac reconciliation before starting new online functionality. Until that happens, treat the baseline as Windows-only verification and preserve the existing Mac project.
+Use the consolidated main branch for new online work. Live cross-platform testing
+deferred during the initial merge must still be completed; the separately reported
+in-game online issue is not resolved by combining the platform sources.
 
 Start from a clean, updated main and create a short-lived branch:
 

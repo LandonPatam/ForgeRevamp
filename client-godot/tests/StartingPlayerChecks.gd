@@ -83,7 +83,10 @@ func _die_variants(ui: Control, state: Dictionary, directory: String) -> void:
 			sample.startingToss = {"id": 8000 + count, "winnerId": 40 + winner, "winnerSeat": winner, "winnerName": sample.players[winner].name, "choosing": true}
 			panel.present(sample)
 			await ui.get_tree().process_frame
-			assert(Rect2(Vector2.ZERO, ui.get_viewport_rect().size).encloses(panel.get_global_rect()), "Starting rolls must fit the Mac viewport")
+			# Headless smoke sets a logical table size; its root viewport stays 64x64.
+			# Rendered checks still require containment in the actual viewport.
+			var bounds: Rect2 = ui.get_global_rect() if DisplayServer.get_name() == "headless" else Rect2(Vector2.ZERO, ui.get_viewport_rect().size)
+			assert(bounds.encloses(panel.get_global_rect()), "Starting rolls must fit the table viewport")
 			assert(panel.winner_index == winner and panel.outcome_marks.size() == count)
 			assert(panel.hint.text.contains("1 in %d" % count))
 			# The viewer's local seat comes first, but die lettering stays fixed.

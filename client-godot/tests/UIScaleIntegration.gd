@@ -80,7 +80,9 @@ func run(root: Control) -> void:
 	var home_size: Vector2i = app.computer.world_view.size
 	await app.open_match_settings()
 	if not await until(func(): return app.view == "settings" and not app.busy, "PC cog settings zoom"): return
-	if not check(app.match_settings.get_viewport_rect().size.is_equal_approx(app.size / 2.0), "PC settings use the same 2x scale"): return
+	# Windows may fit the native window to odd pixel dimensions; logical viewports
+	# use whole pixels, so a half pixel rounds down rather than changing the scale.
+	if not check(app.match_settings.get_viewport_rect().size.is_equal_approx((app.size / 2.0).floor()), "PC settings use the same 2x scale: viewport=%s app=%s surface=%s" % [app.match_settings.get_viewport_rect().size, app.size, app.settings_surface.size]): return
 	if not check(app.settings_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS and not app.settings_surface.render_when_hidden, "Visible settings render continuously after the CRT zoom"): return
 	await capture("settings")
 	await click(app.settings_surface, app.match_settings.names[0])
@@ -102,7 +104,7 @@ func run(root: Control) -> void:
 	print("UI SCALE: opening editor")
 	await app.open_editor()
 	print("UI SCALE: editor opened ", app.editor.get_viewport_rect())
-	if not check(app.editor.get_viewport_rect().size.is_equal_approx(app.editor_surface.size / 2.0), "Editor gets a half-size logical viewport"): return
+	if not check(app.editor.get_viewport_rect().size.is_equal_approx((app.editor_surface.size / 2.0).floor()), "Editor gets a half-size logical viewport"): return
 	if not await until(func(): return not app.editor.draft.is_empty() and app.editor.card_grid.get_child_count() > 0, "editor deck"): return
 	if not check(app.editor_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS, "The visible editor keeps every animation frame"): return
 	print("UI SCALE: editor deck loaded")
@@ -150,7 +152,7 @@ func run(root: Control) -> void:
 	if not await until(func(): return app.selected_deck.get("legal", false) and not app.busy, "home deck readiness"): return
 	app.start_game()
 	if not await until(func(): return app.view == "game" and not app.busy, "real match reveal"): return
-	if not check(app.game.get_viewport_rect().size.is_equal_approx(app.game_surface.size / 2.0), "Battlefield gets a half-size logical viewport"): return
+	if not check(app.game.get_viewport_rect().size.is_equal_approx((app.game_surface.size / 2.0).floor()), "Battlefield gets a half-size logical viewport"): return
 	if not check(app.game_surface.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS and not app.game_surface.render_when_hidden, "The revealed table resumes continuous drawing after its live CRT preview"): return
 	await capture("opening-hand")
 	var opening_deadline := Time.get_ticks_msec() + 45000
@@ -176,7 +178,7 @@ func run(root: Control) -> void:
 	if not check(app.game_surface.viewport.render_target_update_mode == SubViewport.UPDATE_DISABLED, "Parking a game suspends its hidden renderer"): return
 	await click(app, app.computer.quit_button, 1.0)
 	if not await until(func(): return is_instance_valid(app.confirm) and app.confirm.visible, "main-menu Quit confirmation"): return
-	if not check(app.confirm.get_viewport_rect().size.is_equal_approx(app.size / 2.0), "Main-menu Quit confirmation uses the shared 2x scale"): return
+	if not check(app.confirm.get_viewport_rect().size.is_equal_approx((app.size / 2.0).floor()), "Main-menu Quit confirmation uses the shared 2x scale"): return
 	await capture("quit")
 	await click(app.confirm.get_parent().get_parent(), app.confirm.cancel)
 	if not await until(func(): return not is_instance_valid(app.confirm), "Keep Open dismisses Quit"): return

@@ -2,6 +2,11 @@
 
 Branch: `chore/mac-reconciliation`. Merge only after affected Windows checks pass.
 
+Windows acceptance is recorded in [windows-reconciliation.md](windows-reconciliation.md).
+The user chose live Windows/Mac play after the reconciliation merge; those
+physical tests remain pending, along with the reported in-game online issue.
+The Mac verification below is retained as the original record.
+
 ## Preservation
 
 The old Mac project remains at `/Users/landonpatam/ForgeUI/ForgeUI`.
