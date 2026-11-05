@@ -22,6 +22,22 @@ func run(ui: Control, directory: String = "") -> void:
 	panel.card_chosen.connect(func(id): selections.append(id))
 	panel.present(state)
 	assert(panel.visible and panel.views.size() == 7 and not panel.keep_button.disabled)
+	var original_panel_size: Vector2 = panel.size
+	for logical_size in [Vector2(800, 500), Vector2(640, 400)]:
+		panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		panel.size = logical_size
+		panel._layout()
+		await ui.get_tree().process_frame
+		var bounds := Rect2(Vector2.ZERO, logical_size)
+		for button in [panel.view_button, panel.mulligan_button, panel.keep_button]:
+			assert(bounds.encloses(Rect2(button.position + panel.actions.position, button.size)), "Opening hand decisions fit short 2x viewports")
+		for index in range(panel.views.size()):
+			var card_bounds: Rect2 = panel.poses[index] * Rect2(Vector2.ZERO, panel.views[index].size)
+			assert(card_bounds.end.y < panel.actions.position.y, "Opening cards cannot cover required decisions")
+	panel.size = original_panel_size
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await ui.get_tree().process_frame
+	panel._layout()
 	state.prompt.mulliganReturnCount = 2
 	panel.present(state)
 	assert(panel.hint.visible and panel.hint.text.contains("return 2 cards"), "The return count must be visible while Keep and Mulligan are still available")

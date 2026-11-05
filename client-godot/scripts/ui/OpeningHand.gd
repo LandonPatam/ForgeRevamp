@@ -32,6 +32,7 @@ var show_keep_return_count := false
 const EXIT_SECONDS := 0.4
 var exit_tween: Tween
 var keep_requested := false
+var layout_scale := 1.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -212,22 +213,32 @@ func reset() -> void:
 func _layout() -> void:
 	if fan == null:
 		return
-	heading.add_theme_font_size_override("font_size", roundi(clampf(size.y * 0.064, 52, 72)))
-	heading.position = Vector2(24, size.y * 0.16)
-	heading.size = Vector2(size.x - 48, 96)
+	# ScaledSurface halves logical window dimensions. Keep the whole fan and
+	# required decisions inside short viewports, preserving the original large layout.
+	layout_scale = clampf(size.y / 800.0, 0.4, 1.0)
+	heading.add_theme_font_size_override("font_size", roundi(clampf(size.y * 0.064, 52 * layout_scale, 72 * layout_scale)))
+	heading.position = Vector2(24 * layout_scale, size.y * 0.16)
+	heading.size = Vector2(size.x - 48 * layout_scale, 96 * layout_scale)
+	hint.add_theme_font_size_override("font_size", roundi(24 * layout_scale))
+	hint.add_theme_stylebox_override("normal", P.box(Color("381b22"), Color("ff6969"), roundi(8 * layout_scale), roundi(10 * layout_scale)))
 	hint.position = Vector2(size.x * 0.07, size.y * 0.80)
-	hint.size = Vector2(size.x * 0.86, 54)
+	hint.size = Vector2(size.x * 0.86, 54 * layout_scale)
 	fan.size = size
-	actions.position = Vector2(24, size.y * 0.87)
-	actions.size = Vector2(size.x - 48, 50)
+	actions.position = Vector2(24 * layout_scale, size.y * 0.87)
+	actions.size = Vector2(size.x - 48 * layout_scale, 54 * layout_scale)
+	actions.z_index = 60
+	actions.add_theme_constant_override("separation", roundi(14 * layout_scale))
+	for button in [view_button, mulligan_button, keep_button]:
+		button.custom_minimum_size = Vector2(220, 54) * layout_scale
+		button.add_theme_font_size_override("font_size", roundi(20 * layout_scale))
 	poses.clear()
-	var card_width := clampf(size.y * 0.30, 210, 290)
+	var card_width := clampf(size.y * 0.30, 210 * layout_scale, 290 * layout_scale)
 	var dimensions := Vector2(card_width, card_width * 202.0 / 144.0)
 	var spread := minf(card_width * 0.72, (size.x * 0.88 - card_width) / maxf(1, views.size() - 1))
 	var total := dimensions.x + spread * maxf(0, views.size() - 1)
 	for i in range(views.size()):
 		var t: float = 0 if views.size() <= 1 else (float(i) / (views.size() - 1) - 0.5) * 2
-		var at := Vector2((size.x - total) * 0.5 + i * spread, size.y * 0.37 + absf(t) * 24)
+		var at := Vector2((size.x - total) * 0.5 + i * spread, size.y * 0.37 + absf(t) * 24 * layout_scale)
 		var angle := deg_to_rad(t * 10)
 		var view: Control = views[i]
 		view.size = dimensions
@@ -263,7 +274,7 @@ func _apply_hover(animated: bool) -> void:
 		var raised := i == hovered
 		var angle := poses[i].get_rotation()
 		var at: Vector2 = poses[i].origin - view.pivot_offset + view.pivot_offset.rotated(angle)
-		var target_position := at + Vector2(0, -52 if raised else 0)
+		var target_position := at + Vector2(0, -52 * layout_scale if raised else 0)
 		var target_angle := 0.0 if raised else angle
 		var target_scale := Vector2.ONE * (1.06 if raised else 1.0)
 		view.z_index = 30 if raised else i

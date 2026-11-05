@@ -678,7 +678,7 @@ func enter_game(keyboard: bool = false) -> bool:
 		elif state.prompt.get("inputKind", "") in ["", "InputLockUI"]:
 			await app.get_tree().create_timer(0.1).timeout
 		else: return check(false, "Unexpected startup decision: " + str(state.prompt))
-	return check(false, "Opening hand did not reach the table")
+	return check(false, "Opening hand did not reach the table: " + str({"prompt": app.game.snapshot.get("prompt", {}).get("inputKind", ""), "asks": app.game.snapshot.get("asks", []).size(), "ready": app.game.snapshot.get("connectionReady", false), "submitted": app.game.opening_hand.submitted, "openingHandComplete": app.game.snapshot.get("openingHandComplete", false)}))
 
 func leave_game() -> bool:
 	var retained: Control = app.game
@@ -1184,7 +1184,8 @@ func run(root: Control) -> void:
 	await app.get_tree().create_timer(0.3).timeout
 	await capture("app-deck-editor-1280")
 	if not check(_room_above_editor(), "The enlarged computer also clears the editor at 1280x800"): return
-	if not check(app.editor.card_scroll.size.x > 900 and app.editor.card_scroll.size.y > 240, "The editor keeps cards readable below the carousel at 1280x800"): return
+	var physical_card_scroll: Vector2 = app.editor.card_scroll.size * app.editor_surface.UI_SCALE
+	if not check(physical_card_scroll.x > 900 and physical_card_scroll.y > 240, "The editor keeps cards readable below the carousel at 1280x800"): return
 	app.computer.set_dark_mode(true, true, false)
 	await app.get_tree().process_frame
 	if not check(app.editor.styled_darkness == 1.0, "Editor palette is applied once at the target darkness during the room fade"): return
