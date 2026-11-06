@@ -87,6 +87,35 @@ func click_control(control: Control) -> void:
 	_pointer_input(press)
 	await app.get_tree().process_frame
 
+func real_click(control: Control) -> void:
+	# Click a control inside a ScaledSurface (including its embedded dialogs) through
+	# the real window input path, not by emitting its signal.
+	if DisplayServer.get_name() == "headless":
+		if control is Button and not control.disabled: control.pressed.emit()
+		await app.get_tree().process_frame
+		return
+	var surface: SubViewportContainer = app.settings_surface
+	await app.get_tree().process_frame
+	var point := control.get_global_transform() * (control.size * 0.5)
+	var owner_viewport := control.get_viewport()
+	while owner_viewport is Window and owner_viewport != surface.viewport:
+		point += Vector2(owner_viewport.position)
+		owner_viewport = owner_viewport.get_parent().get_viewport()
+	point = surface.get_global_transform() * (point * surface.ui_scale)
+	for pressed in [null, true, false]:
+		var event: InputEventMouse
+		if pressed == null: event = InputEventMouseMotion.new()
+		else:
+			event = InputEventMouseButton.new()
+			event.button_index = MOUSE_BUTTON_LEFT
+			event.pressed = pressed
+			event.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+		event.position = point
+		event.global_position = point
+		Input.parse_input_event(event)
+		await app.get_tree().process_frame
+		await app.get_tree().process_frame
+
 func _pointer_input(event: InputEventMouse) -> void:
 	if DisplayServer.get_name() == "headless":
 		var local: InputEventMouse = event.duplicate()
@@ -509,9 +538,13 @@ func settings_check() -> bool:
 	settings.deck_choices[1].select(1)
 	settings.deck_choices[1].item_selected.emit(1)
 	if not check(settings.value.bots[0].deckId == app.decks[1].id and settings.value.bots[1].mode == "generated", "Bots can choose saved decks or Forge-generated random decks"): return false
-	settings.portrait_buttons[1].pressed.emit()
-	if not check(settings.avatar_choices.size() == 126, "The profile picker offers Forge's complete default avatar selection"): return false
+	await real_click(settings.portrait_buttons[1])
+	if not check(settings.portrait_dialog != null and settings.portrait_dialog.visible and settings.avatar_choices.size() == 126, "The profile picker opens from a real click and offers Forge's complete default avatar selection"): return false
 	await capture("app-forge-avatar-picker")
+	await real_click(settings.avatar_choices[3])
+	if not check(not settings.portrait_dialog.visible and settings.value.bots[0].avatar == 3, "A real click on an avatar applies it and closes the picker"): return false
+	await real_click(settings.portrait_buttons[1])
+	if not check(settings.portrait_dialog.visible, "The picker reopens after a real click"): return false
 	settings.avatar_choices[125].pressed.emit()
 	settings.portrait_buttons[0].pressed.emit()
 	settings._import_portrait("res://assets/forge-avatars.png")

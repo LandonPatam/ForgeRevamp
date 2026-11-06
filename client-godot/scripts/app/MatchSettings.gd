@@ -652,6 +652,7 @@ func _choose_deck(profile: Dictionary, index: int) -> void:
 	browser_index = index
 	if is_instance_valid(deck_browser): deck_browser.queue_free()
 	deck_browser = AcceptDialog.new()
+	_embed_dialog(deck_browser)
 	deck_browser.theme = P.popup_theme()
 	deck_browser.title = "Commander precons" if profile.mode == "precon" else "Random Commander decks"
 	deck_browser.ok_button_text = "Use deck"
@@ -716,11 +717,19 @@ func _select_browser_deck() -> void:
 	_valid()
 	deck_browser.hide()
 
+## Settings runs inside a ScaledSurface SubViewport. Godot resolves an embedded
+## dialog's transient parent past that SubViewport to the root window, so an
+## exclusive dialog makes the root drop every event before it reaches this
+## surface: the dialog shows but nothing, including the dialog, can be clicked.
+func _embed_dialog(dialog: Window) -> void:
+	dialog.exclusive = false
+
 func _choose_portrait(profile: Dictionary, button: Button) -> void:
 	editing_profile = profile
 	editing_button = button
 	if portrait_dialog != null: portrait_dialog.queue_free()
 	portrait_dialog = AcceptDialog.new()
+	_embed_dialog(portrait_dialog)
 	portrait_dialog.title = "Choose a Forge avatar"
 	var choices := VBoxContainer.new()
 	portrait_dialog.add_child(choices)
@@ -759,6 +768,7 @@ func _choose_portrait(profile: Dictionary, button: Button) -> void:
 func _choose_file() -> void:
 	if file_picker == null:
 		file_picker = FileDialog.new()
+		_embed_dialog(file_picker)
 		file_picker.access = FileDialog.ACCESS_FILESYSTEM
 		file_picker.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 		file_picker.filters = PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp;Profile pictures"])
