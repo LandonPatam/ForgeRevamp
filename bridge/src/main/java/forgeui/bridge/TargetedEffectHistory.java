@@ -33,11 +33,14 @@ final class TargetedEffectHistory {
 
     synchronized void record(StackItemView item, PlayerView localPlayer, forge.game.spellability.SpellAbility ability) {
         boolean massRemoval = isMassRemoval(ability);
+        // "Each opponent loses 1 life" / "each player draws": a notice for each affected seat, not a stop.
+        boolean notice = !massRemoval && localPlayer != null && StackInteractionPolicy.noticePlayers(ability)
+                .stream().anyMatch(player -> player.getId() == localPlayer.getId());
         if (item == null || localPlayer == null || item.getActivatingPlayer() == null
                 || (!massRemoval && item.getActivatingPlayer().getId() == localPlayer.getId()) || events.containsKey(item.getId())) return;
         JsonArray targets = new JsonArray();
         collectTargets(item, localPlayer.getId(), targets, new HashSet<>());
-        if ((!massRemoval && targets.isEmpty()) || item.getSourceCard() == null) return;
+        if ((!massRemoval && !notice && targets.isEmpty()) || item.getSourceCard() == null) return;
         CardView source = item.getSourceCard();
         boolean publicSource = !source.isFaceDown() && source.getZone() != null
                 && Set.of(ZoneType.Stack, ZoneType.Battlefield, ZoneType.Graveyard, ZoneType.Exile, ZoneType.Command).contains(source.getZone());
@@ -48,7 +51,7 @@ final class TargetedEffectHistory {
         event.addProperty("controllerName", item.getActivatingPlayer().getName());
         event.addProperty("ability", item.isAbility());
         event.addProperty("effectText", item.getText());
-        event.addProperty("kind", massRemoval ? "massRemoval" : "targeted");
+        event.addProperty("kind", massRemoval ? "massRemoval" : (targets.isEmpty() ? "notice" : "targeted"));
         event.add("source", GameStateJson.describeCard(source, publicSource));
         event.add("targets", targets);
         events.put(item.getId(), event);

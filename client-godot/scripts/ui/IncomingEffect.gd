@@ -31,6 +31,13 @@ var browse_button: Button
 var responding: Array[int] = []
 var dismissed: Array[int] = []
 var current_state: Dictionary = {}
+## Non-blocking notices for untargeted effects on this player ("each opponent loses 1 life").
+var notice_panel: PanelContainer
+var notice_title: Label
+var notice_text: Label
+var notices: Array = []
+var notice_tween: Tween
+const NOTICE_SECONDS := 3.2
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -106,6 +113,19 @@ func _ready() -> void:
 	hover_preview.z_index = 1
 	add_child(hover_preview)
 	hover_preview.hide()
+	notice_panel = PanelContainer.new()
+	P.style_popup(notice_panel, 14)
+	notice_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var notice_column := VBoxContainer.new()
+	notice_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	notice_column.add_theme_constant_override("separation", 4)
+	notice_panel.add_child(notice_column)
+	notice_title = _label("", 13, Color("6d9fa3"))
+	notice_column.add_child(notice_title)
+	notice_text = _label("", 17, Color.WHITE)
+	notice_column.add_child(notice_text)
+	add_child(notice_panel)
+	notice_panel.hide()
 	panel.minimum_size_changed.connect(_layout)
 	get_viewport().size_changed.connect(_layout)
 	resized.connect(_layout)
@@ -129,6 +149,10 @@ func present(state: Dictionary) -> void:
 	var events: Array = state.get("targetedEffects", [])
 	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
+		if event.get("kind", "") == "notice":
+			if int(event.id) > latest and initialized: _queue_notice(event)
+			latest = maxi(latest, int(event.id))
+			continue
 		if auto_resolve:
 			latest = maxi(latest, int(event.id)) # Auto-resolve: no after-the-fact notices.
 			continue
@@ -299,8 +323,31 @@ func acknowledge_stack(stack_id: int) -> void:
 	waiting = waiting.filter(func(event): return int(event.get("stackId", -1)) != stack_id)
 	if int(active.get("stackId", -1)) == stack_id: _next()
 
+func _queue_notice(event: Dictionary) -> void:
+	notices.append(event.duplicate(true))
+	if notice_tween == null or not notice_tween.is_running(): _next_notice()
+
+func _next_notice() -> void:
+	if notices.is_empty():
+		notice_panel.hide()
+		return
+	var event: Dictionary = notices.pop_front()
+	notice_title.text = "%s  ·  %s" % [event.get("controllerName", "Opponent"), event.get("source", {}).get("name", "Hidden source")]
+	notice_text.text = str(event.get("effectText", ""))
+	notice_panel.modulate.a = 0.0
+	notice_panel.show()
+	_layout()
+	notice_tween = create_tween()
+	notice_tween.tween_property(notice_panel, "modulate:a", 1.0, 0.15)
+	notice_tween.tween_interval(NOTICE_SECONDS)
+	notice_tween.tween_property(notice_panel, "modulate:a", 0.0, 0.35)
+	notice_tween.tween_callback(_next_notice)
+
 func reset() -> void:
 	_clear_hover()
+	notices.clear()
+	if notice_tween != null: notice_tween.kill()
+	if notice_panel != null: notice_panel.hide()
 	active = {}
 	waiting.clear()
 	stack_ids.clear()
@@ -315,6 +362,10 @@ func _layout() -> void:
 	if panel == null:
 		return
 	var available := get_viewport_rect().size
+	if notice_panel != null and notice_panel.visible:
+		notice_panel.size = Vector2(minf(520, available.x - 32), 0)
+		notice_text.custom_minimum_size.x = notice_panel.size.x - 36
+		notice_panel.position = Vector2((available.x - notice_panel.size.x) * 0.5, 24)
 	var width := minf(1040, maxf(580, available.x - 96))
 	var height := clampf(available.y - 340, 300, 540)
 	face.custom_minimum_size = Vector2(height * 144 / 202, height)

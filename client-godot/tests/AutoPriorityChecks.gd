@@ -121,6 +121,7 @@ func run() -> void:
 	effect_adapter._service_effect_acknowledgment()
 	assert(effect_adapter.sent.size() == 3 and effect_adapter.acknowledged_effects.is_empty(), "An earlier acknowledged effect must retain its priority pass after a response resolves")
 	_check_resolve_all()
+	_check_stack_modes()
 	print("PASS: automatic routine priority and required-choice/damage/empty-stack guards")
 
 ## Table setting "Auto-resolve the stack": passes any stack item, never a decision.
@@ -157,3 +158,25 @@ func _check_resolve_all() -> void:
 		var state := held.duplicate(true)
 		state.merge(blocked, true)
 		assert(not Live.can_resolve_all(state), "Auto-resolve never answers a decision, draw, own undo window or empty stack: %s" % [blocked])
+
+## "Stack responses": Everything waits on any opponent item this seat can answer; Smart keeps the bridge's pass.
+func _check_stack_modes() -> void:
+	var adapter := RecordingLive.new()
+	adapter.state = {"connectionReady": true, "game": {}, "stack": [{"id": 50, "card": {"owner": 1}}], "bridgeAutoPassId": 50, "autoPassStackId": 50, "canRespond": true, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": []}
+	adapter.stack_mode = 1
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Smart keeps the bridge's routine pass")
+	adapter.stack_mode = 0
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == -1, "Everything waits on a routine opponent item when we can respond")
+	adapter.state.canRespond = false
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Everything still passes when we have no response")
+	adapter.state.canRespond = true
+	adapter.state.stack[0].card.owner = 0
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Everything leaves our own routine casts' automatic commit alone")
+	adapter.stack_mode = 1
+	adapter.state.stack[0].card.owner = 1
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Switching back to Smart restores the bridge's decision")

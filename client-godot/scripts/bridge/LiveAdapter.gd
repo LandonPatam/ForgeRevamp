@@ -39,6 +39,8 @@ var auto_priority_passes := 0
 var auto_priority_request := ""
 ## Table setting: pass priority on every stack item; Forge still asks for every required decision.
 var auto_resolve_all := false
+## Table setting "Stack responses": 0 Everything, 1 Smart (the bridge's policy), 2 Only threats.
+var stack_mode := 1
 var acknowledged_effects: Array[int] = []
 var last_state_text := ""
 var sync_wait := 0.0
@@ -280,6 +282,7 @@ func _unlock() -> void:
 func _publish() -> void:
 	if state.is_empty():
 		return
+	_apply_stack_mode()
 	state.connectionReady = connected and not syncing and pending.is_empty() and not state.get("undoPending", false)
 	var automatic_payment: bool = prepaid_target >= 0 and state.asks.is_empty() and state.prompt.get("inputKind", "") in ["InputPassPriority", "InputPayManaOfCostPayment"]
 	state.connectionReady = state.connectionReady and not automatic_payment
@@ -485,6 +488,7 @@ func normalize(raw: Dictionary) -> Dictionary:
 			entity.engineId = int(entity.id)
 			entity.id = seats.find(int(entity.id))
 		if entity.has("card"): entity.card = _card(entity.card, -1, "Selection")
+	result.bridgeAutoPassId = int(result.get("autoPassStackId", -1))
 	return result
 
 func _service_prepaid() -> void:
@@ -551,6 +555,13 @@ static func holds_for_response(state_value: Dictionary) -> bool:
 
 ## Auto-resolve everything else: any stack item at plain priority, never a decision, draw or your
 ## own just-cast spell's undo window (that keeps its existing commit behavior).
+## Everything: an opponent's item the bridge would pass under Smart still waits when this seat can respond.
+func _apply_stack_mode() -> void:
+	state.autoPassStackId = int(state.get("bridgeAutoPassId", state.get("autoPassStackId", -1)))
+	var stack: Array = state.get("stack", [])
+	if stack_mode == 0 and state.get("canRespond", false) and not stack.is_empty() and int(stack[0].get("card", {}).get("owner", -1)) != 0:
+		state.autoPassStackId = -1
+
 static func can_resolve_all(state_value: Dictionary) -> bool:
 	return not holds_for_response(state_value) and state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
 

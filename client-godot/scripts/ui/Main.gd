@@ -99,8 +99,13 @@ const UI_LAYOUT_SETTINGS := [
 	{"key": "pile_tap", "title": "Tapped cards in a stack", "low": "In place", "high": "Aside", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
 	{"key": "hud_x", "title": "Health and portrait position", "low": "Left", "high": "Right", "min": -1600.0, "max": 0.0, "step": 10.0, "default": 0.0},
 	{"key": "hud_y", "title": "Health and portrait height", "low": "Lower", "high": "Higher", "min": 0.0, "max": 900.0, "step": 10.0, "default": 0.0},
-	{"key": "auto_resolve", "title": "Auto-resolve the stack", "low": "Off", "high": "On", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
 	{"key": "notify_volume", "title": "Notification volume", "low": "Quiet", "high": "Loud", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.6},
+]
+## Table setting "Stack responses": when this seat stops to respond to the stack.
+const STACK_MODES := [
+	{"name": "Everything", "hint": "Stop for every spell and ability you could respond to."},
+	{"name": "Smart", "hint": "Stop for opponents' instants and sorceries, board wipes and anything aimed at your things. Routine abilities pass; effects like \"each opponent loses 1 life\" show a notice."},
+	{"name": "Only threats", "hint": "Pass everything except respondable effects aimed at your things and board wipes. Forge still asks for every required choice."},
 ]
 ## Built-in library backs: regions of Forge's sleeve atlas. The first is the original back.
 const CARD_BACKS := [
@@ -111,7 +116,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "auto_resolve": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -647,13 +652,19 @@ func _read_ui_layout(config: ConfigFile) -> void:
 		ui_layout[setting.key] = clampf(float(config.get_value("ui", setting.key, setting.default)), setting.min, setting.max)
 	ui_layout.card_back = float(clampi(int(config.get_value("ui", "card_back", 0)), 0, CARD_BACKS.size() - 1))
 	ui_layout.notify_sound = float(clampi(int(config.get_value("ui", "notify_sound", 0)), 0, NotificationSound.CHOICES.size() - 1))
+	# The earlier On/Off "auto_resolve" setting maps to Only threats.
+	var legacy_mode := 2 if float(config.get_value("ui", "auto_resolve", 0.0)) >= 0.5 else 1
+	ui_layout.stack_mode = float(clampi(int(config.get_value("ui", "stack_mode", legacy_mode)), 0, STACK_MODES.size() - 1))
 	_apply_table_style()
 
 ## Pushes pile and card-back preferences to the shared layout and library views.
 func _apply_table_style() -> void:
 	FieldLayout.pile_step = float(ui_layout.pile_spread)
 	FieldLayout.tap_aside = float(ui_layout.pile_tap) >= 0.5
-	if adapter != null and "auto_resolve_all" in adapter: adapter.auto_resolve_all = float(ui_layout.auto_resolve) >= 0.5
+	if adapter != null and "stack_mode" in adapter:
+		adapter.stack_mode = int(ui_layout.stack_mode)
+		adapter.auto_resolve_all = int(ui_layout.stack_mode) == 2
+		if not snapshot.is_empty(): adapter._publish()
 	if notify_sound != null: notify_sound.configure(int(ui_layout.notify_sound), float(ui_layout.notify_volume))
 	var back := AtlasTexture.new()
 	back.atlas = preload("res://assets/forge-sleeves.png")
@@ -2884,11 +2895,41 @@ func _show_table_settings() -> void:
 	sounds.add_child(sound_row)
 	sounds.add_child(_label("Drop an MP3 file onto this window to use it as Custom.", 12, Color("bfc4ca")))
 	extras.add_child(sounds)
+	var stack_box := VBoxContainer.new()
+	stack_box.add_child(_label("Stack responses", 14))
+	var stack_row := HBoxContainer.new()
+	stack_row.add_theme_constant_override("separation", 6)
+	var stack_buttons: Array = []
+	for index in range(STACK_MODES.size()):
+		var option := _button(STACK_MODES[index].name, func(): pass)
+		option.name = "StackMode" + str(index)
+		P.style_popup_button(option)
+		stack_row.add_child(option)
+		stack_buttons.append(option)
+	stack_box.add_child(stack_row)
+	var stack_hint := _label("", 12, Color("bfc4ca"))
+	stack_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack_hint.custom_minimum_size.x = 760
+	stack_box.add_child(stack_hint)
+	var mark_stack := func():
+		for index in range(stack_buttons.size()):
+			stack_buttons[index].modulate = Color.WHITE if index == int(ui_layout.stack_mode) else Color(1, 1, 1, 0.5)
+		stack_hint.text = STACK_MODES[int(ui_layout.stack_mode)].hint
+	for index in range(stack_buttons.size()):
+		stack_buttons[index].pressed.connect(func():
+			_set_ui_layout("stack_mode", float(index))
+			mark_stack.call())
+	mark_stack.call()
+	column.add_child(stack_box)
+	column.move_child(stack_box, position_in_column)
+	position_in_column += 1
 	var reset := _button("Reset to default", func():
 		for index in range(sliders.size()):
 			sliders[index].value = UI_LAYOUT_SETTINGS[index].default
 		_set_ui_layout("card_back", 0.0)
 		_set_ui_layout("notify_sound", 0.0)
+		_set_ui_layout("stack_mode", 1.0)
+		mark_stack.call()
 		mark_sound.call()
 		mark_back.call())
 	P.style_popup_button(reset)

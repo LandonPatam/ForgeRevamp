@@ -105,6 +105,7 @@ func run(ui: Control, directory: String = "") -> void:
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-many-cards-paged-1280.png"))
 	assert(popup.panel.get_global_rect().end.y <= ui.size.y and popup.panel.get_global_rect().end.x <= ui.size.x, "Multi-card effect and long rules fit the viewport: " + str([popup.panel.get_global_rect(), ui.size, popup.panel.get_combined_minimum_size(), popup.rules.size, popup.rules_pages.scroll.size]))
 	_check_auto_resolve(popup)
+	_check_notice(popup)
 	popup.queue_free()
 	if not directory.is_empty():
 		ui.capture_size = Vector2i(1600, 1000)
@@ -138,3 +139,17 @@ func _check_auto_resolve(popup: Control) -> void:
 	popup.present(wipe)
 	assert(popup.panel.visible and popup.eyebrow.text == "BOARD-WIDE EFFECT", "A respondable board wipe keeps its board-wide popup")
 	popup.reset()
+
+## "Each opponent loses 1 life": a timed notice, never the blocking popup or a decision.
+func _check_notice(popup: Control) -> void:
+	popup.reset()
+	var base := {"stack": [], "targetedEffects": []}
+	popup.present(base)
+	var drain := {"stack": [], "targetedEffects": [{"id": 60, "stackId": 9800, "kind": "notice", "controllerName": "Bot", "source": {"id": 9801, "name": "Blood Artist"}, "effectText": "Target player loses 1 life and you gain 1 life.", "targets": []}]}
+	popup.present(drain)
+	assert(popup.notice_panel.visible and not popup.panel.visible and popup.active.is_empty(), "A player notice shows without blocking or asking")
+	assert(popup.notice_title.text.contains("Blood Artist") and popup.notice_panel.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	popup.present(drain)
+	assert(popup.notices.is_empty(), "A repeated snapshot never repeats a notice")
+	popup.reset()
+	assert(not popup.notice_panel.visible)
