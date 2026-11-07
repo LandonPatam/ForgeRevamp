@@ -24,7 +24,7 @@ static func needs_choice(state: Dictionary) -> bool:
 	if kind == "InputPassPriority":
 		# The stack is waiting on this player to resolve or respond, unless it passes itself.
 		var top_id := int(state.stack[0].get("id", -1))
-		if state.get("autoResolveAll", false) and state.get("takebackCast", {}).is_empty(): return false
+		if state.get("autoResolveAll", false) and state.get("takebackCast", {}).is_empty(): return preload("res://scripts/bridge/LiveAdapter.gd").holds_for_response(state) and prompt.get("okEnabled", false)
 		return prompt.get("okEnabled", false) and int(state.get("autoPassStackId", -1)) != top_id and state.get("takebackCast", {}).is_empty() and state.get("pendingDraws", []).is_empty()
 	return false
 

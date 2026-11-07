@@ -127,7 +127,11 @@ func present(state: Dictionary) -> void:
 		if not stack_ids.has(completed): acknowledge_stack(completed)
 	responding.assign(responding.filter(func(id): return stack_ids.has(id)))
 	var events: Array = state.get("targetedEffects", [])
+	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
+		if auto_resolve:
+			latest = maxi(latest, int(event.id)) # Auto-resolve: no after-the-fact notices.
+			continue
 		if int(event.id) > latest and (initialized or stack_ids.has(int(event.stackId))):
 			if dismissed.has(int(event.stackId)):
 				latest = maxi(latest, int(event.id))
@@ -154,19 +158,24 @@ func present(state: Dictionary) -> void:
 func _offer_priority(force: bool = false) -> void:
 	# Routine stack changes stay in the rail. Direct targets still get a visual
 	# interaction for opponents; our own choices remain in the rail.
-	if not force and (current_state.get("stack", []).is_empty() or current_state.stack[0].get("targets", []).is_empty()): return
+	if not force and not current_state.get("autoResolveAll", false) and (current_state.get("stack", []).is_empty() or current_state.stack[0].get("targets", []).is_empty()): return
 	var stack: Array = current_state.get("stack", [])
 	if int(current_state.get("pendingCastId", -1)) >= 0 or current_state.get("game", {}).get("gameOver", false): return
-	if not force and current_state.get("autoResolveAll", false): return # Auto-resolve passes priority without asking.
+	var auto_resolve: bool = current_state.get("autoResolveAll", false)
+	if not force and auto_resolve and not preload("res://scripts/bridge/LiveAdapter.gd").holds_for_response(current_state): return # Passing on its own.
 	if stack.is_empty() or current_state.get("prompt", {}).get("inputKind", "") != "InputPassPriority": return
 	var item: Dictionary = stack[0]
 	# Our target choices already show the effect; keep priority in the rail.
 	if not force and int(item.get("card", {}).get("owner", -1)) == 0: return
 	var id := int(item.id)
-	if not force and item.has("targetsLocal") and not item.targetsLocal: return
+	if not force and not auto_resolve and item.has("targetsLocal") and not item.targetsLocal: return
 	if not item.has("card") or (not force and (responding.has(id) or dismissed.has(id) or int(current_state.get("autoPassStackId", -1)) == id)): return
 	if int(active.get("stackId", -1)) == id: return
 	var notice := {"id": -id - 1, "stackId": id, "source": item.card, "effectText": item.get("text", ""), "controllerName": item.get("controllerName", "Player"), "ability": item.get("ability", false), "targets": item.get("targets", []), "kind": "effect"}
+	if auto_resolve:
+		# Keep the bridge's board-wide/targeted framing for the one popup auto-resolve still shows.
+		for event in current_state.get("targetedEffects", []):
+			if int(event.get("stackId", -1)) == id: notice = event.duplicate(true)
 	for queued in waiting:
 		if int(queued.stackId) == id:
 			notice = queued

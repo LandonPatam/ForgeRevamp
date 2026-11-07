@@ -143,6 +143,16 @@ func _check_resolve_all() -> void:
 	adapter.pending = ""
 	adapter._service_auto_priority()
 	assert(adapter.sent.size() == 1, "Never pass the same stack item twice")
+	var aimed := held.duplicate(true)
+	aimed.stack[0].targetsLocal = true
+	assert(Live.holds_for_response(aimed) and not Live.can_resolve_all(aimed), "Auto-resolve stops for a respondable spell aimed at our things")
+	aimed.autoPassStackId = 70
+	assert(not Live.holds_for_response(aimed) and Live.can_auto_pass(aimed), "With no legal response even a spell aimed at us passes on its own")
+	var wipe := held.duplicate(true)
+	wipe.targetedEffects = [{"id": 3, "stackId": 70, "kind": "massRemoval"}]
+	assert(Live.holds_for_response(wipe) and not Live.can_resolve_all(wipe), "Auto-resolve stops for a respondable board wipe")
+	wipe.targetedEffects[0].kind = "targeted"
+	assert(not Live.holds_for_response(wipe), "Another player's targeted effect does not stop auto-resolve")
 	for blocked in [{"asks": [{"kind": "choose"}]}, {"pendingDraws": [5]}, {"takebackCast": {"id": 9}}, {"stack": []}, {"prompt": {"inputKind": "InputSelectTargets", "okEnabled": true}}, {"prompt": {"inputKind": "InputPayManaOfCostPayment", "okEnabled": false}}]:
 		var state := held.duplicate(true)
 		state.merge(blocked, true)

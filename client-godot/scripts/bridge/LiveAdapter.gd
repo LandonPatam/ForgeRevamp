@@ -541,10 +541,18 @@ static func is_automatic_cast(state_value: Dictionary) -> bool:
 static func is_automatic_stack(state_value: Dictionary) -> bool:
 	return not state_value.get("stack", []).is_empty() and int(state_value.get("autoPassStackId", -1)) == int(state_value.stack[0].id) and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty()
 
-## Auto-resolve everything: any stack item at plain priority, never a decision, draw or your
+## Auto-resolve still stops for the stack top when it targets this seat's things or is a board
+## wipe AND Forge found a legal response (with none, the bridge already marks it autoPassStackId).
+static func holds_for_response(state_value: Dictionary) -> bool:
+	var stack: Array = state_value.get("stack", [])
+	if stack.is_empty() or int(state_value.get("autoPassStackId", -1)) == int(stack[0].id): return false
+	if stack[0].get("targetsLocal", false): return true
+	return state_value.get("targetedEffects", []).any(func(event): return int(event.get("stackId", -1)) == int(stack[0].id) and event.get("kind", "") == "massRemoval")
+
+## Auto-resolve everything else: any stack item at plain priority, never a decision, draw or your
 ## own just-cast spell's undo window (that keeps its existing commit behavior).
 static func can_resolve_all(state_value: Dictionary) -> bool:
-	return state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
+	return not holds_for_response(state_value) and state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
 
 static func can_auto_pass(state_value: Dictionary) -> bool:
 	if not state_value.get("takebackCast", {}).is_empty() and not is_automatic_cast(state_value):
