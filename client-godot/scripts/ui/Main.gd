@@ -97,6 +97,8 @@ const UI_LAYOUT_SETTINGS := [
 	{"key": "hand_angle", "title": "Hand angle", "low": "Flat", "high": "Curved", "min": 0.0, "max": 25.0, "step": 1.0, "default": 10.0},
 	{"key": "pile_spread", "title": "Space between stacked cards", "low": "Tight", "high": "Wide", "min": 8.0, "max": 60.0, "step": 2.0, "default": 26.0},
 	{"key": "pile_tap", "title": "Tapped cards in a stack", "low": "In place", "high": "Aside", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
+	{"key": "hud_x", "title": "Health and portrait position", "low": "Left", "high": "Right", "min": -1600.0, "max": 0.0, "step": 10.0, "default": 0.0},
+	{"key": "hud_y", "title": "Health and portrait height", "low": "Lower", "high": "Higher", "min": 0.0, "max": 900.0, "step": 10.0, "default": 0.0},
 	{"key": "notify_volume", "title": "Notification volume", "low": "Quiet", "high": "Loud", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.6},
 ]
 ## Built-in library backs: regions of Forge's sleeve atlas. The first is the original back.
@@ -108,7 +110,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -383,7 +385,7 @@ func _build_shell() -> void:
 	rail.add_theme_constant_override("separation", 8)
 	rail_panel.add_child(rail)
 	var terminal = preload("res://scripts/ui/TerminalStyle.gd")
-	rail.add_child(_terminal_button("Table settings", _show_table_settings, "Move your hand and library. Your layout is saved for every game."))
+	rail.add_child(_terminal_button("Table settings", _show_table_settings, "Move your hand, library and health panel. Your layout is saved for every game."))
 	rail.add_child(_label("COMMANDER / TERMINAL",12,terminal.MUTED))
 	turn_label = _label("Turn 1", 30, terminal.INK)
 	turn_label.add_theme_font_override("font", terminal.font())
@@ -1247,8 +1249,10 @@ func _layout_board() -> void:
 			if own_cast and not play_positions.has(id):
 				var center: Vector2 = board.get_global_transform().affine_inverse() * _bounded_card_center(retiring, retiring.get_global_rect().get_center())
 				play_positions[id] = {"position": Vector2(center.x / board.size.x, center.y), "age": 0.0}
-			var waiting_for_payment: bool = live and (not snapshot.get("connectionReady", false) or snapshot.prompt.get("inputKind", "").begins_with("InputPayMana"))
-			if play_positions.has(id) and (waiting_for_payment or snapshot.stack.any(func(item): return item.sourceId == id)):
+			# Presentation only: while Forge is still mid-cast (payment, targets, a cost/mode
+			# choice), the card sits provisionally in its Stack zone without a stack item yet.
+			var cast_in_progress: bool = live and (not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty() or snapshot.prompt.get("inputKind", "") != "InputPassPriority")
+			if play_positions.has(id) and (cast_in_progress or snapshot.stack.any(func(item): return item.sourceId == id)):
 				retiring.data.zone = "Stack"
 				retiring.data.pendingCast = true
 				retiring.data.availableActions = snapshot.get("takebackCast", {}).get("availableActions", {}) if int(snapshot.get("takebackCast", {}).get("id", -1)) == int(id) else {}
@@ -1418,12 +1422,22 @@ func _layout_hand(instant_id: int = -1) -> void:
 	hand_previous.size = Vector2(26, 36)
 	hand_next.size = Vector2(26, 36)
 	library_pile.position = Vector2(library_center - library_pile.size.x * 0.5, size.y - library_pile.size.y * ui_layout.library_show)
-	hud[0].position.y = size.y - 158
-	if library_pile.get_global_rect().intersects(hud_values[0].portrait.get_global_rect()):
-		hud[0].position.y = library_pile.position.y - hud_values[0].portrait.size.y - 12
+	_place_local_hud(table_right)
 	library_count.position = library_pile.position + Vector2(0, -30)
 	library_count.size = Vector2(library_pile.size.x, 24)
 	_order_hand_input()
+
+## Your health/portrait panel: bottom-right of the table by default, moved by Table settings,
+## always kept on the table and above the library.
+func _place_local_hud(table_right: float) -> void:
+	var table_left: float = board_scroller.global_position.x
+	var default_x: float = table_right - 228
+	hud[0].position.x = clampf(default_x + float(ui_layout.hud_x), table_left + 8, maxf(table_left + 8, default_x))
+	var lowest: float = size.y - 158
+	var highest: float = minf(board_scroller.global_position.y + 8, lowest)
+	hud[0].position.y = clampf(lowest - float(ui_layout.hud_y), highest, lowest)
+	if library_pile.get_global_rect().intersects(hud_values[0].portrait.get_global_rect()):
+		hud[0].position.y = maxf(highest, library_pile.position.y - hud_values[0].portrait.size.y - 12)
 
 func _library_drag_started(pointer: Vector2) -> void:
 	if targeting or modal.visible or library_draw_pending or not library_pile.enabled:
@@ -1607,7 +1621,8 @@ func _process(_delta: float) -> void:
 	_layout_mana_pool()
 	for id in play_positions.keys():
 		play_positions[id].age += _delta
-		if live and play_positions[id].age > 0.6 and snapshot.get("connectionReady", false) and snapshot.prompt.get("inputKind", "") == "InputPassPriority" and snapshot.players[0].zones.Hand.any(func(card): return card.id == id):
+		# A cost/mode popup keeps Forge at priority with the card still in hand; keep it on the board until answered.
+		if live and play_positions[id].age > 0.6 and snapshot.get("connectionReady", false) and snapshot.get("asks", []).is_empty() and snapshot.prompt.get("inputKind", "") == "InputPassPriority" and snapshot.players[0].zones.Hand.any(func(card): return card.id == id):
 			play_positions.erase(id)
 			_layout_board()
 	for id in pending_returns.keys():
@@ -1755,7 +1770,11 @@ func _sync_raised_card() -> void:
 		return
 	if not is_instance_valid(hovered_source) or not hovered_source.hover_active or hovered_source.hand_mode or hovered_source.zone_browser or _modal_covers_table() or opening_hand.visible or library_draw_pending:
 		raised_card.hide()
+		# A hovered table card hides its own face behind the raised copy; never leave it blank.
+		if is_instance_valid(hovered_source) and not hovered_source.hand_mode:
+			hovered_source.visual.show()
 		return
+	hovered_source.visual.hide()
 	# Mirror the animated card transform in the root overlay, outside every ScrollContainer.
 	# The original node continues to receive clicks, scrolling and mouse exit events.
 	var geometry_changed: bool = raised_card.size != hovered_source.size or raised_card.table_angle != hovered_source.table_angle

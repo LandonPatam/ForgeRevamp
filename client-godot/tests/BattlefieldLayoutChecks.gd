@@ -120,6 +120,16 @@ func _check_ui_layout(ui: Control, directory: String) -> void:
 	assert(ui.hand_root.get_rect().end.x <= table_right and ui.library_pile.get_rect().end.x <= table_right, "Neither can slide off the table")
 	for setting in ui.UI_LAYOUT_SETTINGS: ui._set_ui_layout(setting.key, setting.default)
 	assert(ui.hand_root.position.is_equal_approx(hand) and ui.library_pile.position.is_equal_approx(library), "The defaults restore the original layout")
+	var hud: Vector2 = ui.hud[0].position
+	ui._set_ui_layout("hud_x", -300.0)
+	ui._set_ui_layout("hud_y", 200.0)
+	assert(ui.hud[0].position.x < hud.x and ui.hud[0].position.y < hud.y, "The health panel moves left and up")
+	ui._set_ui_layout("hud_x", -1600.0)
+	ui._set_ui_layout("hud_y", 900.0)
+	assert(ui.hud[0].position.x >= ui.board_scroller.global_position.x and ui.hud[0].position.y >= ui.board_scroller.global_position.y, "The health panel stays on the table")
+	ui._set_ui_layout("hud_x", 0.0)
+	ui._set_ui_layout("hud_y", 0.0)
+	assert(ui.hud[0].position.is_equal_approx(hud), "The health panel defaults to its original spot")
 	ui._close_modal()
 	await ui.get_tree().process_frame
 

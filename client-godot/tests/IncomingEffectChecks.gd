@@ -10,6 +10,15 @@ func run(ui: Control, directory: String = "") -> void:
 	popup.review()
 	assert(popup.panel.visible, "An unrelated effect remains available for explicit review when responding")
 	popup.reset()
+	# A targeted player shows as a portrait tile with their name, never a word-wrapped "Y o u".
+	var at_player := {"connectionReady": true, "prompt": {"inputKind": "InputPassPriority"}, "players": [{"id": 0, "engineId": 41, "name": "Landon", "avatar": 3, "life": 40}], "stack": [], "targetedEffects": [{"id": 1, "stackId": 8100, "controllerName": "Opponent", "source": {"id": 8101, "name": "Lightning Bolt"}, "targets": [{"id": 41, "kind": "player", "name": "Landon"}]}]}
+	popup.present({"stack": [], "targetedEffects": []})
+	popup.present(at_player)
+	var tile: Control = popup.target_cards.get_child(0)
+	assert(tile.has_meta("player_target") and tile.get_node("Portrait").portrait != null, "A targeted player shows their Forge portrait")
+	assert(tile.get_node("PlayerName").text.begins_with("Landon") and tile.get_node("PlayerName").autowrap_mode == TextServer.AUTOWRAP_OFF, "The player's name sits under the portrait on one line")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-player-target.png"))
+	popup.reset()
 	var acknowledged: Array[int] = []
 	popup.acknowledged.connect(func(stack_id): acknowledged.append(stack_id))
 	popup.present({"stack": [], "targetedEffects": []})

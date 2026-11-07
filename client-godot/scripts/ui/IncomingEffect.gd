@@ -224,7 +224,7 @@ func _next() -> void:
 		child.queue_free()
 	for target in active.get("targets", []):
 		if target.get("kind", "") == "player":
-			target_cards.add_child(_label(str(target.get("name", "You")), 24, P.TEXT))
+			target_cards.add_child(_player_target(target))
 			continue
 		var target_face := Card.new()
 		target_face.inspection = true
@@ -241,6 +241,41 @@ func _next() -> void:
 	panel.visible = not responding.has(int(active.stackId))
 	panel.modulate.a = 0
 	create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
+
+## A targeted player reads like a card slot: their Forge portrait with their name beneath it.
+func _player_target(target: Dictionary) -> Control:
+	var engine_id := int(target.get("id", -1))
+	var player: Dictionary = {}
+	for candidate in current_state.get("players", []):
+		if int(candidate.get("engineId", candidate.get("id", -2))) == engine_id: player = candidate
+	if player.is_empty(): player = {"name": str(target.get("name", "Player")), "life": 0}
+	var tile := VBoxContainer.new()
+	tile.set_meta("player_target", true)
+	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tile.alignment = BoxContainer.ALIGNMENT_CENTER
+	tile.add_theme_constant_override("separation", 10)
+	var portrait := preload("res://scripts/ui/PlayerAvatar.gd").new()
+	portrait.name = "Portrait"
+	portrait.portrait_only = true
+	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	tile.add_child(portrait)
+	portrait.set_player(player, false)
+	portrait.tooltip_text = ""
+	var label := _label(str(player.get("name", target.get("name", "Player"))) + (" (you)" if int(player.get("id", -1)) == 0 else ""), 20, P.TEXT)
+	label.name = "PlayerName"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	tile.add_child(label)
+	_size_player_target(tile, face.custom_minimum_size)
+	return tile
+
+func _size_player_target(tile: Control, card_size: Vector2) -> void:
+	tile.custom_minimum_size = card_size
+	var side := minf(card_size.x, card_size.y - 40)
+	tile.get_node("Portrait").custom_minimum_size = Vector2.ONE * side
+	tile.get_node("PlayerName").custom_minimum_size.x = card_size.x
 
 func dismiss() -> void:
 	var stack_id := int(active.get("stackId", -1))
@@ -275,6 +310,7 @@ func _layout() -> void:
 	face.custom_minimum_size = Vector2(height * 144 / 202, height)
 	for target in target_cards.get_children():
 		if target is Card: target.custom_minimum_size = face.custom_minimum_size
+		elif target.has_meta("player_target"): _size_player_target(target, face.custom_minimum_size)
 	var columns := clampi(int((width - face.custom_minimum_size.x - 124) / (face.custom_minimum_size.x + 12)), 1, 3)
 	targets_scroll.configure(columns, columns)
 	# Reserve room for the header, card gallery, both page controls and response action.
