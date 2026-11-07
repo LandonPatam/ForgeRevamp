@@ -62,7 +62,8 @@ final class StackInteractionPolicy {
         if (ability == null || ability.getApi() == null) return false;
         if (ability.usesTargeting() || ability.hasParam("Radiance")) return false;
         for (String key : RECIPIENTS) {
-            if (ability.hasParam(key) && !SELF.contains(ability.getParam(key))) return false;
+            if (ability.hasParam(key) && !SELF.contains(ability.getParam(key))
+                    && !resolvesToControllerOnly(ability, ability.getParam(key))) return false;
         }
         if (ability.getSubAbility() != null && !isSelfContained(ability.getSubAbility())) return false;
         ApiType api = ability.getApi();
@@ -76,6 +77,35 @@ final class StackInteractionPolicy {
         }
         if (api == ApiType.ChangeZone) return isOwnZoneChange(ability);
         return SELF_APIS.contains(api);
+    }
+
+    /**
+     * A recipient named by reference (TriggeredAttacker, Enchanted, Remembered, ParentTarget...)
+     * is self-only when Forge resolves it, right now, to the effect's controller and/or cards
+     * that player controls. Nothing resolved, a stack object, or an unreadable reference keeps
+     * the response window: the reference may not be filled in until resolution.
+     */
+    private static boolean resolvesToControllerOnly(SpellAbility ability, String defined) {
+        Card host = ability.getHostCard();
+        if (host == null) return false;
+        Player controller = ability.getActivatingPlayer() != null ? ability.getActivatingPlayer() : host.getController();
+        if (controller == null) return false;
+        try {
+            var objects = forge.game.ability.AbilityUtils.getDefinedObjects(host, defined, ability);
+            if (objects.isEmpty()) return false;
+            for (var object : objects) {
+                if (object instanceof Player player) {
+                    if (!player.equals(controller)) return false;
+                } else if (object instanceof Card card) {
+                    if (!controller.equals(card.getController())) return false;
+                } else {
+                    return false;
+                }
+            }
+            return true;
+        } catch (RuntimeException unreadable) {
+            return false;
+        }
     }
 
     private static boolean isOwnZoneChange(SpellAbility ability) {

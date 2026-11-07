@@ -465,6 +465,19 @@ public final class BridgeChecks {
         check(!gui.isUiSetToSkipPhase(defender.getView(), forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS), "An explicit own-turn blocker stop still pauses with no legal response");
         var attacker = testCreature(attackerPlayer, "Attacker");
         var blocker = testCreature(defender, "Blocker");
+        // Stinkdrinker Bandit: "Whenever a Rogue you control attacks and isn't blocked, it gets +2/+1."
+        var bandit = testCreature(attackerPlayer, "Stinkdrinker Bandit");
+        var banditPump = forge.game.ability.AbilityFactory.getAbility("DB$ Pump | NumAtt$ +2 | NumDef$ +1 | Defined$ TriggeredAttacker", bandit);
+        banditPump.setActivatingPlayer(attackerPlayer);
+        banditPump.setTriggeringObject(forge.game.ability.AbilityKey.Attacker, attacker);
+        check(StackInteractionPolicy.isSelfContained(banditPump), "A trigger pumping the opponent's own attacker is self-only");
+        check(StackInteractionPolicy.mayAutoPass(banditPump, false, true, false, false), "An opponent's own-attacker pump must not hold a seat with an unrelated instant");
+        check(!StackInteractionPolicy.mayAutoPass(banditPump, false, true, true, false), "Holding a Stifle-like response keeps the pump trigger window");
+        banditPump.setTriggeringObject(forge.game.ability.AbilityKey.Attacker, blocker);
+        check(!StackInteractionPolicy.isSelfContained(banditPump), "A triggered pump on our creature keeps the response window");
+        var unfilled = forge.game.ability.AbilityFactory.getAbility("DB$ Pump | NumAtt$ +1 | Defined$ Remembered", bandit);
+        unfilled.setActivatingPlayer(attackerPlayer);
+        check(!StackInteractionPolicy.isSelfContained(unfilled), "A reference not yet filled in keeps the response window");
         var scry = forge.game.ability.AbilityFactory.getAbility("SP$ Scry | Cost$ U | ScryNum$ 1", blocker);
         scry.setSubAbility(new forge.game.spellability.AbilitySub(forge.game.ability.ApiType.Draw, blocker, null, Map.of("NumCards", "1")));
         check(GameStateJson.isRoutineInteraction(scry), "A local scry-then-draw chain must proceed into its real engine choices");
