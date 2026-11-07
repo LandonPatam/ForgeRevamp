@@ -83,6 +83,8 @@ var drag_origin_parent: Node
 var manual_positions: Dictionary = {}
 var split_pile_cards: Dictionary = {}
 var victory_announced := false
+var defeat_announced := false
+var outcome_screen: Control
 var local_pile_members: Dictionary = {}
 ## Where a right-dragged pile sits, by its identity apart from tap and combat-round state.
 var pile_anchors: Dictionary = {}
@@ -2363,6 +2365,9 @@ func _update_live_actions() -> void:
 	if outcome.get("title", "") == "Victory" and not victory_announced:
 		victory_announced = true
 		_announce_victory.call_deferred()
+	elif outcome.get("title", "") == "Defeated" and not defeat_announced:
+		defeat_announced = true
+		_show_outcome_screen.call_deferred(false)
 	if not outcome.is_empty():
 		# Forge sends no prompt once this seat is out, so offer a clear way to finish.
 		phase_title.text = outcome.title
@@ -2384,20 +2389,22 @@ func _update_live_actions() -> void:
 		modal_panel.set_submission_enabled(ready)
 	_update_turn_steps()
 
-## A win pops up once, then continues straight into the usual end-of-game wipe.
+## A win shows the YOU WIN screen once; I WON continues straight into the usual end-of-game wipe.
 func _announce_victory() -> void:
 	if not live or not is_instance_valid(app_host) or not app_host.has_method("end_after_victory"): return
-	var popup: Control = preload("res://scripts/app/GameConfirm.gd").new()
-	popup.title = "Victory!"
-	popup.dialog_text = "You won the game."
-	popup.ok_button_text = "Continue"
-	popup.show_cancel = false
-	popup.confirmed.connect(func():
-		popup.hide()
-		popup.queue_free()
-		app_host.end_after_victory())
-	add_child(popup)
-	popup.popup_centered()
+	_show_outcome_screen(true)
+
+## Full-screen YOU WIN / YOU LOSE. "I lost" closes it so the player can keep spectating.
+func _show_outcome_screen(won: bool) -> void:
+	if is_instance_valid(outcome_screen): outcome_screen.queue_free()
+	outcome_screen = preload("res://scripts/ui/OutcomeScreen.gd").new()
+	outcome_screen.z_index = 130
+	add_child(outcome_screen)
+	outcome_screen.present(won)
+	outcome_screen.acknowledged.connect(func():
+		outcome_screen.queue_free()
+		outcome_screen = null
+		if won and is_instance_valid(app_host) and app_host.has_method("end_after_victory"): app_host.end_after_victory())
 
 ## Defeat or game over for the local seat, as rail text; empty while still playing.
 func _match_outcome() -> Dictionary:
@@ -2419,6 +2426,9 @@ func _match_outcome() -> Dictionary:
 func _clear_live_session() -> void:
 	coin_toss_seen.clear()
 	victory_announced = false
+	defeat_announced = false
+	if is_instance_valid(outcome_screen): outcome_screen.queue_free()
+	outcome_screen = null
 	opening_hand_released = false
 	target_gallery_requested = false
 	target_gallery_on_board = false
@@ -3126,6 +3136,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if is_instance_valid(dragged_source):
 		return
+	if is_instance_valid(outcome_screen):
+		outcome_screen.handle_key(event)
+		get_viewport().set_input_as_handled()
+		return
 	if modal.visible:
 		if event.keycode == KEY_ESCAPE and decision_board_button.visible:
 			_set_decision_board(false)
@@ -3230,6 +3244,7 @@ func _smoke() -> void:
 	await preload("res://tests/StartupProgressChecks.gd").new().run(self)
 	await preload("res://tests/FormatLogChecks.gd").new().run(self)
 	await preload("res://tests/IncomingEffectChecks.gd").new().run(self)
+	await preload("res://tests/OutcomeScreenChecks.gd").new().run(self)
 	await preload("res://tests/CardFeedbackChecks.gd").new().run(self)
 	await preload("res://tests/StackFeedChecks.gd").new().run(self)
 	await preload("res://tests/PreviewChecks.gd").new().run(self)
@@ -3677,6 +3692,7 @@ func _visual_checks(directory: String) -> void:
 	await preload("res://tests/StartingPlayerChecks.gd").new().run(self, directory)
 	await preload("res://tests/TapAnimationChecks.gd").new().run(self, true)
 	await preload("res://tests/IncomingEffectChecks.gd").new().run(self, directory)
+	await preload("res://tests/OutcomeScreenChecks.gd").new().run(self, directory)
 	await preload("res://tests/CardFeedbackChecks.gd").new().run(self, directory)
 	await preload("res://tests/StackFeedChecks.gd").new().run(self, directory)
 	await preload("res://tests/PendingDrawChecks.gd").new().run(self, directory)
