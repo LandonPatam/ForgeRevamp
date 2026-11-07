@@ -157,6 +157,7 @@ func _offer_priority(force: bool = false) -> void:
 	if not force and (current_state.get("stack", []).is_empty() or current_state.stack[0].get("targets", []).is_empty()): return
 	var stack: Array = current_state.get("stack", [])
 	if int(current_state.get("pendingCastId", -1)) >= 0 or current_state.get("game", {}).get("gameOver", false): return
+	if not force and current_state.get("autoResolveAll", false): return # Auto-resolve passes priority without asking.
 	if stack.is_empty() or current_state.get("prompt", {}).get("inputKind", "") != "InputPassPriority": return
 	var item: Dictionary = stack[0]
 	# Our target choices already show the effect; keep priority in the rail.

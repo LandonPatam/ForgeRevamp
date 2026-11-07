@@ -37,6 +37,8 @@ var auto_priority_candidate := -1
 var auto_priority_due := 0
 var auto_priority_passes := 0
 var auto_priority_request := ""
+## Table setting: pass priority on every stack item; Forge still asks for every required decision.
+var auto_resolve_all := false
 var acknowledged_effects: Array[int] = []
 var last_state_text := ""
 var sync_wait := 0.0
@@ -286,6 +288,7 @@ func _publish() -> void:
 	var visible_state := state.duplicate(true)
 	visible_state.pendingCastId = prepaid_target
 	visible_state.pendingEquipId = equip_source
+	visible_state.autoResolveAll = auto_resolve_all
 	if prepaid_target >= 0:
 		# A card being paid for is provisional, not yet a committed stack item.
 		visible_state.autoPassStackId = -1
@@ -538,6 +541,11 @@ static func is_automatic_cast(state_value: Dictionary) -> bool:
 static func is_automatic_stack(state_value: Dictionary) -> bool:
 	return not state_value.get("stack", []).is_empty() and int(state_value.get("autoPassStackId", -1)) == int(state_value.stack[0].id) and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty()
 
+## Auto-resolve everything: any stack item at plain priority, never a decision, draw or your
+## own just-cast spell's undo window (that keeps its existing commit behavior).
+static func can_resolve_all(state_value: Dictionary) -> bool:
+	return state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
+
 static func can_auto_pass(state_value: Dictionary) -> bool:
 	if not state_value.get("takebackCast", {}).is_empty() and not is_automatic_cast(state_value):
 		return false # Unclassified effects retain their decision window.
@@ -549,7 +557,7 @@ func _service_auto_priority() -> void:
 	elif int(state.stack[0].id) != auto_priority_sent:
 		# A response creates a new priority cycle for the original effect.
 		auto_priority_sent = -1
-	if prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not can_auto_pass(state):
+	if prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not (can_auto_pass(state) or (auto_resolve_all and can_resolve_all(state))):
 		auto_priority_candidate = -1
 		return
 	var stack_id := int(state.stack[0].id)

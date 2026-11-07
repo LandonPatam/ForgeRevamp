@@ -99,6 +99,7 @@ const UI_LAYOUT_SETTINGS := [
 	{"key": "pile_tap", "title": "Tapped cards in a stack", "low": "In place", "high": "Aside", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
 	{"key": "hud_x", "title": "Health and portrait position", "low": "Left", "high": "Right", "min": -1600.0, "max": 0.0, "step": 10.0, "default": 0.0},
 	{"key": "hud_y", "title": "Health and portrait height", "low": "Lower", "high": "Higher", "min": 0.0, "max": 900.0, "step": 10.0, "default": 0.0},
+	{"key": "auto_resolve", "title": "Auto-resolve the stack", "low": "Off", "high": "On", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
 	{"key": "notify_volume", "title": "Notification volume", "low": "Quiet", "high": "Loud", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.6},
 ]
 ## Built-in library backs: regions of Forge's sleeve atlas. The first is the original back.
@@ -110,7 +111,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "auto_resolve": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -652,6 +653,7 @@ func _read_ui_layout(config: ConfigFile) -> void:
 func _apply_table_style() -> void:
 	FieldLayout.pile_step = float(ui_layout.pile_spread)
 	FieldLayout.tap_aside = float(ui_layout.pile_tap) >= 0.5
+	if adapter != null and "auto_resolve_all" in adapter: adapter.auto_resolve_all = float(ui_layout.auto_resolve) >= 0.5
 	if notify_sound != null: notify_sound.configure(int(ui_layout.notify_sound), float(ui_layout.notify_volume))
 	var back := AtlasTexture.new()
 	back.atlas = preload("res://assets/forge-sleeves.png")

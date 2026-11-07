@@ -120,4 +120,30 @@ func run() -> void:
 	effect_adapter.state.stack.pop_front()
 	effect_adapter._service_effect_acknowledgment()
 	assert(effect_adapter.sent.size() == 3 and effect_adapter.acknowledged_effects.is_empty(), "An earlier acknowledged effect must retain its priority pass after a response resolves")
+	_check_resolve_all()
 	print("PASS: automatic routine priority and required-choice/damage/empty-stack guards")
+
+## Table setting "Auto-resolve the stack": passes any stack item, never a decision.
+func _check_resolve_all() -> void:
+	var held := {"connectionReady": true, "game": {}, "stack": [{"id": 70}], "autoPassStackId": -1, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": []}
+	assert(Live.can_resolve_all(held) and not Live.can_auto_pass(held))
+	var adapter := RecordingLive.new()
+	adapter.connected = true
+	adapter.syncing = false
+	adapter.state = held
+	adapter._service_auto_priority()
+	adapter.auto_priority_due = 0
+	adapter._service_auto_priority()
+	assert(adapter.sent.is_empty(), "With the setting off, a held stack item keeps its response window")
+	adapter.auto_resolve_all = true
+	adapter._service_auto_priority()
+	adapter.auto_priority_due = 0
+	adapter._service_auto_priority()
+	assert(adapter.sent == [{"action": "ok"}], "With the setting on, any stack item passes priority once")
+	adapter.pending = ""
+	adapter._service_auto_priority()
+	assert(adapter.sent.size() == 1, "Never pass the same stack item twice")
+	for blocked in [{"asks": [{"kind": "choose"}]}, {"pendingDraws": [5]}, {"takebackCast": {"id": 9}}, {"stack": []}, {"prompt": {"inputKind": "InputSelectTargets", "okEnabled": true}}, {"prompt": {"inputKind": "InputPayManaOfCostPayment", "okEnabled": false}}]:
+		var state := held.duplicate(true)
+		state.merge(blocked, true)
+		assert(not Live.can_resolve_all(state), "Auto-resolve never answers a decision, draw, own undo window or empty stack: %s" % [blocked])
