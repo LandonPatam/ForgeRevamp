@@ -45,7 +45,7 @@ func _ready() -> void:
 	face = preload("res://scripts/ui/CardView.gd").new()
 	face.inspection = true
 	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	face.custom_minimum_size = Vector2(144, 202)
+	face.custom_minimum_size = Vector2(230, 322)
 	face_center.add_child(face)
 	face.hide()
 	line = _label(16, Terminal.INK)
@@ -92,6 +92,8 @@ func _button(callback: Callable) -> Button:
 func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool, card: Dictionary = {}) -> void:
 	face.visible = not card.is_empty()
 	if face.visible: face.update_card(card)
+	# With the card shown large, its name above it would only repeat it.
+	title.visible = not face.visible
 	mode_ask = {}
 	mode_list.hide()
 	line.custom_minimum_size.x = 250
@@ -118,6 +120,7 @@ func _process(delta: float) -> void:
 ## A card's modes as toggles. Picks stay local until Confirm; a new ask id starts fresh.
 func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 	face.hide()
+	title.show()
 	if int(ask.get("id", -1)) != int(mode_ask.get("id", -2)):
 		mode_picks = []
 		mode_sent = false
