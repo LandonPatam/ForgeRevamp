@@ -122,6 +122,7 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
   3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
   4. Inspect captures only for visual changes (`visual <Name>`).
   5. Run `check.mjs all` once before a push, not after every edit. Java checks are unnecessary for frontend-only changes.
+- UI sandbox: `node client-godot/tools/sandbox.mjs <board>` opens the real table on a prepared board (`tests/sandbox/` playgrounds or any `tests/scenarios/` board) past startup, and relaunches the window on the same live board when sources change; `--mock` for the mock table, `--shot` for a screenshot. When handing a UI change to the user, give them the sandbox command for a board that shows it. Details in `docs/testing.md`.
 - Bash launch on Windows: `bash ./client-godot/tools/run.sh`; add `-Decks` or `-Mock` as needed.
 - App/home UI checks (not in the runner yet): `node client-godot/tools/app-check.mjs --render` (or `--editor-preview`), `node client-godot/tools/library-check.mjs --render`, and `.\client-godot\tools\run.ps1 -Capture`.
 - Automated playtest as the human seat across precons: `node bridge/tools/playtest.mjs` (see `docs/playtest.md`).

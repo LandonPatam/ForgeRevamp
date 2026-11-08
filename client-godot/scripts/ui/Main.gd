@@ -68,6 +68,8 @@ var mana_pool: VBoxContainer
 var live_buttons: Array[Button] = []
 var integration_checks: RefCounted
 var snapshot: Dictionary = {}
+var sandbox_starting := false
+var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
 var cards: Dictionary = {}
@@ -205,6 +207,11 @@ var toast_tween: Tween
 
 func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
+		if arg == "--sandbox":
+			# tools/sandbox.mjs: click through startup onto the prepared board, then play by hand.
+			sandbox_starting = true
+			sandbox_start = load("res://tests/SandboxStart.gd").new()
+			sandbox_start.run.call_deferred(self)
 		if arg == "--live-check":
 			integration_checks = load("res://tests/LiveIntegration.gd").new()
 			integration_checks.run.call_deferred(self)
@@ -3307,6 +3314,13 @@ func _pass_turn() -> void:
 
 func _capture(path: String) -> void:
 	await get_tree().process_frame
+	if live:
+		# A live table (the sandbox's --shot) shows nothing until Forge's first snapshot arrives;
+		# then give the layout and cached artwork a moment to settle.
+		var deadline := Time.get_ticks_msec() + 60000
+		while (snapshot.is_empty() or sandbox_starting) and Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+		await get_tree().create_timer(2.5).timeout
 	await get_tree().create_timer(0.6).timeout
 	await RenderingServer.frame_post_draw
 	var error := get_viewport().get_texture().get_image().save_png(path)

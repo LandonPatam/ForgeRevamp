@@ -42,6 +42,24 @@ Don't rerun the whole suite after every edit. When one check fails, rerun just t
 
 `ui` with no names runs the whole headless smoke suite, and `visual` with no names runs every rendered check. Leave those to `all`.
 
+## UI sandbox (try a change by hand)
+
+For UI work, open the real table directly on a prepared board instead of playing a game to reach it:
+
+```
+node client-godot/tools/sandbox.mjs                  # list boards with one-line descriptions
+node client-godot/tools/sandbox.mjs busy-table       # real Forge on that board, playable window
+node client-godot/tools/sandbox.mjs --mock           # MockAdapter table (layout only, no rules)
+node client-godot/tools/sandbox.mjs decisions --shot # screenshot to client-godot/artifacts/sandbox-decisions.png, then exit
+```
+
+- It starts a real `BridgeMain` with `--test-state`, clicks through startup (notices, Keep, starting player) and stops on your priority in the board's phase. From there every decision is yours and Forge is the rules authority.
+- Saving a `.gd`/`.tscn`/`.tres`/`.gdshader` relaunches only the window. The engine keeps running, so the new code opens on the same board as you left it. Saving the board file restarts the board. In the terminal: `r` relaunch window, `b` restart board, `q` quit. Closing the window also quits.
+- Boards: `client-godot/tests/sandbox/` holds UI playgrounds (`busy-table`, `decisions`, `wide-combat`, `empty`). Every `tests/scenarios/` board works too. A sandbox board with the same name wins. The first `#` line is the description shown in the list; lines starting with `#` are comments. Copy `empty.state` to make a new one; the launcher strips blank lines (Forge's parser rejects them).
+- Options: `--opponents=1..3`, `--deck=<tests/*.dck>` (commander/library fixture), `--size=WxH`, `--no-watch`.
+- Logs: `client-godot/artifacts/sandbox-bridge.log` and `sandbox-godot.log`. Script errors and unknown card names are echoed in the terminal.
+- Agents handing a UI change to the user give the exact sandbox command for the board that shows it (adding a board under `tests/sandbox/` when none fits), and can verify with `--shot` first. Sandbox boards have no driver and are not part of `check.mjs`.
+
 ## Real-engine scenarios
 
 `scenario <name>` starts a real Forge `BridgeMain` with a prepared board and drives the real Godot table the way a player would (`client-godot/tools/live-check.mjs --scenario=<name>`). `--render` also saves `client-godot/artifacts/scenario-<name>-1600-<stage>.png`. Each scenario takes about 15–40 s. `scenario` with no name lists the existing ones.

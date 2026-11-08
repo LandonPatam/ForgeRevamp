@@ -1,0 +1,15 @@
+# Wide creature boards on all sides: declare attackers, pass the turn to see blocks and damage assignment
+activeplayer=p0
+activephase=MAIN1
+turn=6
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Forest;Grizzly Bears;Grizzly Bears;Craw Wurm;Vampire Nighthawk|Id:1;Rancor|AttachedTo:1;Llanowar Elves;Serra Angel;Shivan Dragon
+p0hand=Giant Growth;Lightning Bolt;Mountain
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Plains;Plains;Darksteel Gargoyle;Serra Angel;Grizzly Bears;Grizzly Bears;Soul Warden
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Mountain;Mountain;Goblin Guide;Goblin Guide;Craw Wurm;Shivan Dragon
+p2library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
