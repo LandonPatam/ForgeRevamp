@@ -148,6 +148,7 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	var ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
 	heading.text = description.title
 	message.text = state.stack[0].get("text", "") if response else prompt.get("message", "")
+	if prompt.get("inputKind", "") == "InputSelectCardsForConvokeOrImprovise": message.text = _helper_payment_text(prompt)
 	help.text = description.help
 	help.visible = not help.text.is_empty()
 	source_view.visible = not prompt.get("sourceCard", {}).is_empty()
@@ -188,6 +189,22 @@ func _confirm() -> void:
 	if confirm_button.disabled: return
 	if description.get("kind", "") == "response": resolve_requested.emit(int(state.stack[0].id))
 	else: action_requested.emit("ok")
+
+## Forge's improvise/convoke text repeats the card and shows the cost before floating mana is
+## spent; say what is actually still owed and what clicking does.
+func _helper_payment_text(prompt: Dictionary) -> String:
+	var raw := str(prompt.get("message", ""))
+	var found := RegEx.create_from_string("Remaining mana cost is (\\{[^\\n]*\\})").search(raw)
+	if found == null: return raw
+	var pool: Dictionary = state.get("players", [{}])[0].get("mana", {})
+	var owed: String = preload("res://scripts/ui/ManaPips.gd").remaining_after_pool(found.get_string(1), pool)
+	var spell := str(prompt.get("sourceCard", {}).get("name", raw.get_slice("\n", 0).get_slice(" (", 0)))
+	var helper := "creature" if raw.to_lower().contains("convoke") else "artifact"
+	var keyword := "convoke" if helper == "creature" else "improvise"
+	var floating := 0
+	for amount in pool.values(): floating += int(amount)
+	if owed == "{0}": return "%s is paid by your floating mana. Confirm to cast it." % spell
+	return "%s still needs %s%s.\nTap an outlined %s to pay {1} with %s, or Confirm to pay the rest with mana." % [spell, owed, " after your %d floating mana" % floating if floating > 0 else "", helper, keyword]
 
 ## Choosing cards on the board must never cover the cards being chosen.
 func _picks_from_board() -> bool:

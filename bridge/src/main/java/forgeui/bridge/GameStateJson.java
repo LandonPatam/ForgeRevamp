@@ -205,6 +205,29 @@ final class GameStateJson {
             selectionCards.add(describeCard(card, gui.mayView(card)));
         }
         prompt.add("cards", selectionCards);
+        if (currentPrompt && sel.cards().isEmpty() && input instanceof forge.gamemodes.match.input.InputSelectCardsForConvokeOrImprovise improvise) {
+            // Improvise/convoke never publishes its tappable cards as a selection; offer them so the
+            // table can outline them (Forge still validates every click).
+            try {
+                var field = improvise.getClass().getDeclaredField("availableCards");
+                field.setAccessible(true);
+                JsonArray offered = new JsonArray();
+                JsonArray offeredCards = new JsonArray();
+                for (var card : (forge.game.card.CardCollectionView) field.get(improvise)) {
+                    CardView view = card.getView();
+                    cards.put(view.getId(), view);
+                    offered.add(view.getId());
+                    offeredCards.add(describeCard(view, gui.mayView(view)));
+                }
+                JsonArray picked = new JsonArray();
+                for (var card : improvise.getSelected()) picked.add("card:" + card.getId());
+                prompt.add("selectable", offered);
+                prompt.add("cards", offeredCards);
+                prompt.add("chosen", picked);
+            } catch (ReflectiveOperationException | RuntimeException unreadable) {
+                // Clicking the artifacts still works; they just are not outlined.
+            }
+        }
         JsonArray entities = new JsonArray();
         for (TrackableObject offered : sel.targets()) {
             if (offered instanceof StackItemView stackTarget) {

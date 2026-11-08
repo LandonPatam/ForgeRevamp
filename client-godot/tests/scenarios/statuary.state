@@ -1,0 +1,13 @@
+# Tap all five Forests, then cast Craw Wurm (6): the cost shown must count the floating mana; tap an artifact for improvise
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Inspiring Statuary;Ornithopter;Mind Stone;Forest;Forest;Forest;Forest;Forest
+p0hand=Craw Wurm
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

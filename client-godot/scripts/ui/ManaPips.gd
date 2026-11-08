@@ -44,6 +44,32 @@ static func pool_covers(cost: String, pool: Dictionary, extra_generic: int = 0) 
 	for key in left: total += left[key]
 	return total >= generic
 
+## What is still owed of `cost` once the floating pool has paid what it can, as cost text
+## ("{4}{G}{G}" with five floating green -> "{1}"); "{0}" when the pool covers it all.
+static func remaining_after_pool(cost: String, pool: Dictionary) -> String:
+	var left := {}
+	for key in ManaCounter.KEYS: left[key] = int(pool.get(key, 0))
+	var generic := 0
+	var owed: Array = []
+	for code in parse(cost):
+		if code.is_valid_int(): generic += int(code)
+		elif left.has(code) and left[code] > 0: left[code] -= 1
+		elif code.contains("/"):
+			var paid := false
+			for part in code.split("/"):
+				if left.has(part) and left[part] > 0:
+					left[part] -= 1
+					paid = true
+					break
+			if not paid: owed.append(code)
+		else: owed.append(code)
+	var spare := 0
+	for key in left: spare += left[key]
+	generic = maxi(0, generic - spare)
+	var text := ("{%d}" % generic) if generic > 0 else ""
+	for code in owed: text += "{%s}" % code
+	return text if not text.is_empty() else "{0}"
+
 static func _fill(code: String) -> Color:
 	var index := ManaCounter.KEYS.find(code)
 	return ManaCounter.FILLS[index] if index >= 0 else GENERIC_FILL

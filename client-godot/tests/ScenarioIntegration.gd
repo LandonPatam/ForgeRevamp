@@ -1023,3 +1023,29 @@ func commander_zone() -> bool:
 		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
 		await ui.get_tree().create_timer(0.2).timeout
 	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone")
+
+## Five floating mana, then a six-mana spell with improvise: what the screen says you still owe must
+## match Forge (one more), not the printed six.
+func statuary() -> bool:
+	if not await tap("Forest", 5): return false
+	print("SCENARIO pool before cast: ", ui.snapshot.players[0].mana)
+	if not await cast("Craw Wurm"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	print("SCENARIO paying: ", panel.message.text.replace("
+", " | "), " selectable=", ui.snapshot.prompt.get("selectable", []))
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsForConvokeOrImprovise", "Craw Wurm offers improvise: " + str(ui.snapshot.prompt.get("inputKind", ""))): return false
+	if not check(panel.message.text.contains("{1}") and not panel.message.text.contains("{4}{G}{G}"), "With five floating green, the rail must say one more mana is owed, not the printed cost: " + panel.message.text): return false
+	var artifacts: Array = zone("Battlefield").filter(func(card): return card.name in ["Ornithopter", "Mind Stone"]).map(func(card): return int(card.id))
+	var offered: Array = ui.snapshot.prompt.get("selectable", []).map(func(id): return int(id))
+	if not check(artifacts.all(func(id): return offered.has(id)), "The artifacts you can tap for improvise are offered (outlined): " + str(offered)): return false
+	await capture("paying")
+	ui._click_card(artifacts[0])
+	if not await wait_ready(): return false
+	for index in range(30):
+		if not await wait_ready(): return false
+		if zone("Battlefield").any(func(card): return card.name == "Craw Wurm"): break
+		if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.asks.is_empty() and str(ui.snapshot.prompt.get("inputKind", "")) != "InputPassPriority": ui._intent("ok")
+		elif not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(zone("Battlefield").any(func(card): return card.name == "Craw Wurm"), "Five floating green plus one improvised artifact cast Craw Wurm")
