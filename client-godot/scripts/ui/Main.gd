@@ -1580,7 +1580,14 @@ func _layout_inspection() -> void:
 	var left_edge := 24.0
 	if is_instance_valid(mana_pool):
 		left_edge = maxf(left_edge, (get_global_transform().affine_inverse() * mana_pool.get_global_rect().end).x + 16)
-	if is_instance_valid(incoming_effect): incoming_effect.hover_left_inset = left_edge
+	if is_instance_valid(incoming_effect):
+		incoming_effect.hover_left_inset = left_edge
+		# Small effect cards sit in the middle of the table, never over the rail.
+		if is_instance_valid(board_scroller):
+			var table: Rect2 = get_global_transform().affine_inverse() * board_scroller.get_global_rect()
+			if incoming_effect.table_rect != table:
+				incoming_effect.table_rect = table
+				incoming_effect._layout()
 	var source_on_right := false
 	if is_instance_valid(hovered_source):
 		var center: Vector2 = get_global_transform().affine_inverse() * (hovered_source.get_global_transform() * (hovered_source.size * 0.5))

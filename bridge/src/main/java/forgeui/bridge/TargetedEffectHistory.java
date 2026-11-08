@@ -31,8 +31,46 @@ final class TargetedEffectHistory {
         return isMassRemoval(ability.getSubAbility());
     }
 
+    /** Whether a board-wide removal can actually reach one of this player's permanents: a delayed
+     *  "sacrifice it at the next end step" (SacrificeAll of one remembered token) on someone else's
+     *  board, or a wipe of only its controller's things, is no news for this seat. */
+    static boolean massRemovalReaches(forge.game.spellability.SpellAbility ability, forge.game.player.Player local) {
+        if (ability == null) return false;
+        if (local == null) return isMassRemoval(ability);
+        if (isMassRemoval(ability) && reachesHere(ability, local)) return true;
+        forge.game.spellability.SpellAbility sub = ability.getSubAbility();
+        return sub != null && massRemovalReaches(sub, local);
+    }
+
+    private static boolean reachesHere(forge.game.spellability.SpellAbility ability, forge.game.player.Player local) {
+        var api = ability.getApi();
+        boolean wipeApi = api == forge.game.ability.ApiType.DestroyAll || api == forge.game.ability.ApiType.SacrificeAll
+                || api == forge.game.ability.ApiType.DamageAll || api == forge.game.ability.ApiType.ChangeZoneAll
+                || api == forge.game.ability.ApiType.PumpAll;
+        if (!wipeApi) return false;
+        try {
+            var host = ability.getHostCard();
+            if (ability.hasParam("Defined")) {
+                for (var card : forge.game.ability.AbilityUtils.getDefinedCards(host, ability.getParam("Defined"), ability)) {
+                    if (card.getController() != null && card.getController().equals(local)) return true;
+                }
+                return false;
+            }
+            String valid = ability.getParamOrDefault("ValidCards", ability.getParamOrDefault("ChangeType", ""));
+            if (valid.isEmpty()) return true; // Unknown shape: keep the warning.
+            var mine = local.getCardsIn(ZoneType.Battlefield);
+            return !forge.game.card.CardLists.getValidCards(mine, valid, ability.getActivatingPlayer(), host, ability).isEmpty();
+        } catch (RuntimeException e) {
+            return true; // Never hide a wipe because the check itself failed.
+        }
+    }
+
     synchronized void record(StackItemView item, PlayerView localPlayer, forge.game.spellability.SpellAbility ability) {
-        boolean massRemoval = isMassRemoval(ability);
+        forge.game.player.Player local = null;
+        if (ability != null && localPlayer != null && ability.getHostCard() != null && ability.getHostCard().getGame() != null) {
+            local = ability.getHostCard().getGame().getPlayer(localPlayer);
+        }
+        boolean massRemoval = local != null ? massRemovalReaches(ability, local) : isMassRemoval(ability);
         // "Each opponent loses 1 life" / "each player draws": a notice for each affected seat, not a stop.
         boolean notice = !massRemoval && localPlayer != null && StackInteractionPolicy.noticePlayers(ability)
                 .stream().anyMatch(player -> player.getId() == localPlayer.getId());
@@ -42,8 +80,15 @@ final class TargetedEffectHistory {
         collectTargets(item, localPlayer.getId(), targets, new HashSet<>());
         if ((!massRemoval && !notice && targets.isEmpty()) || item.getSourceCard() == null) return;
         CardView source = item.getSourceCard();
-        boolean publicSource = !source.isFaceDown() && source.getZone() != null
-                && Set.of(ZoneType.Stack, ZoneType.Battlefield, ZoneType.Graveyard, ZoneType.Exile, ZoneType.Command).contains(source.getZone());
+        boolean publicSource = isPublic(source);
+        if (!publicSource && !source.isFaceDown() && ability != null && ability.getHostCard() != null && ability.getHostCard().getGame() != null) {
+            // Delayed triggers carry a zoneless snapshot of their creator; show the real card if it is public.
+            var live = ability.getHostCard().getGame().findById(source.getId());
+            if (live != null && isPublic(live.getView())) {
+                source = live.getView();
+                publicSource = true;
+            }
+        }
         JsonObject event = new JsonObject();
         event.addProperty("id", ++sequence);
         event.addProperty("stackId", item.getId());
@@ -56,6 +101,11 @@ final class TargetedEffectHistory {
         event.add("targets", targets);
         events.put(item.getId(), event);
         while (events.size() > 32) events.remove(events.keySet().iterator().next());
+    }
+
+    private static boolean isPublic(CardView card) {
+        return card != null && !card.isFaceDown() && card.getZone() != null
+                && Set.of(ZoneType.Stack, ZoneType.Battlefield, ZoneType.Graveyard, ZoneType.Exile, ZoneType.Command).contains(card.getZone());
     }
 
     private static void collectTargets(StackItemView item, int localId, JsonArray result, Set<String> seen) {

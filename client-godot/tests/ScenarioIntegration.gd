@@ -705,3 +705,17 @@ func playable() -> bool:
 	if not await settle(): return false
 	for index in range(20): await ui.get_tree().process_frame
 	return check(not flag.call("Lingering Souls", "Graveyard") and flag.call("Ornithopter", "Hand"), "After spending the mana only the free spell stays playable")
+
+## A board wipe is news for this seat only when it can reach one of its permanents.
+func wipe_events() -> Array:
+	return ui.snapshot.get("targetedEffects", []).filter(func(event): return event.get("kind", "") == "massRemoval")
+
+func wrath_hits() -> bool:
+	var events := wipe_events()
+	print("SCENARIO wipe events: ", events.map(func(event): return event.get("source", {}).get("name", "?")))
+	if not check(events.size() == 1 and events[0].get("source", {}).get("name", "") == "Wrath of God", "A wipe that reaches your creature is announced with its real source card"): return false
+	await capture("wipe")
+	return true
+
+func wrath_misses() -> bool:
+	return check(wipe_events().is_empty(), "A wipe that cannot reach any of your permanents is not announced to you: " + str(wipe_events()))

@@ -18,6 +18,8 @@ var targets_scroll: Control
 var hover_preview: Control
 var hovered_card: Control
 var hover_left_inset := 24.0
+## The visible table (Main sets it); small effect cards center on it. Empty: the whole viewport.
+var table_rect := Rect2()
 var blocked: Callable
 var active: Dictionary = {}
 var waiting: Array = []
@@ -473,12 +475,14 @@ func _layout() -> void:
 		return
 	var available := get_viewport_rect().size
 	if notice_panel != null and notice_panel.visible:
-		# A small card near the top of the table, out of the way of the hand and the rail.
-		var notice_width := minf(460, available.x - 32)
+		# A small card in the middle of the table, never over the rail.
+		var area: Rect2 = table_rect if table_rect.has_area() else Rect2(Vector2.ZERO, available)
+		var notice_width := minf(460, area.size.x - 32)
 		notice_text.custom_minimum_size.x = notice_width - 32
 		notice_panel.size = Vector2(notice_width, 0)
 		notice_panel.size = Vector2(notice_width, notice_panel.get_combined_minimum_size().y)
-		notice_panel.position = Vector2(clampf((available.x - notice_panel.size.x) * 0.5, 16, maxf(16, available.x - notice_panel.size.x - 16)), 24)
+		var centered := area.get_center() - notice_panel.size * 0.5
+		notice_panel.position = Vector2(clampf(centered.x, 16, maxf(16, available.x - notice_panel.size.x - 16)), clampf(centered.y, 16, maxf(16, available.y - notice_panel.size.y - 16))).round()
 	var width := minf(1040, maxf(580, available.x - 96))
 	var height := clampf(available.y - 340, 300, 540)
 	face.custom_minimum_size = Vector2(height * 144 / 202, height)

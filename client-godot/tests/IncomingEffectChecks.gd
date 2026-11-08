@@ -132,6 +132,13 @@ func _check_auto_resolve(popup: Control) -> void:
 	assert(popup.notice_panel.visible and int(popup.notice_active.stackId) == 9700, "Only threats still shows a popup when you cannot respond")
 	assert(popup.notice_source.data.get("name", "") == "Murder" and popup.notice_arrow.visible and popup.notice_targets.get_child_count() == 1 and popup.notice_targets.get_child(0).data.get("name", "") == "Our creature", "The popup shows the source card with an arrow to your affected card")
 	assert(popup.notice_panel.size.x <= 520 and popup.notice_ok.visible, "It is a small popup with an OK button, not a full-screen panel")
+	var view_size: Vector2 = popup.get_viewport_rect().size
+	popup.table_rect = Rect2(view_size * Vector2(0.05, 0.1), view_size * Vector2(0.7, 0.8))
+	popup._layout()
+	var wanted: Vector2 = popup.table_rect.get_center() - popup.notice_panel.size * 0.5
+	wanted = Vector2(clampf(wanted.x, 16, maxf(16, view_size.x - popup.notice_panel.size.x - 16)), clampf(wanted.y, 16, maxf(16, view_size.y - popup.notice_panel.size.y - 16))).round()
+	assert(popup.notice_panel.position.distance_to(wanted) < 2.0, "The small popup sits in the middle of the table (kept on screen): " + str([popup.notice_panel.get_rect(), popup.table_rect]))
+	popup.table_rect = Rect2()
 	popup.present(passing)
 	assert(popup.notices.is_empty(), "A repeated snapshot never repeats the popup")
 	var resolved := passing.duplicate(true)
