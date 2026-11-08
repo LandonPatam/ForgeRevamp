@@ -36,7 +36,7 @@ import org.jupnp.support.model.PortMapping;
  */
 final class OnlineLobby implements AutoCloseable {
     /** Bumped when lobby messages or the seat protocol change, so mismatched builds are told plainly. */
-    static final int NET_VERSION = 4;
+    static final int NET_VERSION = 5;
     private static final int MAX_PLAYERS = 4;
     private static final int MAX_DECK_BYTES = 256 * 1024;
     private static final int MAX_WAITING_CONNECTIONS = 16;
@@ -301,6 +301,7 @@ final class OnlineLobby implements AutoCloseable {
                 switch (DeckLibrary.string(message, "type", "")) {
                     case "join" -> join(channel, message);
                     case "deck" -> changeDeck(channel, message);
+                    case "profile" -> changeProfile(channel, message);
                     case "ready" -> ready(channel, message);
                     default -> throw new IllegalArgumentException("Unknown lobby message");
                 }
@@ -335,6 +336,22 @@ final class OnlineLobby implements AutoCloseable {
         joined.put(channel, replacement);
         player.deckFile().toFile().delete();
         resetReady();
+        broadcast();
+    }
+
+    /** A joined player's own portrait change in the lobby; cosmetic, so readiness is kept. */
+    private synchronized void changeProfile(Channel channel, JsonObject message) throws Exception {
+        Joined player = joined.get(channel);
+        BridgeProtocol.require(player != null, "Join the session first");
+        JsonObject requested = new JsonObject();
+        requested.addProperty("name", player.profile().get("name").getAsString());
+        requested.add("avatar", message.has("avatar") ? message.get("avatar") : player.profile().get("avatar"));
+        requested.addProperty("portrait", DeckLibrary.string(message, "portrait", ""));
+        JsonObject accepted;
+        try { accepted = MatchSetup.profile(requested); }
+        catch (IllegalArgumentException e) { throw new IllegalArgumentException("That portrait could not be used: " + e.getMessage()); }
+        player.profile().add("avatar", accepted.get("avatar"));
+        player.profile().add("portrait", accepted.get("portrait"));
         broadcast();
     }
 

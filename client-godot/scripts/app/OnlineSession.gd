@@ -5,7 +5,7 @@ extends Node
 signal changed
 signal notice(text: String)
 signal match_started(url: String, token: String)
-const NET_VERSION := 4
+const NET_VERSION := 5
 const DEFAULT_PORT := 36743
 const CONNECT_TIMEOUT_MS := 10000
 const OFFLINE_ROLE := ""
@@ -138,6 +138,11 @@ func set_deck(id: String) -> void:
 		set_ready(false)
 	elif is_joined():
 		deck_request = _request("lobby.deckText", {"id": id})
+
+## A joined player's portrait change, applied by the host without leaving or losing readiness.
+func set_profile(profile: Dictionary) -> void:
+	if is_joined() and socket != null and socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		socket.send_text(JSON.stringify({"type": "profile", "avatar": int(profile.get("avatar", 0)), "portrait": str(profile.get("portrait", ""))}))
 
 func leave() -> void:
 	if role in ["connecting", "joined"]: _become_idle("")

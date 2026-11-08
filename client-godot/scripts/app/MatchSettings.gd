@@ -425,16 +425,29 @@ func _net_row(entry: Dictionary, slot: int) -> void:
 	seat.add_child(_text("[%02d]" % slot, 20))
 	seat.add_child(_text("YOU" if is_you else {"host": "HOST", "bot": "BOT"}.get(entry.get("kind", ""), "NET"), 13, DIM))
 	row.add_child(seat)
-	var portrait := TextureRect.new()
-	portrait.texture = Portraits.texture(entry)
-	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	portrait.custom_minimum_size = Vector2(84, 56)
-	portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var phosphor := ShaderMaterial.new()
 	phosphor.shader = preload("res://shaders/match_portrait.gdshader")
-	portrait.material = phosphor
-	row.add_child(portrait)
+	if is_you:
+		# Your own seat stays editable after joining; the host applies the change for everyone.
+		var own := _button("", func(): pass)
+		own.icon = Portraits.texture(value.human)
+		own.expand_icon = true
+		own.custom_minimum_size = Vector2(84, 72)
+		own.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		own.tooltip_text = "Change profile picture"
+		own.material = phosphor
+		own.pressed.connect(func(): _choose_portrait(value.human, own))
+		portrait_buttons.append(own)
+		row.add_child(own)
+	else:
+		var portrait := TextureRect.new()
+		portrait.texture = Portraits.texture(entry)
+		portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		portrait.custom_minimum_size = Vector2(84, 56)
+		portrait.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		portrait.material = phosphor
+		row.add_child(portrait)
 	var name_label := _text(str(entry.get("name", "PLAYER")), 21)
 	name_label.custom_minimum_size.x = row_name_width
 	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -751,6 +764,7 @@ func _choose_portrait(profile: Dictionary, button: Button) -> void:
 			editing_profile.avatar = index
 			editing_profile.portrait = ""
 			editing_button.icon = Portraits.texture(editing_profile)
+			_portrait_chosen()
 			portrait_dialog.hide())
 		preset.icon = Portraits.texture({"avatar": index})
 		preset.expand_icon = true
@@ -784,4 +798,10 @@ func _import_portrait(path: String) -> void:
 	pixels.resize(128, 128, Image.INTERPOLATE_LANCZOS)
 	editing_profile.portrait = Marshalls.raw_to_base64(pixels.save_jpg_to_buffer(0.85))
 	editing_button.icon = Portraits.texture(editing_profile)
+	_portrait_chosen()
 	portrait_dialog.hide()
+
+## Joined to someone else's lobby: send your new portrait to the host (Save & Return keeps it locally).
+func _portrait_chosen() -> void:
+	if not _joined() or not is_same(editing_profile, value.human): return
+	net.set_profile(value.human)

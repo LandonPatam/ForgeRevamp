@@ -176,7 +176,7 @@ try {
 
   // Joining
   const {deckData, version} = await call('lobby.deckText', {id: deck.id});
-  check(version === 4, 'Shared coin toss uses online protocol version 4');
+  check(version === 5, 'Lobby portrait changes use online protocol version 5');
   const joinMessage = (name, extra = {}) => ({type: 'join', version, name, avatar: 0, portrait: '', deckData, ...extra});
   const wrongBuild = await open(onlineUrl);
   wrongBuild.send(joinMessage('Old build', {version: 999}));
@@ -226,6 +226,15 @@ try {
   friend.send({type: 'deck', deckData: Buffer.from('[metadata]\nName=Invalid replacement\n[Main]\n1 Mountain\n').toString('base64')});
   await friend.wait(m => m.type === 'rejected', 'invalid replacement rejection');
   check((await call('lobby.status')).players[0].deck === 'Windows CRLF – Zoë', 'An invalid replacement keeps the accepted deck in the roster');
+
+  // A joined player can change their portrait in the lobby without leaving.
+  friend.send({type: 'profile', avatar: 17, portrait: ''});
+  const repainted = await friend.wait(m => m.type === 'lobby' && m.roster.some(p => p.kind === 'player' && p.name === 'Friend' && p.avatar === 17), 'portrait change');
+  check(repainted.roster.find(p => p.name === 'Friend').avatar === 17, 'A joined player changes their portrait in the lobby');
+  check((await call('lobby.status')).players[0].avatar === 17, 'The host sees the new portrait');
+  friend.send({type: 'profile', avatar: 999, portrait: ''});
+  await friend.wait(m => m.type === 'rejected' && m.message.includes('portrait'), 'invalid portrait rejection');
+  check((await call('lobby.status')).players[0].avatar === 17, 'An invalid portrait keeps the accepted one');
 
   const fourth = await open(onlineUrl);
   fourth.send(joinMessage('Fourth seat'));

@@ -44,7 +44,7 @@ Prompt controls belong to a specific Forge input instance. Each seat observes it
 
 After attacker and blocker declarations, default empty-stack priority also passes automatically for the active player when Forge finds no playable response. The declaration itself still needs its owner's confirmation. A legal combat trick/activation or an explicitly enabled phase stop retains the priority window, so combat needs extra clicks only when there is a response opportunity or a requested stop.
 
-Lobby protocol version 4 includes readiness, opening/session lifecycle and the shared starting-toss presentation. Clients send `{ "type": "ready", "ready": true }`; the local host uses `lobby.ready`, per-human `ready` roster flags, and `hostReady`/`allReady` host status. Deck and roster changes invalidate readiness. Both Java and Godot must use version 4; older builds are refused at join. The game protocol still uses its session/revision/request identities at version 2.
+Lobby protocol version 5 includes readiness, opening/session lifecycle, the shared starting-toss presentation and in-lobby portrait changes. Clients send `{ "type": "ready", "ready": true }`; a joined player changes their own portrait with `{ "type": "profile", "avatar": N, "portrait": "<base64 or empty>" }`, validated like a join and kept without resetting readiness; the local host uses `lobby.ready`, per-human `ready` roster flags, and `hostReady`/`allReady` host status. Deck and roster changes invalidate readiness. Both Java and Godot must use version 5; older builds are refused at join. The game protocol still uses its session/revision/request identities at version 2.
 
 ### Loading and opening hands
 
@@ -74,7 +74,7 @@ Deck names and player names from joined players are displayed; deck files are pa
 
 ## Known limits
 
-- A physical Mac-to-Windows game with lobby protocol version 4, and a connection from another internet connection, have not been verified after this update. Automated checks exercise native Apple Silicon and the bundled Intel runtime under Rosetta, including connecting to this Mac’s own LAN address; this does not test a remote machine’s firewall or the router from outside.
+- A physical Mac-to-Windows game with lobby protocol version 5, and a connection from another internet connection, have not been verified after this update. Automated checks exercise native Apple Silicon and the bundled Intel runtime under Rosetta, including connecting to this Mac’s own LAN address; this does not test a remote machine’s firewall or the router from outside.
 - `OnlineLobby.NET_VERSION` only catches protocol changes when it is bumped. Different builds with the same number, or different card data, are not detected. Bump it when lobby or seat messages change.
 - There is no spectating, chat, or rejoining the lobby after the host stops hosting. A session is one match.
 - If the match process fails to start after the lobby has closed, joined players wait until their boot times out, and everyone must reconnect to a new session.
@@ -88,7 +88,7 @@ Deck names and player names from joined players are displayed; deck files are pa
 
 For the Mac payload, run `node bridge/tools/online-check.mjs --mac-app dist/ForgeUI-mac-optimized/ForgeUI.app --arch arm64`; repeat with `--arch x86_64` on an Intel Mac or with Rosetta. Add `--host-address <this-Mac-LAN-IPv4>` to exercise the non-loopback listener. The runtime, service classes and Forge assets come from that app; test libraries and logs are isolated. The source-mode runner now uses the platform classpath separator on Windows and macOS.
 
-`node client-godot/tools/online-app-check.mjs` tests the exported Mac application's real online joining, seat token, disk/table reveal and Leave cleanup with its bundled Java payload. Set `FORGE_EXPORTED_EXE` to check a different exported Mac app; `--intel` runs both the game and Java as x86_64. It reuses `ApplicationIntegration.online_join_check` for both hosting and joining, including physical PLAY readiness and automatic host launch, and does not contact a router. `--source` checks the local Mac sources before packaging. `--peer <Windows-LAN-IP>` runs the live joining check against a host running the matching lobby protocol version 4 build.
+`node client-godot/tools/online-app-check.mjs` tests the exported Mac application's real online joining, seat token, disk/table reveal and Leave cleanup with its bundled Java payload. Set `FORGE_EXPORTED_EXE` to check a different exported Mac app; `--intel` runs both the game and Java as x86_64. It reuses `ApplicationIntegration.online_join_check` for both hosting and joining, including physical PLAY readiness and automatic host launch, and does not contact a router. `--source` checks the local Mac sources before packaging. `--peer <Windows-LAN-IP>` runs the live joining check against a host running the matching lobby protocol version 5 build.
 
 Rejected lobby configuration is validated before replacing the accepted roster. Received deck changes are validated in a separate temporary file; a rejected replacement cannot overwrite the accepted deck. Successful changes remove the previous copy, and session cleanup removes all received decks. These fixes are shared by Windows and macOS builds and do not change the wire protocol.
 

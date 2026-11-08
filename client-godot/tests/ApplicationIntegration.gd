@@ -514,6 +514,14 @@ func settings_check() -> bool:
 	settings.net.roster = [{"kind": "host", "name": "The host", "avatar": 1, "portrait": ""}, {"kind": "player", "id": 1, "name": "Me", "avatar": 2, "portrait": "", "deck": "Dragon's Fury", "commander": "Scion of the Ur-Dragon"}]
 	settings._net_changed()
 	if not check(settings.rows.size() == 3 and settings.names.is_empty() and settings.deck_choices.is_empty(), "A joined player sees the host's roster and cannot edit it"): return false
+	if not check(settings.portrait_buttons.size() == 1, "A joined player can still change their own portrait (and only their own)"): return false
+	var before_avatar := int(settings.value.human.get("avatar", 0))
+	settings.portrait_buttons[0].pressed.emit()
+	if not check(is_instance_valid(settings.portrait_dialog) and settings.portrait_dialog.visible, "The joined player's portrait opens the avatar chooser"): return false
+	var pick: int = (before_avatar + 5) % settings.avatar_choices.size()
+	settings.avatar_choices[pick].pressed.emit()
+	if not check(int(settings.value.human.avatar) == pick and settings.value.human.portrait == "", "Choosing an avatar in the lobby updates the joined player's profile"): return false
+	settings.value.human.avatar = before_avatar
 	await capture("app-settings-online-joined")
 	settings.net.role = ""
 	settings.net.roster = []
