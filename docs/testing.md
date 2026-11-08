@@ -58,7 +58,7 @@ node client-godot/tools/sandbox.mjs decisions --shot # screenshot to client-godo
 - Boards: `client-godot/tests/sandbox/` holds UI playgrounds (`busy-table`, `decisions`, `wide-combat`, `empty`). Every `tests/scenarios/` board works too. A sandbox board with the same name wins. The first `#` line is the description shown in the list; lines starting with `#` are comments. Copy `empty.state` to make a new one; the launcher strips blank lines (Forge's parser rejects them).
 - Options: `--opponents=1..3`, `--deck=<tests/*.dck>` (commander/library fixture), `--size=WxH`, `--no-watch`.
 - Logs: `client-godot/artifacts/sandbox-bridge.log` and `sandbox-godot.log`. Script errors and unknown card names are echoed in the terminal.
-- Agents handing a UI change to the user give the exact sandbox command for the board that shows it (adding a board under `tests/sandbox/` when none fits), and can verify with `--shot` first. Sandbox boards have no driver and are not part of `check.mjs`.
+- Agents present every UI change through the sandbox (procedure in `AGENTS.md`, "Presenting a UI/table change"): a board that shows it, a `--shot` they looked at first, then the exact command, the steps to reach the change and what to expect. Example: `node client-godot/tools/sandbox.mjs discard`, "tap a Mountain, cast Faithless Looting, then click two hand cards". Sandbox boards have no driver and are not part of `check.mjs`; boards under `tests/scenarios/` do have one.
 
 ## Real-engine scenarios
 

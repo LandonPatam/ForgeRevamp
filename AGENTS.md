@@ -122,7 +122,12 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
   3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
   4. Inspect captures only for visual changes (`visual <Name>`).
   5. Run `check.mjs all` once before a push, not after every edit. Java checks are unnecessary for frontend-only changes.
-- UI sandbox: `node client-godot/tools/sandbox.mjs <board>` opens the real table on a prepared board (`tests/sandbox/` playgrounds or any `tests/scenarios/` board) past startup, and relaunches the window on the same live board when sources change; `--mock` for the mock table, `--shot` for a screenshot. When handing a UI change to the user, give them the sandbox command for a board that shows it. Details in `docs/testing.md`.
+- UI sandbox: `node client-godot/tools/sandbox.mjs <board>` opens the real table on a prepared board (`tests/sandbox/` playgrounds or any `tests/scenarios/` board) past startup, and relaunches the window on the same live board when sources change; `--mock` for the mock table, `--shot` for a screenshot. Details in `docs/testing.md`.
+- Presenting a UI/table change to the user always goes through the sandbox, so they never have to play a game to reach it:
+  1. Pick a board that shows the change at once (`sandbox.mjs` with no arguments lists them). If none does, add one: a playground under `tests/sandbox/`, or, when the change also needs an automated real-engine check, `tests/scenarios/<name>.state` plus its driver (the sandbox opens those too). Start the file with a `#` line saying what to do on it.
+  2. Check it yourself before handing over: `sandbox.mjs <board> --shot` (or `scenario <name> --render`) and look at the PNG.
+  3. In the reply, give the exact command and the short steps to reach the change on that board (e.g. "tap a Mountain, cast Faithless Looting"), then what they should see. Mention that saving a script relaunches the open window on the same board, so they can ask for tweaks while it stays open.
+  This applies to home/editor changes only where a board makes sense; otherwise give the closest launch command (`run.sh`, `--mock`).
 - Bash launch on Windows: `bash ./client-godot/tools/run.sh`; add `-Decks` or `-Mock` as needed.
 - App/home UI checks (not in the runner yet): `node client-godot/tools/app-check.mjs --render` (or `--editor-preview`), `node client-godot/tools/library-check.mjs --render`, and `.\client-godot\tools\run.ps1 -Capture`.
 - Automated playtest as the human seat across precons: `node bridge/tools/playtest.mjs` (see `docs/playtest.md`).
