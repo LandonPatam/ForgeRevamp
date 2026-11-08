@@ -850,3 +850,28 @@ func triggers() -> bool:
 	if not check(answers == [wanted], "Confirm must send the whole pile, top first: %s vs %s" % [answers, wanted]): return false
 	if not await wait_ready(): return false
 	return check(not ui.snapshot.asks.any(func(ask): return ask.kind == "order"), "Forge must accept the order and close the question")
+
+## "Choose one or more" modes hang off the card as one callout; picks stay local until Confirm,
+## then the bridge feeds every pick to Forge's one-at-a-time mode prompts.
+func concord() -> bool:
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false): break
+		if not await step(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false), "Concord must ask for all its modes at once: " + str(ui.snapshot.asks)): return false
+	var callout: Control = ui.interaction_panel.callout
+	if not check(callout.visible and not ui.modal.visible, "The modes must attach to the card, not open a popup"): return false
+	if not check(callout.mode_buttons.size() == 3 and callout.yes_button.disabled, "Three modes, nothing confirmable before a pick"): return false
+	var hand_before: int = zone("Hand").size()
+	callout.mode_buttons[1].pressed.emit()
+	callout.mode_buttons[2].pressed.emit()
+	await capture("modes")
+	if not await wait_ready(): return false
+	if not check(ui.snapshot.asks.size() == 1 and ui.snapshot.asks[0].get("modeChoice", false), "Picking modes must not answer Forge"): return false
+	callout.yes_button.pressed.emit()
+	for index in range(40):
+		if not await wait_ready(): return false
+		if zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")): break
+		if not await step(): return false
+	if not check(zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")), "Both picked modes must resolve: a Spirit token"): return false
+	return check(zone("Hand").size() > hand_before, "… and a drawn card")

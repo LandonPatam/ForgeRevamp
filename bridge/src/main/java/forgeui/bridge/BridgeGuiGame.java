@@ -71,6 +71,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
             yields.setPref(FPref.YIELD_INTERRUPT_ON_TARGETING, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL, "false");
+            installModeChooser(human);
         }
         super.setOriginalGameController(player, controller);
         if (controller instanceof PlayerControllerHuman human) {
@@ -662,11 +663,74 @@ final class BridgeGuiGame extends AbstractGuiGame {
         return picked.isEmpty() ? defaultIndex : picked.get(0);
     }
 
+    /**
+     * Forge picks "choose one or more" modes one prompt at a time, but first offers the whole set
+     * (min and max) to the controller's macro system. That hook notes the range so the first mode
+     * prompt becomes one multi-select ask; the picks then answer Forge's remaining prompts here, on
+     * the game thread, with no client round trip. Repeatable modes keep Forge's own loop.
+     */
+    private void installModeChooser(PlayerControllerHuman human) {
+        try {
+            var field = PlayerControllerHuman.class.getDeclaredField("macros");
+            field.setAccessible(true);
+            if (!(field.get(human) instanceof ModeRangeMacros)) field.set(human, new ModeRangeMacros(human));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Forge's one-at-a-time mode prompts still work.
+        }
+    }
+
+    private final class ModeRangeMacros extends forge.player.RecordActionsMacroSystem {
+        ModeRangeMacros(PlayerControllerHuman human) { super(human); }
+        @Override
+        public List<String> consumeRememberedModeChoice(List<String> choices, int min, int num, boolean allowRepeat) {
+            List<String> remembered = super.consumeRememberedModeChoice(choices, min, num, allowRepeat);
+            modeRange = remembered == null && !allowRepeat && num > 1 ? new int[] {min, num} : null;
+            modeQueue.clear();
+            modeQueueActive = false;
+            return remembered;
+        }
+    }
+
+    private int[] modeRange;
+    private final List<SpellAbilityView> modeQueue = new ArrayList<>();
+    private boolean modeQueueActive;
+    private int modesLeft;
+
+    @SuppressWarnings("unchecked")
+    private <T> List<T> modeChoices(String message, int min, int max, List<T> choices) {
+        if (max != 1 || !choices.stream().allMatch(choice -> choice instanceof SpellAbilityView)) return null;
+        if (modeRange != null) {
+            int low = modeRange[0], high = Math.min(modeRange[1], choices.size());
+            modeRange = null;
+            if (high <= 1) return null;
+            JsonObject metadata = new JsonObject();
+            metadata.addProperty("modeChoice", true);
+            String range = low == high ? String.valueOf(high) : low + " to " + high;
+            List<Integer> picked = choose(message, "Choose " + range + " modes", low, high, options(choices, null), null, metadata);
+            if (picked.size() < Math.max(low, 1)) return null;
+            for (int i : picked) modeQueue.add((SpellAbilityView) choices.get(i));
+            modeQueueActive = true;
+            modesLeft = high;
+        }
+        if (!modeQueueActive) return null;
+        modeQueue.removeIf(view -> !choices.contains(view));
+        if (modeQueue.isEmpty()) {
+            modeQueueActive = false;
+            return min == 0 ? new ArrayList<>() : null;
+        }
+        List<T> next = new ArrayList<>();
+        next.add((T) modeQueue.remove(0));
+        if (--modesLeft <= 0) modeQueueActive = false;
+        return next;
+    }
+
     @Override
     public <T> List<T> getChoices(String message, int min, int max, List<T> choices, List<T> selected, FSerializableFunction<T, String> display) {
         if (choices == null || choices.isEmpty()) {
             return new ArrayList<>();
         }
+        List<T> modes = modeChoices(message, min, max, choices);
+        if (modes != null) return modes;
         if (min == -1 && max == -1) {
             // reveal: nothing to choose, just acknowledge
             JsonObject a = newAsk("message", "", message);

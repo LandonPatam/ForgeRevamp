@@ -1,0 +1,15 @@
+# Pass priority in Main 2: at your end step Concord with the Kami asks for its modes on the card itself
+activeplayer=p0
+activephase=MAIN2
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Forest;Forest;Concord with the Kami;Grizzly Bears|Id:1|Counters:P1P1=1;Llanowar Elves|Id:2;Ethereal Armor|AttachedTo:2;Bonesplitter|AttachedTo:1
+p0hand=Grizzly Bears
+p0library=Forest;Island;Swamp;Mountain;Plains;Forest;Island;Swamp;Mountain;Plains;Forest;Forest
+p1life=40
+p1battlefield=Plains;Serra Angel
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Mountain;Goblin Guide
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

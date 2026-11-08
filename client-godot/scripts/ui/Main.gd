@@ -622,6 +622,7 @@ func _build_shell() -> void:
 	interaction_panel.action_requested.connect(func(action):
 		_primary_action() if action == "ok" else _secondary_action())
 	interaction_panel.entity_selected.connect(func(action, id): _intent(action, {"id": id}))
+	interaction_panel.modes_answered.connect(func(id, picks): _intent("answer", {"id": id, "value": picks}))
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -969,16 +970,25 @@ func _apply_state(value: Dictionary) -> void:
 		_inspect(snapshot.players[0].zones.Battlefield[1])
 	if not snapshot.asks.is_empty():
 		var ask: Dictionary = snapshot.asks[0]
-		if _board_ask(ask):
+		var mode_card: Control = cards.get(interaction_panel.mode_source(ask)) if live else null
+		if is_instance_valid(mode_card) and mode_card.is_visible_in_tree():
+			# Mode choices hang off the card itself, not a popup.
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes(ask)
+		elif _board_ask(ask):
+			interaction_panel.show_modes({})
 			if modal.visible: _close_modal()
 			var avatars := {}
 			for seat in hud_values:
 				if seat < snapshot.players.size(): avatars[int(snapshot.players[seat].get("engineId", seat))] = hud_values[seat].portrait
 			board_choice.present(ask, cards, snapshot.get("connectionReady", false), avatars)
 		else:
+			interaction_panel.show_modes({})
 			board_choice.hide()
 			if ask.id != open_ask or not modal.visible or not is_instance_valid(modal_panel): _open_decision(ask)
 	else:
+		interaction_panel.show_modes({})
 		board_choice.hide()
 		if open_ask >= 0: _close_modal()
 	if live:

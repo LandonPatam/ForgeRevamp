@@ -5,6 +5,7 @@ signal entity_selected(action: String, id: int)
 signal resolve_requested(stack_id: int)
 signal review_requested
 signal browse_requested
+signal modes_answered(id: int, picks: Array)
 const P = preload("res://scripts/ui/Palette.gd")
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -29,6 +30,8 @@ var decision_key := ""
 ## Yes/no confirmations about a visible card attach to it instead of the top banner.
 var callout: PanelContainer
 var callout_card: Control
+## A card's modes ("choose one or more —") also attach to that card when it is on the table.
+var mode_ask: Dictionary = {}
 const CALLOUT_GAP := 34.0
 const RAIL_WIDTH := 316.0
 
@@ -78,6 +81,7 @@ func _ready() -> void:
 	panel.hide()
 	callout = preload("res://scripts/ui/CardCallout.gd").new()
 	callout.answered.connect(func(action): action_requested.emit(action))
+	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
 	add_child(callout)
 
 func _label(font_size: int, color: Color) -> Label:
@@ -104,6 +108,15 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	player_views = avatars
 	suspended = blocked
 	description = Flow.describe(state)
+	var mode_view := _mode_view()
+	if mode_view != null:
+		panel.hide()
+		callout_card = mode_view
+		callout.visible = true
+		callout.present_modes(str(mode_ask.options[0].card.get("name", "Card")), mode_ask, state.get("connectionReady", false))
+		_place_callout()
+		queue_redraw()
+		return
 	panel.visible = not suspended and not description.is_empty()
 	callout_card = _callout_card() if panel.visible else null
 	callout.visible = callout_card != null
@@ -166,6 +179,26 @@ func _confirm() -> void:
 func _picks_from_board() -> bool:
 	var kind: String = state.get("prompt", {}).get("inputKind", "")
 	return kind.begins_with("InputSelect") or kind.begins_with("InputPayMana")
+
+## The card id a mode ask chooses for: every option is a mode of one card, not a card itself.
+static func mode_source(ask: Dictionary) -> int:
+	var options: Array = ask.get("options", [])
+	if ask.get("kind", "") != "choose" or options.size() < 2: return -1
+	for option in options:
+		if not option.has("card") or option.has("cardId") or option.has("stackId") or not option.card.has("id"): return -1
+		if int(option.card.id) != int(options[0].card.id) or str(option.get("label", "")) == str(option.card.get("name", "")): return -1
+	return -1 if options[0].card.get("hidden", false) else int(options[0].card.id)
+
+## Main hands over a mode ask (or {} to drop it) when its card is on the table.
+func show_modes(ask: Dictionary) -> void:
+	if ask == mode_ask: return
+	mode_ask = ask
+	present(state, suspended, cards, player_views)
+
+func _mode_view() -> Control:
+	if mode_ask.is_empty(): return null
+	var view: Control = cards.get(mode_source(mode_ask))
+	return view if is_instance_valid(view) and view.is_visible_in_tree() else null
 
 ## The table card a plain yes/no confirmation is about, when it is on screen.
 func _callout_card() -> Control:
@@ -241,6 +274,10 @@ func _process(_delta: float) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not callout.visible or not event is InputEventKey or not event.pressed or event.echo: return
+	if not callout.mode_ask.is_empty() and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		callout._toggle_mode(event.keycode - KEY_1)
+		get_viewport().set_input_as_handled()
+		return
 	if event.keycode == KEY_Y and not callout.yes_button.disabled:
 		callout.yes_button.pressed.emit()
 		get_viewport().set_input_as_handled()
