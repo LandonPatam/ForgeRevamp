@@ -69,6 +69,13 @@ var live_buttons: Array[Button] = []
 var integration_checks: RefCounted
 var snapshot: Dictionary = {}
 var sandbox_starting := false
+var hand_pick_shade: ColorRect
+var hand_pick_panel: PanelContainer
+var hand_pick_title: Label
+var hand_pick_message: Label
+var hand_pick_count: Label
+var hand_pick_confirm: Button
+var hand_pick_cancel: Button
 var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
@@ -496,11 +503,21 @@ func _build_shell() -> void:
 	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(note)
 	footer.add_child(_label("SPACE  Pass turn    Q  Advance    D  Draw    T  Tap / attack    H  Help", 10, P.MUTED))
+	# Picking from your hand (discard, put back): the table dims and stops taking clicks; the hand,
+	# a later sibling with a higher z_index, stays bright and usable.
+	hand_pick_shade = ColorRect.new()
+	hand_pick_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hand_pick_shade.color = Color(0.01, 0.015, 0.02, 0.66)
+	hand_pick_shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	hand_pick_shade.z_index = 19
+	hand_pick_shade.hide()
+	add_child(hand_pick_shade)
 	hand_root = Control.new()
 	hand_root.mouse_filter = Control.MOUSE_FILTER_PASS
 	hand_root.z_index = 20
 	hand_root.gui_input.connect(_hand_scroll)
 	add_child(hand_root)
+	_build_hand_pick_panel()
 	library_pile = Library.new()
 	library_pile.z_index = 22
 	library_pile.tooltip_text = "Library / drag a face-down card into your hand"
@@ -631,7 +648,7 @@ func _present_interaction() -> void:
 	var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
-	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible, cards, avatars)
+	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible, cards, avatars)
 	var rail_decision: bool = interaction_panel.uses_stack_rail() or board_choice.visible
 	decision_scroll.visible = rail_decision
 	rail_space.visible = not rail_decision and stack_box.entries.is_empty()
@@ -1006,6 +1023,11 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		card_size = FieldLayout.fit_card_size(automatic, dimensions - Vector2(16, 16), TABLE_CARD_SIZE, spacing)
 	pack_values = pack_values.filter(func(card): return automatic.any(func(other): return other.id == card.id))
 	var packed: Dictionary = FieldLayout.arrange(pack_values, dimensions - Vector2(16, 16), card_size, spacing, zone == "Battlefield")
+	var hand_pick := zone == "Hand" and _hand_pick_active()
+	var hand_pick_discard := hand_pick and _hand_pick_is_discard()
+	var hand_pick_offered := {}
+	if hand_pick:
+		for offered in snapshot.prompt.get("cards", []): hand_pick_offered[int(offered.id)] = true
 	for i in range(values.size()):
 		var c: Dictionary = values[i].duplicate(true)
 		c.owner = owner
@@ -1013,6 +1035,10 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		c.playable = _playable(c, owner, zone)
 		if snapshot.prompt.get("inputKind", "") == "InputBlock" and snapshot.prompt.get("chosen", []).has("card:" + str(c.id)):
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
+		if hand_pick and zone == "Hand" and owner == 0:
+			# Forge's own chosen list marks the pick; cards it cannot take are shaded.
+			if snapshot.prompt.get("chosen", []).has("card:" + str(c.id)): c.pickMark = 2 if hand_pick_discard else 1
+			elif not hand_pick_offered.has(int(c.id)): c.pickBlocked = true
 		c.stackCount = int(anchored_counts.get(c.id, packed.counts.get(c.id, 1)))
 		c.pileSize = int(pile_sizes.get(c.id, 1))
 		seen[c.id] = true
@@ -1665,7 +1691,7 @@ func _process(_delta: float) -> void:
 	if layout_paused: return
 	if live and is_instance_valid(interaction_panel):
 		var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
-		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing): _present_interaction()
+		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing or hand_pick_panel.visible): _present_interaction()
 	_layout_zone_browser()
 	_layout_mana_pool()
 	if is_instance_valid(decision_board_button) and decision_board_button.visible: _place_decision_board_button()
@@ -2332,6 +2358,8 @@ func _secondary_action() -> void:
 		return
 	if targeting:
 		_cancel_attack_target()
+	elif hand_pick_panel.visible and not snapshot.get("prompt", {}).get("cancelEnabled", false):
+		return # A required hand pick (discard) has nothing to cancel.
 	else:
 		_intent("cancel")
 
@@ -2727,8 +2755,90 @@ func _present_coin_toss() -> bool:
 	if current: _close_modal()
 	return false
 
+## A Forge card selection drawn only from your own hand (discard, put back) is made on the hand itself:
+## the table dims, the hand stays usable, a click toggles the card in Forge and this prompt confirms.
+func _hand_pick_active() -> bool:
+	if not live or snapshot.is_empty() or not snapshot.get("asks", []).is_empty() or snapshot.get("players", []).is_empty(): return false
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	if prompt.get("inputKind", "") != "InputSelectCardsFromList" or prompt.has("selectionShortcut"): return false
+	var offered: Array = prompt.get("cards", [])
+	if offered.is_empty(): return false
+	var hand_ids := {}
+	for card in snapshot.players[0].get("zones", {}).get("Hand", []): hand_ids[int(card.id)] = true
+	return offered.all(func(card): return hand_ids.has(int(card.id)))
+
+func _hand_pick_is_discard() -> bool:
+	return str(snapshot.get("prompt", {}).get("message", "")).to_lower().contains("discard")
+
+func _build_hand_pick_panel() -> void:
+	hand_pick_panel = PanelContainer.new()
+	hand_pick_panel.z_index = 30
+	hand_pick_panel.custom_minimum_size.x = 420
+	P.style_popup(hand_pick_panel)
+	hand_pick_panel.hide()
+	add_child(hand_pick_panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	hand_pick_panel.add_child(column)
+	hand_pick_title = _label("", 22)
+	column.add_child(hand_pick_title)
+	hand_pick_message = _label("", 14, Color("bfc4ca"))
+	hand_pick_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hand_pick_message.custom_minimum_size.x = 380
+	column.add_child(hand_pick_message)
+	hand_pick_count = _label("", 13, P.MUTED)
+	column.add_child(hand_pick_count)
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	column.add_child(buttons)
+	hand_pick_confirm = _button("Confirm", func(): _intent("ok"), "Confirm the selected cards (Q)")
+	P.style_popup_button(hand_pick_confirm, true)
+	hand_pick_confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	buttons.add_child(hand_pick_confirm)
+	hand_pick_cancel = _button("Cancel", func(): _intent("cancel"))
+	P.style_popup_button(hand_pick_cancel)
+	buttons.add_child(hand_pick_cancel)
+	resized.connect(_place_hand_pick)
+
+## Shows or hides the hand-pick prompt; true while it owns the decision.
+func _present_hand_pick() -> bool:
+	if hand_pick_panel == null: return false
+	var active := _hand_pick_active()
+	hand_pick_panel.visible = active
+	hand_pick_shade.visible = active
+	if not active: return false
+	var prompt: Dictionary = snapshot.prompt
+	var discard := _hand_pick_is_discard()
+	var chosen: int = prompt.get("chosen", []).size()
+	var low := int(prompt.get("selMin", 0))
+	var high := int(prompt.get("selMax", 0))
+	var ready: bool = snapshot.get("connectionReady", false) and snapshot.get("pendingDraws", []).is_empty()
+	hand_pick_title.text = "DISCARD" if discard else "CHOOSE FROM YOUR HAND"
+	hand_pick_title.add_theme_color_override("font_color", Color("ff6b6b") if discard else P.TEXT)
+	# Forge names the source with its engine id ("Faithless Looting (304)"); players don't need the number.
+	var id_suffix := RegEx.create_from_string(" \\(\\d+\\)")
+	hand_pick_message.text = id_suffix.sub(str(prompt.get("message", "")), "", true).strip_edges()
+	hand_pick_count.text = ("%d of %d selected" % [chosen, high] if low == high else "%d selected (%d–%d)" % [chosen, low, high]) + "   ·   click cards in your hand"
+	hand_pick_confirm.text = "Discard" if discard else "Confirm"
+	hand_pick_confirm.disabled = not ready or not prompt.get("okEnabled", false) or (chosen == 0 and low > 0)
+	hand_pick_cancel.visible = prompt.get("cancelEnabled", false)
+	hand_pick_cancel.disabled = not ready
+	_place_hand_pick.call_deferred()
+	return true
+
+## Centered over the table, above the hand fan, so it never covers the cards being picked.
+func _place_hand_pick() -> void:
+	if hand_pick_panel == null or not hand_pick_panel.visible: return
+	hand_pick_panel.reset_size()
+	var table: Rect2 = board_scroller.get_global_rect() if is_instance_valid(board_scroller) and board_scroller.is_visible_in_tree() else get_global_rect()
+	var center: Vector2 = get_global_transform().affine_inverse() * Vector2(table.get_center().x, table.position.y + table.size.y * 0.4)
+	hand_pick_panel.position = (center - hand_pick_panel.size * 0.5).round()
+
 func _present_card_selection() -> void:
 	if _present_coin_toss(): return
+	if _present_hand_pick():
+		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
+		return
 	var reveal_pending: bool = snapshot.asks.is_empty() and snapshot.prompt.get("inputKind", "") == "InputConfirm" and not snapshot.get("revealed", []).is_empty()
 	if reveal_pending:
 		if not native_reveal or not is_instance_valid(modal_panel):

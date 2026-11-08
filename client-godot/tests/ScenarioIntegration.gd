@@ -750,3 +750,30 @@ func wilds() -> bool:
 	if not await choose_named("Island"): return false
 	if not await settle(): return false
 	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")
+
+## Discarding happens on your own hand: no card gallery, the table dims, a click marks the card red
+## through Forge's own selection, and the prompt confirms exactly those cards.
+func discard() -> bool:
+	if not await tap("Mountain") or not await cast("Faithless Looting"): return false
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList": break
+		if not await step(): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList", "Faithless Looting must ask for a discard: " + str(ui.snapshot.prompt)): return false
+	if not check(not (ui.modal.visible and ui.modal_panel is SelectionDialog), "Discarding must not open the card gallery"): return false
+	if not check(ui.hand_pick_panel.visible and ui.hand_pick_shade.visible and not ui.interaction_panel.panel.visible, "The discard prompt must show over a dimmed table"): return false
+	if not check(ui.hand_pick_confirm.disabled, "Nothing may be confirmed before a card is picked"): return false
+	var picks: Array = zone("Hand").slice(0, 2)
+	ui._click_card(picks[0].id)
+	if not await wait_ready(): return false
+	if not check(int(ui.cards[picks[0].id].data.get("pickMark", 0)) == 2, "A clicked hand card must be marked for discard: " + str(ui.snapshot.prompt.get("chosen", []))): return false
+	await capture("picked")
+	ui._click_card(picks[1].id)
+	if not await wait_ready(): return false
+	if ui.hand_pick_panel.visible:
+		if not check(not ui.hand_pick_confirm.disabled, "Confirm must enable once two cards are picked"): return false
+		ui.hand_pick_confirm.pressed.emit()
+	if not await settle(): return false
+	var graveyard: Array = zone("Graveyard").map(func(card): return card.id)
+	if not check(graveyard.has(picks[0].id) and graveyard.has(picks[1].id), "Forge must discard the two clicked cards: " + str(zone("Graveyard").map(func(card): return card.name))): return false
+	return check(not ui.hand_pick_panel.visible and not ui.hand_pick_shade.visible, "The table must return to normal after discarding")

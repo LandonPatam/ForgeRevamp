@@ -47,6 +47,7 @@ const ManaPips = preload("res://scripts/ui/ManaPips.gd")
 static var mana_overlay := false
 static var playable_glow := true
 const PLAYABLE_GLOW := Color("b48cff")
+const PICK_DISCARD := Color("ff3b3b")
 var surface: SubViewport
 var visual: TextureRect
 var table_angle := true
@@ -148,7 +149,29 @@ func _draw_hand_overlays() -> void:
 	if (inspection and not hand_copy) or data.get("faceDown", false): return
 	var unit := size.x / 144.0
 	var body := Rect2(Vector2.ZERO, size)
-	if playable_glow and data.get("playable", false):
+	var pick_mark := int(data.get("pickMark", 0))
+	if pick_mark > 0:
+		# Picked from the hand for a Forge selection: tinted all over (red to discard) with a strong rim.
+		var tint: Color = PICK_DISCARD if pick_mark == 2 else PLAYABLE_GLOW
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = Color(tint, 0.4)
+		fill.set_corner_radius_all(int(7 * unit))
+		fill.anti_aliasing = true
+		trait_layer.draw_style_box(fill, body)
+		for ring in range(4):
+			var rim := StyleBoxFlat.new()
+			rim.bg_color = Color.TRANSPARENT
+			rim.border_color = Color(tint, 1.0 - ring * 0.22)
+			rim.set_border_width_all(maxi(2, int(round(3.0 * unit))))
+			rim.set_corner_radius_all(int((7 + ring * 2) * unit))
+			rim.anti_aliasing = true
+			trait_layer.draw_style_box(rim, body.grow((1.0 + ring * 2.4) * unit))
+	elif data.get("pickBlocked", false):
+		var shade := StyleBoxFlat.new()
+		shade.bg_color = Color(0, 0, 0, 0.6)
+		shade.set_corner_radius_all(int(7 * unit))
+		trait_layer.draw_style_box(shade, body)
+	if pick_mark == 0 and playable_glow and data.get("playable", false):
 		for ring in range(4):
 			var grow := (1.5 + ring * 2.2) * unit
 			var box := StyleBoxFlat.new()
