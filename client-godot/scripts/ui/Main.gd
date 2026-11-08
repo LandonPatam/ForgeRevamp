@@ -3080,11 +3080,6 @@ func _show_card_detail(data: Dictionary) -> void:
 	column.move_child(card_view, 1)
 	card_view.update_card(data)
 
-func _show_log() -> void:
-	if snapshot.is_empty():
-		return
-	_information("Table journal", "\n\n".join(snapshot.log))
-
 func _show_player(id: int) -> void:
 	if snapshot.is_empty():
 		return
@@ -3354,6 +3349,7 @@ func _smoke() -> void:
 	await preload("res://tests/StartupProgressChecks.gd").new().run(self)
 	await preload("res://tests/FormatLogChecks.gd").new().run(self)
 	await preload("res://tests/IncomingEffectChecks.gd").new().run(self)
+	await preload("res://tests/HandOverlayChecks.gd").new().run(self)
 	await preload("res://tests/OutcomeScreenChecks.gd").new().run(self)
 	await preload("res://tests/ReadyScreenChecks.gd").new().run(self)
 	await preload("res://tests/CardFeedbackChecks.gd").new().run(self)

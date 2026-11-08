@@ -15,9 +15,17 @@ It prints one `PASS`/`FAIL` line per step. A failure also prints the lines aroun
 2. **Fix it.** Keep the diff focused (AGENTS.md design rules still apply).
 3. **Run only the checks for what you touched** (table below), plus the new scenario. Iterate on these alone.
 4. **Visual changes:** run `visual <Name>` for that check only, then look at the one or two captures it lists. Don't review captures for changes that aren't visual.
-5. **Before the push, once:** run `all`. Then commit/push the feature branch and hand off to Mac (AGENTS.md working rules).
+5. **Before the push, once:** run `all` (it includes every real-engine scenario). Then commit/push the feature branch and hand off to Mac (AGENTS.md working rules).
 
 Don't rerun the whole suite after every edit. When one check fails, rerun just that check.
+
+## Keep testing proportional
+
+- **UI-only changes** (layout, wording, colors, popups that don't change what is sent to Forge): run the matching `ui`/`visual` check once and let the user play it. Don't write a new scenario or run `all` for these.
+- **Engine/rules bugs** (what Forge does, payment, targeting, stack, combat): reproduce with a scenario first, as above.
+- **When a check fails but the feature looks right, stop and ask the user.** Report the failing assertion and why it may be the test, not the feature. Don't loop on rewriting working code to satisfy a check, and don't rerun a failing check more than twice.
+- **Tests assert behavior, not implementation.** Check what a player can observe or what Forge receives (who is targeted, which instance was sent, that hidden faces stay hidden, that nothing replays). Don't pin exact wording, internal node names or pixel sizes; those belong in a `visual` capture the user looks at.
+- Timeouts are short on purpose: a live wait fails after 30 s without a ready snapshot (`LiveIntegration.wait_ready`). Don't raise them to make a flaky check pass; find out why it stalls.
 
 ## Which check for which change
 
@@ -49,6 +57,17 @@ Adding one (no other registration needed):
 3. **Prove it:** run it against the broken code (or temporarily reintroduce the bug) and confirm it fails with your message; then confirm it passes with the fix.
 
 `mind_stone()` is the template: it clicks Mind Stone, clicks the "Add {C}" ability in the real Forge popup, and asserts that the stone tapped and `{C}` is floating. With the old Confirm-required popup it fails with "Choosing the ability must tap Mind Stone".
+
+## Stale bridge classes
+
+If incremental Maven output looks stale (source changes seem absent), compile the bridge directly before retesting (PowerShell), then restart any running service:
+
+```
+$bridgeSources = @(Get-ChildItem -LiteralPath bridge/src/main/java -Filter *.java -Recurse | ForEach-Object { $_.FullName })
+javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/classes @bridgeSources
+javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/test-classes bridge/src/test/java/forgeui/bridge/BridgeChecks.java
+java -cp 'bridge/target/test-classes;bridge/target/classes;bridge/target/lib/*' forgeui.bridge.BridgeChecks
+```
 
 ## Other tools
 

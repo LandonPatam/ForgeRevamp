@@ -49,7 +49,7 @@ Changed files:
 | `scripts/ui/Main.gd` | Smoke suite invokes the replacement `FormatLogChecks.gd`. |
 | `tests/ApplicationIntegration.gd` | Both confirmed end paths, exact stop count, stale stop guard, unchanged deck faces, silence and final state. |
 | `tests/FormatLogChecks.gd`, `tests/FormatSequenceChecks.gd` | Gate/timeout regression plus light/dark capture matrix, resize and interruption. |
-| `AGENTS.md`, `CLAUDE_HANDOFF.txt`, this document | Current lifecycle and file-map documentation. |
+| `AGENTS.md`, this document | Current lifecycle and file-map documentation. |
 
 Verification completed:
 

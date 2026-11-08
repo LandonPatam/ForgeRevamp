@@ -5,6 +5,7 @@ import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,existsSync} from 'node:
 import {join,resolve,dirname,delimiter} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../..',import.meta.url));
+if(process.platform!=='darwin'){console.error('online-app-check.mjs drives the exported macOS app and runs only on a Mac; on Windows use bridge/tools/online-check.mjs or app-check.mjs.');process.exit(2);}
 const artifacts=join(root,'client-godot/artifacts');mkdirSync(artifacts,{recursive:true});
 const fixture=mkdtempSync(join(artifacts,'online-app-fixture-'));
 writeFileSync(join(fixture,'Scale.dck'),'[metadata]\nName=Scale test\n[Commander]\n1 Isamaru, Hound of Konda\n[Main]\n99 Plains\n');

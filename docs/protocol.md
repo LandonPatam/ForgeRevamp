@@ -8,7 +8,7 @@ The handshake supplies the latest snapshot when available. Send `{ "type": "hell
 
 All server messages carry `protocolVersion: 2`, `sessionId` (a UUID for this bridge process), and `revision` (a monotonic change counter). The current implementation has one match per process, so a session also identifies that match. State revisions can skip numbers. The counter is not a count of frames or an atomic engine transaction ID.
 
-Full `state` snapshots retain the original fields documented in `HANDOFF.md`: `me`, `game`, `players`, `stack`, `combat`, `prompt`, `log`, and `asks`. New fields:
+Full `state` snapshots retain the original fields documented in `archive/HANDOFF.md`: `me`, `game`, `players`, `stack`, `combat`, `prompt`, `log`, and `asks`. New fields:
 
 - `targetedEffects`: up to 32 retained public opposing cast/ability notices targeting this local player or their cards. Each has a monotonic `id`, `stackId`, `controller`, `controllerName`, `ability`, a source card descriptor, and `targets` (`kind`, `id`, `name`). Source/target data is frozen at the cast event so quick resolution cannot erase it. Hidden sources remain id-only and face-down targets use a generic name. Clients deduplicate by notice ID within the session; on first connection skip resolved historical notices and show ongoing ones. These are informational notifications, not blocking asks or proof of successful damage/destruction.
 

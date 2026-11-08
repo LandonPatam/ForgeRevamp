@@ -136,7 +136,7 @@ Hand and battlefield cards share full 200×281 dimensions, including lands, oppo
 - `scripts/ui/FieldDivider.gd`: draggable field dividers and double-click reset.
 - `scripts/ui/LibraryPile.gd`: native face-down stack artwork and a cancellable drag gesture; the dragged card stays hidden until the adapter publishes the draw.
 - `scripts/ui/ZoneIcon.gd`: native flag, headstone, and X icons; no icon fonts or generated images required.
-- `scripts/ui/TableBackdrop.gd`: native dark grey grid background. The previous `assets/capenna-court.jpg` is retained but unused, with its credits in [CREDITS.md](assets/CREDITS.md).
+- `scripts/ui/TableBackdrop.gd`: native dark grey grid background.
 - `scripts/ui/PromptPanel.gd`: all five generic decision forms, count/total validation, ordering, input cancellation, and acknowledgments.
 - `scripts/ui/TargetOverlay.gd`: curved target/attack arrows.
 
@@ -158,7 +158,7 @@ Zero-card bottom selections (including the first free Commander mulligan) are ac
 
 ## Verification and completion test
 
-Prepared difficult card combinations can be run with `node client-godot/tools/live-check.mjs --scenario=proliferate --render`. Available scenarios are `proliferate`, `tokens`, `reanimate`, `protection`, `blink`, and `combat`; omit `--render` for headless runs. Each uses an isolated match and checks the actual UI choices and exact resulting game state. See [the interaction test report](../docs/interaction-test-report.md) for card combinations, outcomes, limitations and a command to run all six.
+Prepared difficult card combinations can be run with `node client-godot/tools/live-check.mjs --scenario=proliferate --render`. Available scenarios are `proliferate`, `tokens`, `reanimate`, `protection`, `blink`, and `combat`; omit `--render` for headless runs. Each uses an isolated match and checks the actual UI choices and exact resulting game state. See [the interaction test report](../docs/archive/interaction-test-report.md) for card combinations, outcomes, limitations and a command to run all six.
 
 `node client-godot/tools/live-check.mjs --colorless-payment` reproduces Sol Ring plus Plains and Forest paying Forgotten Ancient's `{3}{G}` with W/G/C/C. Colorless pool payments use the bridge's corrected wire-to-Forge mapping. Ordinary artifacts now resolve automatically like creatures, and clicked casts keep a pending board card while on the stack. `--takeback` checks automatic artifact commitment and rejects undo after resolution.
 

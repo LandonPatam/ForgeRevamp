@@ -29,8 +29,8 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - `app/DeckAppearance.gd`, `CardColorSampler.gd` — persistent shell colors and source-artwork eyedropper.
 - `app/LightSwitch.gd`, `MenuFrame.gd`, `MenuAtmosphere.gdshader` — rocker/frame drawing and home background finish; room state/tween belongs to ComputerMenu.
 - `app/DiskNightLighting.gdshader`, `InsertionNightLighting.gdshader` — presentation-only carousel shading and real-light insertion-face blend.
-- `app/StartupScreen.gd`, `StartupGrid.gd`, `StartupSegments.gd` — initial service diagnostic startup and smooth bounded progress.
-- `app/MatchBootLog.gd`, `TerminalMeter.gd`, `LoadingProgress.gd` — inserted-disk log/shared blocks and pre-insertion artwork preparation.
+- `app/StartupScreen.gd`, `StartupSegments.gd` — initial service diagnostic startup and smooth bounded progress.
+- `app/MatchBootLog.gd`, `TerminalMeter.gd` — inserted-disk log and shared meter blocks.
 - `app/MatchSettings.gd`, `MatchRoster.gd`, `MatchPreferences.gd` — player/bot/deck/portrait setup and persistence.
 - `app/OnlineSession.gd` — online lobby state for host and joiner, shared by settings and Application.
 - `app/BundledService.gd` — in an exported build (no `--library-url`) starts the Java `LibraryMain` from `runtime/`, `service/` and `forge-gui/` beside the exe; `--service-port=N` overrides 7778. The service watches `--parent-pid` and exits when the game closes.
@@ -116,7 +116,8 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Ask before large refactors or renaming files. Keep diffs focused on the request.
 - Preserve existing modified/untracked work. Do not reset/clean the tree or delete user decks/caches as a routine fix.
 - Fix-and-test pipeline (details in `docs/testing.md`):
-  1. Reproduce a reported gameplay bug first with a real-engine scenario: `tests/scenarios/<name>.state` plus a `<name>()` driver in `tests/ScenarioIntegration.gd`. Confirm it fails.
+  0. Keep testing proportional: UI-only changes get one matching `ui`/`visual` check and the user's own play, no new scenario. If a check fails but the feature looks right, stop and ask the user instead of rewriting working code; never raise timeouts to pass a flaky check. Tests assert observable behavior, not exact wording, node names or pixel sizes.
+  1. Reproduce a reported gameplay (engine/rules) bug first with a real-engine scenario: `tests/scenarios/<name>.state` plus a `<name>()` driver in `tests/ScenarioIntegration.gd`. Confirm it fails.
   2. Fix the bug.
   3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
   4. Inspect captures only for visual changes (`visual <Name>`).
@@ -127,9 +128,18 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Online checks: `node bridge/tools/online-check.mjs` (real lobby, seats and hidden information; contacts no router).
 - Run suites that host online lobbies serially: they share Forge's configured online port. On Windows, test helpers must resolve `java.home` and launch its actual JVM; killing a PATH launcher shim can orphan its JVM and keep inherited output pipes open.
 - Windows build: `.\client-godot\tools\package.ps1` (add `-SkipBuild` if the bridge is already built) writes `dist/ForgeUI/` and `dist/ForgeUI-windows.zip`; needs the Godot 4.7.2 export templates (`client-godot/export_presets.cfg`) and JDK 17. It bundles a jlink runtime and Forge `res/` without `adventure/`. Installed builds keep logs/startup status in Godot's `user://service`. Keep `tests/` in the export (`Main.gd` preloads it) and list non-resource files such as JSON in the preset's include filter. To check a package, run app-check with `FORGE_EXPORTED_EXE=dist/ForgeUI/ForgeUI.exe`; release builds print almost no script errors, so a broken script just hangs.
-- Java checks: `node client-godot/tools/check.mjs bridge` (or `.\bridge\tools\test.ps1`). If incremental Maven classes are stale, use the direct javac commands in CLAUDE_HANDOFF.txt. Restart services after Java changes.
+- Java checks: `node client-godot/tools/check.mjs bridge` (or `.\bridge\tools\test.ps1`). If incremental Maven classes are stale, use the direct javac commands in `docs/testing.md`. Restart services after Java changes.
 - Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`, `testing.md`.
-- HANDOFF.md is historical and may contain superseded details. Prefer current source, this file and NOTES.md.
+- `docs/archive/` holds historical handoffs and reports (HANDOFF.md, CLAUDE_HANDOFF.txt, Mac handoffs, audits); don't read them unless a task needs that history. Prefer current source, this file and NOTES.md.
+
+## Release packaging
+
+When asked to package a build for release:
+
+- Build only with the packagers (`package.ps1` on Windows, `package-macos.py` on Mac) from a clean, committed `main`. The release is exactly their output: `dist/ForgeUI/` + `dist/ForgeUI-windows.zip`, or the Mac DMG. Never zip the repo or any folder by hand.
+- Ignore everything else. None of it belongs in a release, and none of it should be copied, zipped or uploaded: `client-godot/artifacts/` (test captures and logs), `artifacts/`, `backups/`, root `ForgeUI-*.zip` handoffs, other `dist/` folders and zips (old builds, `*-mac-transfer-*`), `*.log`, `.tools/`, `.godot/`, `bridge/target/` (the packager copies what it needs), `docs/`, `tests/scenarios/` and user decks or caches.
+- `client-godot/assets/cards/` are test fixtures, excluded from exports in `export_presets.cfg`; keep them out. The game downloads card art at runtime. A Windows game pack well over ~10 MB means something unintended got exported, so check the export filters.
+- Don't delete or tidy the ignored folders while packaging; only the user decides that. Publishing a release (tags, GitHub releases, uploads) is a separate task that needs the user's go-ahead.
 
 ## Session notes
 
