@@ -136,7 +136,7 @@ Hand and battlefield cards share full 200×281 dimensions, including lands, oppo
 - `scripts/ui/FieldDivider.gd`: draggable field dividers and double-click reset.
 - `scripts/ui/LibraryPile.gd`: native face-down stack artwork and a cancellable drag gesture; the dragged card stays hidden until the adapter publishes the draw.
 - `scripts/ui/ZoneIcon.gd`: native flag, headstone, and X icons; no icon fonts or generated images required.
-- `scripts/ui/TableBackdrop.gd`: native dark grey grid background. The previous `assets/capenna-court.jpg` is retained but unused, with its credits in [CREDITS.md](assets/CREDITS.md).
+- `scripts/ui/TableBackdrop.gd`: native dark grey grid background.
 - `scripts/ui/PromptPanel.gd`: all five generic decision forms, count/total validation, ordering, input cancellation, and acknowledgments.
 - `scripts/ui/TargetOverlay.gd`: curved target/attack arrows.
 
