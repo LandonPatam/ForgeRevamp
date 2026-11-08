@@ -29,8 +29,8 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - `app/DeckAppearance.gd`, `CardColorSampler.gd` — persistent shell colors and source-artwork eyedropper.
 - `app/LightSwitch.gd`, `MenuFrame.gd`, `MenuAtmosphere.gdshader` — rocker/frame drawing and home background finish; room state/tween belongs to ComputerMenu.
 - `app/DiskNightLighting.gdshader`, `InsertionNightLighting.gdshader` — presentation-only carousel shading and real-light insertion-face blend.
-- `app/StartupScreen.gd`, `StartupGrid.gd`, `StartupSegments.gd` — initial service diagnostic startup and smooth bounded progress.
-- `app/MatchBootLog.gd`, `TerminalMeter.gd`, `LoadingProgress.gd` — inserted-disk log/shared blocks and pre-insertion artwork preparation.
+- `app/StartupScreen.gd`, `StartupSegments.gd` — initial service diagnostic startup and smooth bounded progress.
+- `app/MatchBootLog.gd`, `TerminalMeter.gd` — inserted-disk log and shared meter blocks.
 - `app/MatchSettings.gd`, `MatchRoster.gd`, `MatchPreferences.gd` — player/bot/deck/portrait setup and persistence.
 - `app/OnlineSession.gd` — online lobby state for host and joiner, shared by settings and Application.
 - `app/BundledService.gd` — in an exported build (no `--library-url`) starts the Java `LibraryMain` from `runtime/`, `service/` and `forge-gui/` beside the exe; `--service-port=N` overrides 7778. The service watches `--parent-pid` and exits when the game closes.

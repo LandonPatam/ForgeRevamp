@@ -3080,11 +3080,6 @@ func _show_card_detail(data: Dictionary) -> void:
 	column.move_child(card_view, 1)
 	card_view.update_card(data)
 
-func _show_log() -> void:
-	if snapshot.is_empty():
-		return
-	_information("Table journal", "\n\n".join(snapshot.log))
-
 func _show_player(id: int) -> void:
 	if snapshot.is_empty():
 		return

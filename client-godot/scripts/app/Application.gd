@@ -27,8 +27,6 @@ var requests: Dictionary = {}
 var deck_request := -1
 var status_pending := false
 var content: Control
-var menu_panel: PanelContainer
-var menu_body: VBoxContainer
 var status_label: Label
 var start_button: Button
 var confirm: Control
@@ -272,24 +270,6 @@ func _button(text: String, action: Callable, primary: bool = false) -> Button:
 	button.pressed.connect(action)
 	return button
 
-func _clear_menu() -> void:
-	if menu_panel != null:
-		content.remove_child(menu_panel)
-		menu_panel.queue_free()
-	menu_panel = PanelContainer.new()
-	menu_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	menu_panel.offset_left = -460
-	menu_panel.offset_right = 460
-	menu_panel.offset_top = -340
-	menu_panel.offset_bottom = 340
-	P.style_popup(menu_panel, 32)
-	content.add_child(menu_panel)
-	menu_body = VBoxContainer.new()
-	menu_body.add_theme_constant_override("separation", 16)
-	menu_panel.add_child(menu_body)
-	status_label = null
-	start_button = null
-
 func show_menu() -> void:
 	if busy or (game != null and not parked) or not startup_done: return
 	if view == "editor" and computer != null:
@@ -328,7 +308,6 @@ func show_commander() -> void:
 	_update_status()
 
 func _ensure_computer() -> void:
-	if menu_panel != null: menu_panel.hide()
 	if computer == null:
 		computer = Computer.new()
 		computer.images = images
@@ -393,7 +372,6 @@ func _render_deck() -> void:
 func open_editor() -> void:
 	if busy or (game != null and not parked) or not startup_done: return
 	view = "editor"
-	if menu_panel != null: menu_panel.hide()
 	busy = true
 	# Move the existing room on the very first click frame. Cold editor setup
 	# and card loading happen after the movement, never before it.
@@ -747,7 +725,6 @@ func _table_can_reveal(snapshot: Dictionary, resuming: bool) -> bool:
 
 func _reveal_game(resuming: bool) -> void:
 	view = "transition"
-	if menu_panel != null: menu_panel.hide()
 	if editor != null: editor.hide()
 	computer.show()
 	game.set_transition_preview(true)

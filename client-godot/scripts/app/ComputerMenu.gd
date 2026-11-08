@@ -17,7 +17,6 @@ signal deck_filter_changed
 const P = preload("res://scripts/ui/Palette.gd")
 const World = preload("res://scripts/app/ComputerWorld.gd")
 const Carousel = preload("res://scripts/app/DeckCarousel.gd")
-const Loading = preload("res://scripts/app/LoadingProgress.gd")
 const DISPLAY_SIZE := Vector2i(1024, 744)
 ## Full light/dark room fade; a reversal mid-fade takes only the remaining share.
 const LIGHTING_SECONDS := 0.35
@@ -50,7 +49,6 @@ var boot_deck: Dictionary = {}
 var boot_setup: Dictionary = {}
 var boot_engine_ready := false
 var inserting_session := false
-var loading: Control
 var shelf: Control
 var tiles: Array = []
 var decks: Array = []
@@ -436,7 +434,6 @@ func _clear_screen() -> void:
 	status_label = Label.new()
 	monitor_body.add_child(status_label)
 	status_label.hide()
-	loading = null
 
 func present_menu() -> void:
 	present_commander()
@@ -458,26 +455,6 @@ func set_console_status(message: String, connected: bool, lobby: String = "", pa
 	if is_instance_valid(console):
 		console.set_status(message, connected, lobby)
 		console.set_party(party, lobby_ready)
-
-func show_loading() -> Control:
-	normal_body.hide()
-	boot_body.show()
-	boot_content.get_parent().show()
-	if is_instance_valid(boot_log):
-		boot_log.stop()
-		boot_log.hide()
-	if loading == null:
-		loading = Loading.new()
-		loading.compact = true
-		boot_content.add_child(loading)
-		loading.heading.add_theme_font_size_override("font_size", 43)
-		loading.detail.add_theme_font_size_override("font_size", 30)
-		loading.elapsed.add_theme_font_size_override("font_size", 25)
-		for label in [loading.detail, loading.elapsed]: label.add_theme_color_override("font_color", CRT_INK)
-		loading.progress.add_theme_stylebox_override("background", P.box(CRT_PANEL, Color("285c55"), 0, 0))
-		loading.progress.add_theme_stylebox_override("fill", P.box(Color("61cdbc"), Color.TRANSPARENT, 0, 0))
-		loading.present("READING DECK…", "Preparing Commander and two AI opponents.\nYour game will open here when ready.", "game")
-	return loading
 
 func _show_boot_log(resuming: bool = false) -> void:
 	normal_body.hide()
@@ -623,10 +600,6 @@ func set_editor_mode(enabled: bool) -> void:
 	phase = "idle"
 	_position_play_button()
 
-func scroll_by(amount: float) -> void:
-	if phase != "idle": return
-	shelf.step(1 if amount > 0 else -1)
-
 func _monitor_input(event: InputEvent) -> void:
 	if phase != "idle" or editor_progress > 0.01 or not event is InputEventMouse: return
 	var uv: Vector2 = world.screen_uv(event.position)
@@ -646,11 +619,6 @@ func _monitor_input(event: InputEvent) -> void:
 	last_monitor_position = forwarded.position
 	monitor_view.push_input(forwarded, true)
 	accept_event()
-
-func monitor_point(control: Control) -> Vector2:
-	var uv := control.get_global_rect().get_center() / Vector2(DISPLAY_SIZE)
-	var point: Vector3 = world.screen_point(uv)
-	return world.camera.unproject_position(point)
 
 func begin_launch(deck: Dictionary, setup: Dictionary) -> void:
 	if phase != "idle": return
