@@ -7,6 +7,7 @@ extends PanelContainer
 signal answered(action: String)
 signal modes_answered(id: int, picks: Array)
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+const ManaOption = preload("res://scripts/ui/ManaOption.gd")
 const BLINK_SECONDS := 0.55
 var title: Label
 var line: Label
@@ -107,10 +108,26 @@ func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 	if int(ask.get("id", -1)) != int(mode_ask.get("id", -2)):
 		mode_picks = []
 		mode_sent = false
-		for button in mode_buttons: button.queue_free()
+		for child in mode_list.get_children(): child.queue_free()
 		mode_buttons.clear()
 		var options: Array = ask.get("options", [])
-		for i in range(options.size()):
+		if _mana_tiles(ask):
+			# Plain "add one color" choices: a row of mana symbols, one click each.
+			var tiles := HBoxContainer.new()
+			tiles.alignment = BoxContainer.ALIGNMENT_CENTER
+			tiles.add_theme_constant_override("separation", 12)
+			mode_list.add_child(tiles)
+			for i in range(options.size()):
+				var tile := ManaOption.new()
+				tile.choice_tile = true
+				tile.colors = ManaOption.colors_for(str(options[i].get("label", "")))
+				tile.focus_mode = Control.FOCUS_NONE
+				tile.tooltip_text = "%d  ·  %s" % [i + 1, str(options[i].get("label", ""))]
+				tile.pressed.connect(_toggle_mode.bind(i))
+				tiles.add_child(tile)
+				tile.custom_minimum_size = Vector2(76, 76)
+				mode_buttons.append(tile)
+		for i in range(options.size() if mode_buttons.is_empty() else 0):
 			var button := _button(_toggle_mode.bind(i))
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			button.custom_minimum_size.x = 400
@@ -119,7 +136,7 @@ func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 			mode_buttons.append(button)
 	mode_ask = ask
 	mode_list.show()
-	line.custom_minimum_size.x = 400
+	line.custom_minimum_size.x = 250 if mode_buttons.any(func(button): return button is ManaOption) else 400
 	title.text = "[ %s ]" % card_name.to_upper()
 	var low := int(ask.get("min", 1))
 	var high := int(ask.get("max", 1))
@@ -132,6 +149,15 @@ func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 	no_button.visible = low == 0
 	mode_ready = ready
 	_refresh_modes()
+
+## Mana symbols instead of text when every option just adds one color, with no other cost or effect
+## (a pain land's damage keeps the text rows, so that is never hidden).
+static func _mana_tiles(ask: Dictionary) -> bool:
+	if not ask.get("manaChoice", false) or int(ask.get("max", 1)) != 1: return false
+	for option in ask.get("options", []):
+		var details := ManaOption.choice_details(str(option.get("label", "")))
+		if details.is_empty() or details.colors.size() != 1 or not str(details.cost).is_empty() or not str(details.extra).is_empty(): return false
+	return true
 
 ## Ability and mana choices answer on click; card modes toggle and wait for Confirm.
 func _instant() -> bool:
@@ -156,6 +182,9 @@ func _refresh_modes() -> void:
 	var ready := mode_ready
 	for i in range(mode_buttons.size()):
 		var picked := mode_picks.has(i)
+		if mode_buttons[i] is ManaOption:
+			mode_buttons[i].disabled = mode_sent or not ready
+			continue
 		mode_buttons[i].text = ("%d  %s" % [i + 1, mode_buttons[i].get_meta("text")]) if _instant() else "%d [%s] %s" % [i + 1, "x" if picked else " ", mode_buttons[i].get_meta("text")]
 		Terminal.button(mode_buttons[i], picked)
 		mode_buttons[i].icon = null

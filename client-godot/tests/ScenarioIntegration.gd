@@ -357,7 +357,7 @@ func triland() -> bool:
 			if label.contains("{" + code + "}"): count += 1
 		if not check(count == 1 and not label.contains(" or "), "Each tri-land choice describes only its actual selected mana: " + label): return false
 	var tether: Control = ui.interaction_panel.callout
-	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 3 and not tether.yes_button.visible, "The mana choice is a tether on the land, picked with one click: no popup"): return false
+	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 3 and tether.mode_buttons.all(func(button): return button.colors.size() == 1) and not tether.yes_button.visible, "The mana choice is a tether of mana symbols on the land, picked with one click: no popup"): return false
 	if not check(tether.title.text.contains("SANDSTEPPE CITADEL"), "The tether names its card: " + tether.title.text): return false
 	await capture("mana-options")
 	for i in range(tether.mode_buttons.size()):
