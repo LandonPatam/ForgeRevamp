@@ -114,7 +114,7 @@ func run(ui: Control, directory: String = "") -> void:
 	await ui.get_tree().process_frame
 	print("PASS: incoming spell image/target, fast resolution, deduplication, queue, reconnect and dialog suspension")
 
-## Only threats: a held, respondable effect on our things shows the popup; one we cannot answer shows a timed notice.
+## Only threats: a held, respondable effect on our things shows the popup; one we cannot answer shows the same card popup on a timer.
 func _check_auto_resolve(popup: Control) -> void:
 	popup.reset()
 	var removal := {"id": 9700, "targetsLocal": true, "card": {"id": 9701, "name": "Murder", "owner": 1}, "targets": [{"id": 9702, "kind": "card", "name": "Our creature"}], "controllerName": "Bot"}
@@ -125,17 +125,23 @@ func _check_auto_resolve(popup: Control) -> void:
 	passing.autoPassStackId = 9700
 	passing.targetedEffects = [{"id": 40, "stackId": 9700, "kind": "targeted", "source": removal.card, "targets": removal.targets}]
 	popup.present(passing)
-	assert(not popup.panel.visible and popup.active.is_empty(), "With no legal response, auto-resolve never stops on a blocking popup")
-	assert(popup.notice_panel.visible and popup.notice_title.text.contains("Murder") and popup.notice_text.text.contains("your Our creature") and popup.notice_panel.mouse_filter == Control.MOUSE_FILTER_IGNORE, "Only threats still tells you a spell targeted your things, without a stop: " + popup.notice_title.text + " / " + popup.notice_text.text)
+	assert(popup.panel.visible and int(popup.active.stackId) == 9700 and popup.active.get("noResponse", false), "Only threats still shows the card that targeted your things when you cannot respond")
+	assert(popup.title.text == "Murder" and popup.effect_arrow.visible and popup.target_cards.get_child_count() == 1, "The popup shows the source card with an arrow to the affected card")
+	assert(popup.eyebrow.text.contains("NO RESPONSE") and popup.resolve_button.text == "OK" and not popup.browse_button.visible, "It never offers a response it cannot make")
 	popup.present(passing)
-	assert(popup.notices.is_empty(), "A repeated snapshot never repeats the targeted notice")
+	assert(popup.waiting.is_empty(), "A repeated snapshot never repeats the popup")
+	var resolved := passing.duplicate(true)
+	resolved.stack = []
+	popup.present(resolved)
+	popup._process(9.0)
+	assert(popup.active.is_empty() and not popup.panel.visible, "After the effect resolves the popup closes on its own")
 	popup.reset()
 	popup.present(base)
 	var held := passing.duplicate(true)
 	held.autoPassStackId = -1
 	popup.present(held)
 	assert(popup.panel.visible and int(popup.active.stackId) == 9700 and popup.browse_button.visible, "A respondable spell aimed at us still offers Resolve / respond")
-	assert(not popup.notice_panel.visible and popup.notices.is_empty(), "A held effect shows only its blocking popup, not a duplicate notice")
+	assert(not popup.active.get("noResponse", false) and popup.waiting.is_empty(), "A held effect shows only its blocking popup, not a duplicate")
 	popup.reset()
 	popup.present(base)
 	var wipe := base.duplicate(true)
