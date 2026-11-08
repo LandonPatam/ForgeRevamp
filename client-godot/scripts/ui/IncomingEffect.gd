@@ -24,20 +24,26 @@ var waiting: Array = []
 var stack_ids: Array = []
 var latest := 0
 var initialized := false
-var remaining := 8.0
 var resolve_button: Button
 var respond_button: Button
 var browse_button: Button
 var responding: Array[int] = []
 var dismissed: Array[int] = []
 var current_state: Dictionary = {}
-## Non-blocking notices for untargeted effects on this player ("each opponent loses 1 life").
+## Small card popups for anything that is not waiting on this seat: the source card, an arrow to
+## your affected cards, and OK. They never hold the game and stay until OK (which is local only).
 var notice_panel: PanelContainer
 var notice_title: Label
+var notice_count: Label
 var notice_text: Label
+var notice_source: Control
+var notice_arrow: Control
+var notice_targets: HBoxContainer
+var notice_ok: Button
 var notices: Array = []
-var notice_tween: Tween
-const NOTICE_SECONDS := 3.2
+var notice_active: Dictionary = {}
+const NOTICE_CARD := Vector2(100, 140)
+const NOTICE_MAX_TARGETS := 3
 ## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
 const PLAYER_PORTRAIT_SIDE := 112.0
 
@@ -115,19 +121,7 @@ func _ready() -> void:
 	hover_preview.z_index = 1
 	add_child(hover_preview)
 	hover_preview.hide()
-	notice_panel = PanelContainer.new()
-	P.style_popup(notice_panel, 14)
-	notice_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var notice_column := VBoxContainer.new()
-	notice_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	notice_column.add_theme_constant_override("separation", 4)
-	notice_panel.add_child(notice_column)
-	notice_title = _label("", 13, Color("6d9fa3"))
-	notice_column.add_child(notice_title)
-	notice_text = _label("", 17, Color.WHITE)
-	notice_column.add_child(notice_text)
-	add_child(notice_panel)
-	notice_panel.hide()
+	_build_notice()
 	panel.minimum_size_changed.connect(_layout)
 	get_viewport().size_changed.connect(_layout)
 	resized.connect(_layout)
@@ -148,6 +142,11 @@ func present(state: Dictionary) -> void:
 	for completed in responding.duplicate():
 		if not stack_ids.has(completed): acknowledge_stack(completed)
 	responding.assign(responding.filter(func(id): return stack_ids.has(id)))
+	# A big popup whose item resolved while it was showing becomes a small card you can OK.
+	if not active.is_empty() and not stack_ids.has(int(active.get("stackId", -1))) and not responding.has(int(active.get("stackId", -1))):
+		_queue_notice(active)
+		active = {}
+		_next()
 	var events: Array = state.get("targetedEffects", [])
 	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
@@ -155,25 +154,22 @@ func present(state: Dictionary) -> void:
 			if int(event.id) > latest and initialized: _queue_notice(event)
 			latest = maxi(latest, int(event.id))
 			continue
-		if auto_resolve:
-			# Only threats: a held, respondable effect gets the blocking popup from _offer_priority.
-			# One this seat cannot answer still shows its card and arrow, closing on its own timer.
-			if int(event.id) > latest and initialized and event.get("kind", "") in ["targeted", "massRemoval"] and not dismissed.has(int(event.stackId)) and not _held_here(state, int(event.stackId)):
-				var shown: Dictionary = event.duplicate(true)
-				shown.noResponse = true
-				waiting.append(shown)
+		var stack_id := int(event.get("stackId", -1))
+		if int(event.id) > latest and dismissed.has(stack_id):
 			latest = maxi(latest, int(event.id))
 			continue
-		if int(event.id) > latest and (initialized or stack_ids.has(int(event.stackId))):
-			if dismissed.has(int(event.stackId)):
-				latest = maxi(latest, int(event.id))
-				continue
+		# Not waiting on this seat (already resolved, passing without a response, or Only threats
+		# with nothing to answer): the small card popup, never the decision popup.
+		var informational: bool = not stack_ids.has(stack_id) or int(state.get("autoPassStackId", -1)) == stack_id or (auto_resolve and not _held_here(state, stack_id))
+		if auto_resolve or informational:
+			if int(event.id) > latest and initialized and informational: _queue_notice(event)
+			latest = maxi(latest, int(event.id))
+			continue
+		if int(event.id) > latest and (initialized or stack_ids.has(stack_id)):
 			if int(active.get("stackId", -1)) == int(event.stackId):
-				var time_left := remaining
 				active = {}
 				waiting.push_front(event.duplicate(true))
 				_next()
-				remaining = time_left
 			elif event.get("kind", "") == "massRemoval":
 				if not active.is_empty(): waiting.push_front(active.duplicate(true))
 				active = {}
@@ -203,6 +199,7 @@ func _offer_priority(force: bool = false) -> void:
 	if not force and not auto_resolve and item.has("targetsLocal") and not item.targetsLocal: return
 	if not item.has("card") or (not force and (responding.has(id) or dismissed.has(id) or int(current_state.get("autoPassStackId", -1)) == id)): return
 	if int(active.get("stackId", -1)) == id: return
+	_drop_notice(id) # The decision popup replaces a small card for the same item.
 	var notice := {"id": -id - 1, "stackId": id, "source": item.card, "effectText": item.get("text", ""), "controllerName": item.get("controllerName", "Player"), "ability": item.get("ability", false), "targets": item.get("targets", []), "kind": "effect"}
 	if auto_resolve:
 		# Keep the bridge's board-wide/targeted framing for the one popup auto-resolve still shows.
@@ -237,9 +234,8 @@ func respond() -> void:
 
 func _update_actions() -> void:
 	var pending_effect: bool = stack_ids.has(int(active.get("stackId", -1)))
-	var no_response: bool = active.get("noResponse", false)
-	resolve_button.text = "OK" if no_response else ("Resolve" if pending_effect else "Close")
-	browse_button.visible = pending_effect and not no_response
+	resolve_button.text = "Resolve" if pending_effect else "Close"
+	browse_button.visible = pending_effect
 
 func _next() -> void:
 	_clear_hover()
@@ -248,11 +244,9 @@ func _next() -> void:
 		panel.hide()
 		return
 	active = waiting.pop_front()
-	remaining = 8.0
 	var source: Dictionary = active.get("source", {})
 	var mass_removal: bool = active.get("kind", "") == "massRemoval"
 	eyebrow.text = "BOARD-WIDE EFFECT" if mass_removal else ("SPELL / ABILITY" if active.get("kind", "") == "effect" else "TARGETED EFFECT")
-	if active.get("noResponse", false): eyebrow.text += "  ·  NO RESPONSE AVAILABLE"
 	eyebrow.add_theme_color_override("font_color", Color("ffb978") if mass_removal else Color("6d9fa3"))
 	effect_arrow.visible = not mass_removal and not active.get("targets", []).is_empty()
 	targets_scroll.visible = effect_arrow.visible
@@ -338,30 +332,131 @@ func _held_here(state: Dictionary, stack_id: int) -> bool:
 	var stack: Array = state.get("stack", [])
 	return not stack.is_empty() and int(stack[0].get("id", -1)) == stack_id and preload("res://scripts/bridge/LiveAdapter.gd").holds_for_response(state)
 
+func _build_notice() -> void:
+	notice_panel = PanelContainer.new()
+	P.style_popup(notice_panel, 14)
+	notice_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	notice_panel.add_child(column)
+	var top := HBoxContainer.new()
+	column.add_child(top)
+	notice_title = _label("", 13, Color("6d9fa3"))
+	notice_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	notice_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	notice_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	notice_title.clip_text = true
+	top.add_child(notice_title)
+	notice_count = _label("", 12, P.MUTED)
+	notice_count.autowrap_mode = TextServer.AUTOWRAP_OFF
+	top.add_child(notice_count)
+	var cards := HBoxContainer.new()
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 10)
+	column.add_child(cards)
+	notice_source = Card.new()
+	notice_source.inspection = true
+	notice_source.table_angle = false
+	notice_source.custom_minimum_size = NOTICE_CARD
+	cards.add_child(notice_source)
+	_enable_card_hover(notice_source)
+	notice_arrow = Control.new()
+	notice_arrow.custom_minimum_size = Vector2(40, NOTICE_CARD.y)
+	notice_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	notice_arrow.draw.connect(func():
+		var y := notice_arrow.size.y * 0.5
+		notice_arrow.draw_line(Vector2(2, y), Vector2(34, y), Color("bd9bf2"), 3, true)
+		notice_arrow.draw_colored_polygon(PackedVector2Array([Vector2(38, y), Vector2(26, y - 8), Vector2(26, y + 8)]), Color("bd9bf2")))
+	cards.add_child(notice_arrow)
+	notice_targets = HBoxContainer.new()
+	notice_targets.add_theme_constant_override("separation", 6)
+	cards.add_child(notice_targets)
+	notice_text = _label("", 14, P.TEXT)
+	notice_text.max_lines_visible = 3
+	notice_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	column.add_child(notice_text)
+	notice_ok = Button.new()
+	notice_ok.text = "OK"
+	notice_ok.tooltip_text = "Close this notice. It only clears your screen; the game has already moved on."
+	P.style_popup_button(notice_ok, true)
+	notice_ok.custom_minimum_size.x = 96
+	notice_ok.size_flags_horizontal = Control.SIZE_SHRINK_END
+	notice_ok.pressed.connect(close_notice)
+	column.add_child(notice_ok)
+	add_child(notice_panel)
+	notice_panel.hide()
+
 func _queue_notice(event: Dictionary) -> void:
+	var stack_id := int(event.get("stackId", -1))
+	if stack_id >= 0 and (int(notice_active.get("stackId", -2)) == stack_id or notices.any(func(queued): return int(queued.get("stackId", -2)) == stack_id)): return
 	notices.append(event.duplicate(true))
-	if notice_tween == null or not notice_tween.is_running(): _next_notice()
+	if notice_active.is_empty(): _next_notice()
+	else: _update_notice_count()
+
+## OK on the small card: clears it from this screen only, never an engine answer.
+func close_notice() -> void:
+	var stack_id := int(notice_active.get("stackId", -1))
+	if stack_id >= 0 and not dismissed.has(stack_id): dismissed.append(stack_id)
+	_clear_hover()
+	_next_notice()
+
+func _drop_notice(stack_id: int) -> void:
+	notices = notices.filter(func(queued): return int(queued.get("stackId", -2)) != stack_id)
+	if int(notice_active.get("stackId", -2)) == stack_id: _next_notice()
+	else: _update_notice_count()
 
 func _next_notice() -> void:
 	if notices.is_empty():
+		notice_active = {}
 		notice_panel.hide()
 		return
-	var event: Dictionary = notices.pop_front()
-	notice_title.text = "%s  ·  %s" % [event.get("controllerName", "Opponent"), event.get("source", {}).get("name", "Hidden source")]
-	notice_text.text = str(event.get("effectText", ""))
-	notice_panel.modulate.a = 0.0
+	notice_active = notices.pop_front()
+	var source: Dictionary = notice_active.get("source", {})
+	var kind: String = notice_active.get("kind", "")
+	var targets: Array = notice_active.get("targets", [])
+	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU")
+	notice_title.text = "%s  ·  %s  ·  %s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source")]
+	notice_title.add_theme_color_override("font_color", Color("ffb978") if kind == "massRemoval" else Color("6d9fa3"))
+	notice_source.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
+	for child in notice_targets.get_children():
+		notice_targets.remove_child(child)
+		child.queue_free()
+	for index in range(mini(targets.size(), NOTICE_MAX_TARGETS)):
+		var target: Dictionary = targets[index]
+		if target.get("kind", "") == "player":
+			var tile := _player_target(target)
+			_size_player_target(tile, NOTICE_CARD)
+			tile.get_node("PlayerName").add_theme_font_size_override("font_size", 14)
+			notice_targets.add_child(tile)
+			continue
+		var view := Card.new()
+		view.inspection = true
+		view.table_angle = false
+		view.custom_minimum_size = NOTICE_CARD
+		notice_targets.add_child(view)
+		_enable_card_hover(view)
+		view.update_card(target.get("card", {"id": target.get("id", -1), "name": target.get("name", "Target")}))
+	if targets.size() > NOTICE_MAX_TARGETS:
+		notice_targets.add_child(_label("+%d more" % (targets.size() - NOTICE_MAX_TARGETS), 14, P.MUTED))
+	notice_arrow.visible = not targets.is_empty()
+	notice_targets.visible = not targets.is_empty()
+	var names: Array = targets.map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
+	var lead := ""
+	if not names.is_empty(): lead = "Targeted " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + ".  "
+	notice_text.text = lead + str(notice_active.get("effectText", source.get("text", "")))
+	_update_notice_count()
 	notice_panel.show()
+	notice_panel.modulate.a = 0.0
+	create_tween().tween_property(notice_panel, "modulate:a", 1.0, 0.15)
 	_layout()
-	notice_tween = create_tween()
-	notice_tween.tween_property(notice_panel, "modulate:a", 1.0, 0.15)
-	notice_tween.tween_interval(NOTICE_SECONDS)
-	notice_tween.tween_property(notice_panel, "modulate:a", 0.0, 0.35)
-	notice_tween.tween_callback(_next_notice)
+
+func _update_notice_count() -> void:
+	notice_count.text = "+%d more" % notices.size() if not notices.is_empty() else ""
 
 func reset() -> void:
 	_clear_hover()
 	notices.clear()
-	if notice_tween != null: notice_tween.kill()
+	notice_active = {}
 	if notice_panel != null: notice_panel.hide()
 	active = {}
 	waiting.clear()
@@ -378,9 +473,12 @@ func _layout() -> void:
 		return
 	var available := get_viewport_rect().size
 	if notice_panel != null and notice_panel.visible:
-		notice_panel.size = Vector2(minf(520, available.x - 32), 0)
-		notice_text.custom_minimum_size.x = notice_panel.size.x - 36
-		notice_panel.position = Vector2((available.x - notice_panel.size.x) * 0.5, 24)
+		# A small card near the top of the table, out of the way of the hand and the rail.
+		var notice_width := minf(460, available.x - 32)
+		notice_text.custom_minimum_size.x = notice_width - 32
+		notice_panel.size = Vector2(notice_width, 0)
+		notice_panel.size = Vector2(notice_width, notice_panel.get_combined_minimum_size().y)
+		notice_panel.position = Vector2(clampf((available.x - notice_panel.size.x) * 0.5, 16, maxf(16, available.x - notice_panel.size.x - 16)), 24)
 	var width := minf(1040, maxf(580, available.x - 96))
 	var height := clampf(available.y - 340, 300, 540)
 	face.custom_minimum_size = Vector2(height * 144 / 202, height)
@@ -402,7 +500,7 @@ func _enable_card_hover(card: Control) -> void:
 	card.inspect_requested.connect(func(data): inspect_requested.emit(data))
 
 func _show_hover(card: Control) -> void:
-	if not panel.visible or card.data.get("hidden", false):
+	if not (panel.visible or notice_panel.visible) or card.data.get("hidden", false):
 		_clear_hover()
 		return
 	hovered_card = card
@@ -425,17 +523,12 @@ func _layout_hover() -> void:
 	hover_preview.size = Vector2(width, height)
 	hover_preview.position = Vector2(minf(hover_left_inset, size.x - width - 24) if source_on_right else size.x - width - 24, (size.y - height) * 0.5)
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
+	var suspended: bool = blocked.is_valid() and blocked.call()
+	# Required dialogs come first; a pending small card waits underneath and returns afterwards.
+	if notice_panel != null: notice_panel.visible = not notice_active.is_empty() and not suspended
 	if active.is_empty():
 		return
-	var suspended: bool = blocked.is_valid() and blocked.call()
 	panel.visible = not suspended and not responding.has(int(active.get("stackId", -1)))
 	if suspended:
 		_clear_hover()
-		return
-	if not panel.visible: return
-	if is_instance_valid(hovered_card) or stack_ids.has(int(active.stackId)) or panel.get_global_rect().has_point(get_global_mouse_position()):
-		return
-	remaining -= delta
-	if remaining <= 0:
-		_next()
