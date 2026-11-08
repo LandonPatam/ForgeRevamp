@@ -132,6 +132,15 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`, `testing.md`.
 - `docs/archive/` holds historical handoffs and reports (HANDOFF.md, CLAUDE_HANDOFF.txt, Mac handoffs, audits); don't read them unless a task needs that history. Prefer current source, this file and NOTES.md.
 
+## Release packaging
+
+When asked to package a build for release:
+
+- Build only with the packagers (`package.ps1` on Windows, `package-macos.py` on Mac) from a clean, committed `main`. The release is exactly their output: `dist/ForgeUI/` + `dist/ForgeUI-windows.zip`, or the Mac DMG. Never zip the repo or any folder by hand.
+- Ignore everything else. None of it belongs in a release, and none of it should be copied, zipped or uploaded: `client-godot/artifacts/` (test captures and logs), `artifacts/`, `backups/`, root `ForgeUI-*.zip` handoffs, other `dist/` folders and zips (old builds, `*-mac-transfer-*`), `*.log`, `.tools/`, `.godot/`, `bridge/target/` (the packager copies what it needs), `docs/`, `tests/scenarios/` and user decks or caches.
+- `client-godot/assets/cards/` are test fixtures, excluded from exports in `export_presets.cfg`; keep them out. The game downloads card art at runtime. A Windows game pack well over ~10 MB means something unintended got exported, so check the export filters.
+- Don't delete or tidy the ignored folders while packaging; only the user decides that. Publishing a release (tags, GitHub releases, uploads) is a separate task that needs the user's go-ahead.
+
 ## Session notes
 
 - At the start of a task, read `NOTES.md`.
