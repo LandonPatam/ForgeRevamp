@@ -173,6 +173,14 @@ final class GameStateJson {
                     ? "Waiting for " + waiting.getName() + "." : "Waiting for Forge.");
         }
         prompt.addProperty("inputKind", input == null ? "InputLockUI" : inputKind(input.getClass()));
+        if (currentPrompt && !prompt.has("cardId") && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
+            // Cost confirmations ("Sacrifice Evolving Wilds?") omit their card; the table attaches them to it.
+            CardView host = confirmSource(confirm);
+            if (host != null) {
+                cards.put(host.getId(), host);
+                prompt.addProperty("cardId", host.getId());
+            }
+        }
         if (prompt.has("cardId")) {
             CardView source = cards.get(prompt.get("cardId").getAsInt());
             if (source != null) prompt.add("sourceCard", describeCard(source, gui.mayView(source)));
@@ -234,6 +242,20 @@ final class GameStateJson {
         root.add("log", log);
         root.add("asks", toArray(gui.openAsks()));
         return root;
+    }
+
+    /** Forge keeps the confirming ability private; its host card is the card being asked about. */
+    static CardView confirmSource(forge.gamemodes.match.input.InputConfirm confirm) {
+        try {
+            var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");
+            field.setAccessible(true);
+            if (field.get(confirm) instanceof forge.game.spellability.SpellAbility ability && ability.getHostCard() != null) {
+                return ability.getHostCard().getView();
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // A Forge update renamed the field: fall back to the unattached prompt.
+        }
+        return null;
     }
 
     private JsonObject playerChoice(PlayerView player) {

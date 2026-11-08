@@ -14,7 +14,7 @@ func run(ui: Control, directory: String = "") -> void:
 	var at_player := {"connectionReady": true, "prompt": {"inputKind": "InputPassPriority"}, "players": [{"id": 0, "engineId": 41, "name": "Landon", "avatar": 3, "life": 40}], "stack": [], "targetedEffects": [{"id": 1, "stackId": 8100, "controllerName": "Opponent", "source": {"id": 8101, "name": "Lightning Bolt"}, "targets": [{"id": 41, "kind": "player", "name": "Landon"}]}]}
 	popup.present({"stack": [], "targetedEffects": []})
 	popup.present(at_player)
-	var tile: Control = popup.target_cards.get_child(0)
+	var tile: Control = popup.notice_targets.get_child(0) # Already resolved: the small card popup.
 	assert(tile.has_meta("player_target") and tile.get_node("Portrait").portrait != null, "A targeted player shows their Forge portrait")
 	assert(tile.get_node("Portrait").custom_minimum_size.x <= 112.0, "The 100 px Forge portrait is not stretched to card size")
 	assert(tile.get_node("PlayerName").text.begins_with("Landon") and tile.get_node("PlayerName").autowrap_mode == TextServer.AUTOWRAP_OFF, "The player's name sits under the portrait on one line")
@@ -24,9 +24,9 @@ func run(ui: Control, directory: String = "") -> void:
 	popup.acknowledged.connect(func(stack_id): acknowledged.append(stack_id))
 	popup.present({"stack": [], "targetedEffects": []})
 	var event := {"id": 1, "stackId": 9900, "controllerName": "Opponent", "source": {"id": 9901, "name": "Mortify", "imageKey": "c:Mortify|ACR|1", "text": "Destroy target creature or enchantment.", "typeLine": "Instant", "color": "B"}, "targets": [{"id": 9902, "kind": "card", "name": "Atraxa, Praetors' Voice"}]}
-	var state := {"stack": [], "targetedEffects": [event]}
+	var state := {"stack": [{"id": 9900}], "targetedEffects": [event]}
 	popup.present(state)
-	assert(popup.active.id == 1 and popup.panel.visible, "A fast targeted spell must show even after it has left the stack")
+	assert(popup.active.id == 1 and popup.panel.visible, "A targeted spell still on the stack shows the decision popup")
 	assert(popup.title.text == "Mortify" and popup.targets.text.contains("Atraxa") and popup.face.face.full_image != null)
 	popup.face.mouse_entered.emit()
 	assert(popup.hover_preview.visible and popup.hover_preview.data.id == 9901 and popup.hover_preview.size.y >= 450, "Hovering the spell must show its normal enlarged preview")
@@ -39,9 +39,8 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(popup.hover_preview.visible, "A previous card's exit must not hide the new preview")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-target-hover-1600.png"))
 	target.mouse_exited.emit()
-	popup.remaining = 5
 	popup.present(state)
-	assert(popup.remaining == 5 and popup.waiting.is_empty(), "Repeated snapshots must not repeat or restart the popup")
+	assert(popup.active.id == 1 and popup.waiting.is_empty() and popup.notices.is_empty(), "Repeated snapshots must not repeat or restart the popup")
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("incoming-mortify-1600.png"))
 		ui.capture_size = Vector2i(1280, 800)
@@ -61,6 +60,7 @@ func run(ui: Control, directory: String = "") -> void:
 	var second: Dictionary = event.duplicate(true)
 	second.id = 2
 	second.stackId = 9910
+	state.stack = [{"id": 9910}, {"id": 9900}]
 	state.targetedEffects.append(second)
 	popup.present(state)
 	assert(popup.waiting.size() == 1)
@@ -69,10 +69,11 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(acknowledged == [9900], "Popup acknowledgment must identify the dismissed effect, not the next queued effect")
 	popup.dismiss()
 	popup.present(state)
-	assert(popup.active.is_empty() and not popup.panel.visible, "Dismissed events must not reappear on reconnect snapshots")
+	assert(popup.active.is_empty() and not popup.panel.visible and popup.notice_active.is_empty(), "Dismissed events must not reappear on reconnect snapshots")
 	popup.reset()
+	state.stack = []
 	popup.present(state)
-	assert(popup.active.is_empty(), "Initial connections must not replay old resolved spells")
+	assert(popup.active.is_empty() and popup.notice_active.is_empty(), "Initial connections must not replay old resolved spells")
 	popup.reset()
 	state.stack = [{"id": 9910}]
 	popup.present(state)
@@ -80,13 +81,13 @@ func run(ui: Control, directory: String = "") -> void:
 	popup.face.mouse_entered.emit()
 	popup.blocked = func(): return true
 	popup._process(20)
-	assert(not popup.panel.visible and popup.remaining == 8 and not popup.hover_preview.visible, "Required dialogs must pause notification expiry and hide magnification")
+	assert(not popup.panel.visible and popup.active.id == 2 and not popup.hover_preview.visible, "Required dialogs hide the popup and magnification without losing it")
 	popup.reset()
 	popup.blocked = Callable()
 	popup.present({"stack": [], "targetedEffects": []})
-	popup.present({"stack": [], "targetedEffects": [event]})
+	popup.present({"stack": [{"id": 9900}], "targetedEffects": [event]})
 	var wipe := {"id": 3, "stackId": 9920, "kind": "massRemoval", "controllerName": "Opponent", "source": {"id": 9921, "name": "Toxic Deluge", "text": "As an additional cost to cast this spell, pay X life.\nAll creatures get -X/-X until end of turn.", "typeLine": "Sorcery"}, "targets": []}
-	popup.present({"stack": [], "targetedEffects": [event, wipe]})
+	popup.present({"stack": [{"id": 9920}, {"id": 9900}], "targetedEffects": [event, wipe]})
 	assert(popup.active.id == 3 and popup.eyebrow.text == "BOARD-WIDE EFFECT" and not popup.effect_arrow.visible and not popup.targets_scroll.visible, "An untargeted wipe must interrupt older notices with its own card popup")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("board-wipe-notice-1280.png"))
 	popup.dismiss()
@@ -114,24 +115,48 @@ func run(ui: Control, directory: String = "") -> void:
 	await ui.get_tree().process_frame
 	print("PASS: incoming spell image/target, fast resolution, deduplication, queue, reconnect and dialog suspension")
 
-## Auto-resolve: no after-the-fact notices; only a held, respondable effect on our things shows the popup.
+## Anything not waiting on this seat is a small card popup that stays until OK and answers nothing.
 func _check_auto_resolve(popup: Control) -> void:
 	popup.reset()
+	var acknowledged: Array[int] = []
+	popup.acknowledged.connect(func(stack_id): acknowledged.append(stack_id))
 	var removal := {"id": 9700, "targetsLocal": true, "card": {"id": 9701, "name": "Murder", "owner": 1}, "targets": [{"id": 9702, "kind": "card", "name": "Our creature"}], "controllerName": "Bot"}
 	var base := {"autoResolveAll": true, "connectionReady": true, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": [], "stack": [], "targetedEffects": []}
 	popup.present(base)
 	var passing := base.duplicate(true)
 	passing.stack = [removal]
 	passing.autoPassStackId = 9700
-	passing.targetedEffects = [{"id": 40, "stackId": 9700, "kind": "targeted", "source": removal.card, "targets": removal.targets}]
+	passing.targetedEffects = [{"id": 40, "stackId": 9700, "kind": "targeted", "controllerName": "Bot", "source": removal.card, "targets": [{"id": 9702, "kind": "card", "name": "Our creature", "card": {"id": 9702, "name": "Our creature"}}], "effectText": "Destroy target creature."}]
 	popup.present(passing)
-	assert(not popup.panel.visible and popup.active.is_empty(), "With no legal response, auto-resolve shows no popup")
+	assert(not popup.panel.visible and popup.active.is_empty(), "With no response the game is never held by a big popup")
+	assert(popup.notice_panel.visible and int(popup.notice_active.stackId) == 9700, "Only threats still shows a popup when you cannot respond")
+	assert(popup.notice_source.data.get("name", "") == "Murder" and popup.notice_arrow.visible and popup.notice_targets.get_child_count() == 1 and popup.notice_targets.get_child(0).data.get("name", "") == "Our creature", "The popup shows the source card with an arrow to your affected card")
+	assert(popup.notice_panel.size.x <= 520 and popup.notice_ok.visible, "It is a small popup with an OK button, not a full-screen panel")
+	var view_size: Vector2 = popup.get_viewport_rect().size
+	popup.table_rect = Rect2(view_size * Vector2(0.05, 0.1), view_size * Vector2(0.7, 0.8))
+	popup._layout()
+	var wanted: Vector2 = popup.table_rect.get_center() - popup.notice_panel.size * 0.5
+	wanted = Vector2(clampf(wanted.x, 16, maxf(16, view_size.x - popup.notice_panel.size.x - 16)), clampf(wanted.y, 16, maxf(16, view_size.y - popup.notice_panel.size.y - 16))).round()
+	assert(popup.notice_panel.position.distance_to(wanted) < 2.0, "The small popup sits in the middle of the table (kept on screen): " + str([popup.notice_panel.get_rect(), popup.table_rect]))
+	popup.table_rect = Rect2()
+	popup.present(passing)
+	assert(popup.notices.is_empty(), "A repeated snapshot never repeats the popup")
+	var resolved := passing.duplicate(true)
+	resolved.stack = []
+	popup.present(resolved)
+	popup._process(30.0)
+	assert(popup.notice_panel.visible, "The popup waits for OK after the effect resolves")
+	popup.notice_ok.pressed.emit()
+	assert(not popup.notice_panel.visible and acknowledged.is_empty(), "OK only closes it locally; it never answers the engine")
+	popup.present(resolved)
+	assert(popup.notice_active.is_empty(), "A closed popup never comes back")
 	popup.reset()
 	popup.present(base)
 	var held := passing.duplicate(true)
 	held.autoPassStackId = -1
 	popup.present(held)
 	assert(popup.panel.visible and int(popup.active.stackId) == 9700 and popup.browse_button.visible, "A respondable spell aimed at us still offers Resolve / respond")
+	assert(popup.notice_active.is_empty() and popup.notices.is_empty(), "A held effect shows only its decision popup, not a duplicate")
 	popup.reset()
 	popup.present(base)
 	var wipe := base.duplicate(true)
@@ -140,8 +165,21 @@ func _check_auto_resolve(popup: Control) -> void:
 	popup.present(wipe)
 	assert(popup.panel.visible and popup.eyebrow.text == "BOARD-WIDE EFFECT", "A respondable board wipe keeps its board-wide popup")
 	popup.reset()
+	# Smart: a decision popup left showing when its effect resolves becomes a small card to OK.
+	var smart := {"connectionReady": true, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "stack": [], "targetedEffects": []}
+	popup.present(smart)
+	var aimed := smart.duplicate(true)
+	aimed.stack = [removal]
+	aimed.targetedEffects = passing.targetedEffects
+	popup.present(aimed)
+	assert(popup.panel.visible and int(popup.active.stackId) == 9700)
+	var gone := aimed.duplicate(true)
+	gone.stack = []
+	popup.present(gone)
+	assert(not popup.panel.visible and popup.notice_panel.visible and int(popup.notice_active.stackId) == 9700, "A resolved effect stays as a small card until OK instead of vanishing")
+	popup.reset()
 
-## "Each opponent loses 1 life": a timed notice, never the blocking popup or a decision.
+## "Each opponent loses 1 life": a small card with its source, never the blocking popup or a decision.
 func _check_notice(popup: Control) -> void:
 	popup.reset()
 	var base := {"stack": [], "targetedEffects": []}
@@ -149,8 +187,9 @@ func _check_notice(popup: Control) -> void:
 	var drain := {"stack": [], "targetedEffects": [{"id": 60, "stackId": 9800, "kind": "notice", "controllerName": "Bot", "source": {"id": 9801, "name": "Blood Artist"}, "effectText": "Target player loses 1 life and you gain 1 life.", "targets": []}]}
 	popup.present(drain)
 	assert(popup.notice_panel.visible and not popup.panel.visible and popup.active.is_empty(), "A player notice shows without blocking or asking")
-	assert(popup.notice_title.text.contains("Blood Artist") and popup.notice_panel.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	assert(popup.notice_title.text.contains("Blood Artist") and popup.notice_source.data.get("name", "") == "Blood Artist" and not popup.notice_arrow.visible, "The notice shows the card it came from")
 	popup.present(drain)
 	assert(popup.notices.is_empty(), "A repeated snapshot never repeats a notice")
-	popup.reset()
+	popup.close_notice()
 	assert(not popup.notice_panel.visible)
+	popup.reset()

@@ -18,7 +18,7 @@ func run(ui: Control, directory: String = "") -> void:
 	await ui.get_tree().process_frame
 	await ui.get_tree().process_frame
 	await ui.get_tree().process_frame
-	assert(panel.preview.size.y == 300 and is_equal_approx(panel.preview.size.x / panel.preview.size.y, 144.0 / 202), "A multi-row gallery must not stretch its right-side card preview")
+	assert(is_equal_approx(panel.preview.size.y, panel.PREVIEW_SIZE.y) and is_equal_approx(panel.preview.size.x / panel.preview.size.y, 144.0 / 202), "A long result list must not stretch the card preview: " + str(panel.preview.size))
 	if not directory.is_empty():
 		panel.position = Vector2(16, 16)
 		await ui._save_frame(directory.path_join("selection-preview-proportions-1600.png"))
@@ -30,7 +30,7 @@ func run(ui: Control, directory: String = "") -> void:
 		await ui.get_tree().process_frame
 		await ui.get_tree().process_frame
 		await ui._save_frame(directory.path_join("selection-preview-proportions-1280.png"))
-		assert(panel.get_global_rect().end.x <= 1280 and panel.preview.size.y == 300, "Popup previews and their gallery must fit the narrower screen without squeezing")
+		assert(panel.get_global_rect().end.x <= 1280 and is_equal_approx(panel.preview.size.y, panel.PREVIEW_SIZE.y), "Popup previews and their gallery must fit the narrower screen without squeezing")
 		ui.capture_size = Vector2i(1600, 1000)
 		ui.get_window().size = ui.capture_size
 		await ui.get_tree().create_timer(0.2).timeout

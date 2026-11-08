@@ -26,6 +26,11 @@ var state: Dictionary = {}
 var description: Dictionary = {}
 var suspended := true
 var decision_key := ""
+## Yes/no confirmations about a visible card attach to it instead of the top banner.
+var callout: PanelContainer
+var callout_card: Control
+const CALLOUT_GAP := 34.0
+const RAIL_WIDTH := 316.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -71,6 +76,9 @@ func _ready() -> void:
 	resized.connect(_layout)
 	panel.minimum_size_changed.connect(_layout)
 	panel.hide()
+	callout = preload("res://scripts/ui/CardCallout.gd").new()
+	callout.answered.connect(func(action): action_requested.emit(action))
+	add_child(callout)
 
 func _label(font_size: int, color: Color) -> Label:
 	var label := Label.new()
@@ -97,6 +105,14 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	suspended = blocked
 	description = Flow.describe(state)
 	panel.visible = not suspended and not description.is_empty()
+	callout_card = _callout_card() if panel.visible else null
+	callout.visible = callout_card != null
+	if callout.visible:
+		panel.hide()
+		var ask: Dictionary = state.prompt
+		var ready_now: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
+		callout.present(str(ask.get("sourceCard", {}).get("name", "Card")), str(ask.get("message", "")), str(ask.get("okLabel", "Yes")), str(ask.get("cancelLabel", "No")), ready_now and ask.get("okEnabled", false), ready_now and ask.get("cancelEnabled", false))
+		_place_callout()
 	if not panel.visible:
 		queue_redraw()
 		return
@@ -151,6 +167,36 @@ func _picks_from_board() -> bool:
 	var kind: String = state.get("prompt", {}).get("inputKind", "")
 	return kind.begins_with("InputSelect") or kind.begins_with("InputPayMana")
 
+## The table card a plain yes/no confirmation is about, when it is on screen.
+func _callout_card() -> Control:
+	var prompt: Dictionary = state.get("prompt", {})
+	if description.get("kind", "") != "InputConfirm" or prompt.get("sourceCard", {}).is_empty() or prompt.get("sourceCard", {}).get("hidden", false): return null
+	var view: Control = cards.get(int(prompt.sourceCard.get("id", -1)))
+	return view if is_instance_valid(view) and view.is_visible_in_tree() else null
+
+func _card_rect(view: Control) -> Rect2:
+	var to_local: Transform2D = get_global_transform().affine_inverse() * view.get_global_transform()
+	var bounds := Rect2(to_local * Vector2.ZERO, Vector2.ZERO)
+	for corner in [Vector2(view.size.x, 0), view.size, Vector2(0, view.size.y)]: bounds = bounds.expand(to_local * corner)
+	return bounds
+
+## Beside the card (right, else left, else below), clear of the rail and kept on screen.
+func _place_callout() -> void:
+	if not is_instance_valid(callout_card): return
+	callout.reset_size()
+	var box: Vector2 = callout.size
+	var card := _card_rect(callout_card)
+	var right_limit := size.x - RAIL_WIDTH
+	var at := Vector2(card.end.x + CALLOUT_GAP, card.get_center().y - box.y * 0.5)
+	if at.x + box.x > right_limit:
+		at.x = card.position.x - CALLOUT_GAP - box.x
+		if at.x < 8:
+			at = Vector2(card.get_center().x - box.x * 0.5, card.end.y + CALLOUT_GAP)
+			if at.y + box.y > size.y - 8: at.y = card.position.y - CALLOUT_GAP - box.y
+	at.x = clampf(at.x, 8, maxf(8, right_limit - box.x))
+	at.y = clampf(at.y, 8, maxf(8, size.y - box.y - 8))
+	callout.position = at.round()
+
 func uses_stack_rail() -> bool:
 	return panel != null and panel.visible and (state.get("prompt", {}).has("selectionShortcut") or state.get("prompt", {}).get("inputKind", "") in ["InputAttack", "InputBlock"] or _picks_from_board())
 
@@ -185,12 +231,28 @@ func _layout() -> void:
 	panel.position = Vector2(maxf(110, (size.x - 300 - width) * 0.5), 20)
 
 func _process(_delta: float) -> void:
+	if callout.visible:
+		if not is_instance_valid(callout_card) or not callout_card.is_visible_in_tree():
+			present(state, suspended, cards, player_views)
+		else:
+			_place_callout()
+		queue_redraw()
 	if panel.visible: queue_redraw()
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not callout.visible or not event is InputEventKey or not event.pressed or event.echo: return
+	if event.keycode == KEY_Y and not callout.yes_button.disabled:
+		callout.yes_button.pressed.emit()
+		get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_N and callout.no_button.visible and not callout.no_button.disabled:
+		callout.no_button.pressed.emit()
+		get_viewport().set_input_as_handled()
 
 func _exit_tree() -> void:
 	if is_instance_valid(panel) and panel.get_parent() != self: panel.queue_free()
 
 func _draw() -> void:
+	if callout.visible and is_instance_valid(callout_card): _draw_callout_link()
 	if suspended or description.is_empty() or not str(description.get("kind", "")).begins_with("InputSelect"): return
 	var offered: Array = state.get("prompt", {}).get("cards", [])
 	var chosen: Array = state.get("prompt", {}).get("chosen", [])
@@ -211,3 +273,32 @@ func _draw() -> void:
 		draw_set_transform_matrix(get_global_transform().affine_inverse() * avatar.get_global_transform())
 		draw_style_box(frame, Rect2(Vector2(-3, -3), avatar.size + Vector2(6, 6)))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## A pulsing outline on the card and a leader line from its edge to the callout box.
+func _draw_callout_link() -> void:
+	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+	var glow := Color(Terminal.ACCENT, pulse)
+	draw_set_transform_matrix(get_global_transform().affine_inverse() * callout_card.get_global_transform())
+	var frame := P.box(Color.TRANSPARENT, glow, 9, 0)
+	frame.set_border_width_all(3)
+	draw_style_box(frame, Rect2(Vector2(-5, -5), callout_card.size + Vector2(10, 10)))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+	var card := _card_rect(callout_card).grow(5)
+	var box := Rect2(callout.position, callout.size)
+	var start: Vector2
+	var finish: Vector2
+	if box.position.x >= card.end.x:
+		start = Vector2(card.end.x, card.get_center().y)
+		finish = Vector2(box.position.x, clampf(start.y, box.position.y + 12, box.end.y - 12))
+	elif box.end.x <= card.position.x:
+		start = Vector2(card.position.x, card.get_center().y)
+		finish = Vector2(box.end.x, clampf(start.y, box.position.y + 12, box.end.y - 12))
+	elif box.position.y >= card.end.y:
+		start = Vector2(card.get_center().x, card.end.y)
+		finish = Vector2(clampf(start.x, box.position.x + 12, box.end.x - 12), box.position.y)
+	else:
+		start = Vector2(card.get_center().x, card.position.y)
+		finish = Vector2(clampf(start.x, box.position.x + 12, box.end.x - 12), box.end.y)
+	draw_line(start, finish, Terminal.ACCENT, 2.0, true)
+	draw_circle(start, 4.0, Terminal.ACCENT)
+	draw_rect(Rect2(finish - Vector2(3, 3), Vector2(6, 6)), Terminal.ACCENT)

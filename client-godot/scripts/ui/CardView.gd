@@ -21,6 +21,8 @@ var data: Dictionary = {}
 var selected := false
 var inspection := false
 var zone_browser := false
+## The lifted copy of a hand card keeps the hand overlays its original draws at rest.
+var hand_copy := false
 var resting_position := Vector2.ZERO
 var hover_active := false
 var animation: Tween
@@ -40,6 +42,11 @@ const STATS_HEIGHT := 22.0
 const STATS_FONT := 16.0
 const TraitIcons = preload("res://scripts/ui/TraitIcons.gd")
 const ManaCounter = preload("res://scripts/ui/ManaCounter.gd")
+const ManaPips = preload("res://scripts/ui/ManaPips.gd")
+## Table settings: mana-cost pips across your hand cards, and a glow on cards Forge says you can play now.
+static var mana_overlay := false
+static var playable_glow := true
+const PLAYABLE_GLOW := Color("b48cff")
 var surface: SubViewport
 var visual: TextureRect
 var table_angle := true
@@ -136,6 +143,25 @@ func _draw_chosen_colors() -> void:
 		var baseline := center + Vector2(-width * 0.5, (ManaCounter.ICON_FONT.get_ascent(glyph_size) - ManaCounter.ICON_FONT.get_descent(glyph_size)) * 0.5)
 		trait_layer.draw_string(ManaCounter.ICON_FONT, baseline, glyph, HORIZONTAL_ALIGNMENT_LEFT, -1, glyph_size, Color("17191a"))
 
+## Your playable cards glow purple; hand cards can also show their cost as large mana pips.
+func _draw_hand_overlays() -> void:
+	if (inspection and not hand_copy) or data.get("faceDown", false): return
+	var unit := size.x / 144.0
+	var body := Rect2(Vector2.ZERO, size)
+	if playable_glow and data.get("playable", false):
+		for ring in range(4):
+			var grow := (1.5 + ring * 2.2) * unit
+			var box := StyleBoxFlat.new()
+			box.bg_color = Color.TRANSPARENT
+			box.border_color = Color(PLAYABLE_GLOW, 0.85 - ring * 0.2)
+			box.set_border_width_all(maxi(1, int(round(2.2 * unit))))
+			box.set_corner_radius_all(int((7 + ring * 2) * unit))
+			box.anti_aliasing = true
+			trait_layer.draw_style_box(box, body.grow(grow))
+	if mana_overlay and data.get("zone", "") == "Hand":
+		var margin := 6.0 * unit
+		ManaPips.draw(trait_layer, str(data.get("manaCost", "")), Vector2(margin, 24.0 * unit), 13.0 * unit, size.x - margin * 2.0)
+
 func _borderless_box(radius: int) -> StyleBoxFlat:
 	var box := P.box(Color("11171e"), Color.TRANSPARENT, radius, 0)
 	box.set_border_width_all(0)
@@ -168,7 +194,10 @@ func _draw_stats() -> void:
 	stats_layer.draw_string(font, Vector2(rect.position.x, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, Color.WHITE)
 
 func _draw_traits() -> void:
-	if data.get("zone", "") != "Battlefield" or data.get("hidden", false): return
+	if data.get("hidden", false): return
+	if data.get("zone", "") != "Battlefield":
+		_draw_hand_overlays()
+		return
 	if data.get("faceDown", false): return
 	_draw_chosen_colors()
 	if not show_traits: return

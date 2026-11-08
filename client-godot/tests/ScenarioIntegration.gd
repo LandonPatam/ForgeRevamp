@@ -39,6 +39,10 @@ func prepared() -> bool:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
 		if scenario == "blocking" and state.prompt.get("inputKind", "") == "InputBlock": return true
+		# The fixture jumps to turn 5 straight after the starting roll; finish that animation as a player would.
+		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
+			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
+			ui._close_modal()
 		if scenario != "blocking" and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
@@ -47,7 +51,7 @@ func prepared() -> bool:
 		elif state.prompt.get("inputKind", "") == "InputConfirmMulligan": ui.opening_hand.submit("ok")
 		elif StartingPlayerDialog.needs_selection(state) and ui.modal_panel is StartingPlayerDialog: ui.modal_panel.buttons[0].pressed.emit()
 		elif state.prompt.okEnabled: ui._primary_action()
-	return check(false, "Prepared board did not load")
+	return check(false, "Prepared board did not load: turn=%s input=%s asks=%s modal=%s incoming=%s stack=%s" % [ui.snapshot.get("game", {}).get("turn", -1), ui.snapshot.get("prompt", {}).get("inputKind", ""), ui.snapshot.get("asks", []).map(func(ask): return [ask.kind, ask.get("title", "")]), (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), ui.incoming_effect.panel.visible, ui.snapshot.get("stack", []).size()])
 
 func settle() -> bool:
 	for index in range(80):
@@ -83,7 +87,7 @@ func select_named(name: String) -> bool:
 			ui.interaction_panel.confirm_button.pressed.emit()
 			return await wait_ready()
 		return true
-	if not check(ui.modal_panel is SelectionDialog and ui.modal.visible, "Expected visible card gallery for " + name + ": " + str(ui.snapshot.prompt)): return false
+	if not check(ui.modal_panel is SelectionDialog and ui.modal.visible, "Expected visible card gallery for " + name + " (open modal: " + (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none") + ", decision panel visible: " + str(ui.interaction_panel.panel.visible) + "): " + str(ui.snapshot.prompt)): return false
 	for index in range(ui.modal_panel.options.size()):
 		if ui.modal_panel.options[index].get("name", "") == name:
 			ui.modal_panel.option_buttons[index].pressed.emit()
@@ -632,3 +636,117 @@ func run_scenario(table: Control, name: String) -> void:
 	if not passed: return
 	print("PASS: Godot live integration (prepared ", name, " card-combination scenario; UI choices and exact resulting game state)")
 	ui.get_tree().quit()
+
+## Dimir Aqueduct with no other land returns itself: the play is accepted (land drop used), the turn stays usable.
+func aqueduct() -> bool:
+	var land := find_card("Dimir Aqueduct")
+	ui._click_card(land.id)
+	if not await settle(): return false
+	for index in range(30):
+		await ui.get_tree().process_frame
+	print("SCENARIO log: ", ui.snapshot.log.slice(0, 6))
+	await capture("returned")
+	if not check(zone("Hand").any(func(card): return card.id == land.id), "The Aqueduct returns itself to hand"): return false
+	if not check(not ui.play_positions.has(land.id) and ui.cards[land.id].get_parent() == ui.hand_root, "The returned Aqueduct is back in the hand fan, not a stuck pending play"): return false
+	if not check(ui.toast.text.contains("Dimir Aqueduct") and ui.toast.text.contains("returned"), "A clear message explains the Aqueduct returned and the land drop is used: " + ui.toast.text): return false
+	if not await cast("Ornithopter"): return false
+	if not await settle(): return false
+	return check(zone("Battlefield").any(func(card): return card.name == "Ornithopter"), "The turn continues: another spell can still be cast")
+
+func describe_ui(label: String) -> void:
+	print("SCENARIO ", label, ": modal=", ui.modal.visible, " panel=", (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else str(ui.modal_panel)), " center=", ui.modal_center.visible, " return=", ui.decision_board_button.visible, " rail=", ui.interaction_panel.panel.visible, " asks=", ui.snapshot.asks.map(func(ask): return [ask.kind, ask.get("title", "")]), " input=", ui.snapshot.prompt.get("inputKind", ""), " msg=", str(ui.snapshot.prompt.get("message", "")).left(80))
+
+## Bonders' Enclave's ability choice can be stepped away from and always found again.
+func enclave() -> bool:
+	var land := find_card("Bonders' Enclave", "Battlefield")
+	ui._click_card(land.id)
+	if not await wait_ready(): return false
+	if not check(ui.modal.visible and ui.snapshot.asks.any(func(ask): return ask.get("title", "") == "Choose ability"), "Clicking Bonders' Enclave opens Forge's ability choice"): return false
+	ui.modal_panel.board_requested.emit()
+	for index in range(60): await ui.get_tree().process_frame
+	describe_ui("viewing board")
+	var button: Rect2 = ui.decision_board_button.get_global_rect()
+	var table: Rect2 = ui.board_scroller.get_global_rect()
+	if not check(ui.decision_board_button.is_visible_in_tree() and not ui.modal_center.visible, "Viewing the board keeps a Return to decision control"): return false
+	if not check(button.get_center().distance_to(table.get_center()) < 4.0 and button.size.x >= 300, "Return to decision sits large in the middle of the table: " + str(button) + " / " + str(table)): return false
+	if not check(ui.decision_board_button.modulate.a < 0.9, "Return to decision is see-through over the table"): return false
+	await capture("return")
+	ui.decision_board_button.pressed.emit()
+	if not check(ui.modal_center.visible and not ui.decision_board_button.visible and ui.modal_panel.get_script().resource_path.ends_with("PromptPanel.gd"), "Return to decision restores the same ability choice"): return false
+	var hand := int(ui.snapshot.players[0].handCount)
+	if not await choose_named("Draw"): return false
+	for index in range(40):
+		if str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputPayMana") and ui.snapshot.prompt.okEnabled:
+			if ui.modal_panel is ManaPaymentDialog and ui.modal.visible: ui.modal_panel.sources_button.pressed.emit()
+			else:
+				var swamp: Array = zone("Battlefield").filter(func(card): return card.name == "Swamp" and not card.get("tapped", false))
+				if not check(not swamp.is_empty(), "A Swamp pays the Enclave's {3}"): return false
+				ui._click_card(swamp[0].id)
+			if not await wait_ready(): return false
+		elif int(ui.snapshot.players[0].handCount) > hand or not ui.snapshot.stack.is_empty(): break
+		await ui.get_tree().create_timer(0.1).timeout
+	if not await settle(): return false
+	return check(int(ui.snapshot.players[0].handCount) == hand + 1, "The returned decision still activates the draw ability")
+
+## Forge's priority scan marks what is castable now: affordable hand cards, the commander and flashback.
+func playable() -> bool:
+	for index in range(20): await ui.get_tree().process_frame
+	var flag := func(name: String, zone_name: String) -> bool:
+		for card in ui.snapshot.players[0].zones[zone_name]:
+			if card.name == name: return ui._playable(card, 0, zone_name)
+		return false
+	print("SCENARIO playable: ", ["Ornithopter", "Mind Stone", "Craw Wurm"].map(func(name): return [name, flag.call(name, "Hand")]), " souls=", flag.call("Lingering Souls", "Graveyard"), " commander=", flag.call("Gravecrawler", "Command"))
+	if not check(flag.call("Ornithopter", "Hand") and flag.call("Mind Stone", "Hand"), "Affordable hand cards are playable"): return false
+	if not check(not flag.call("Craw Wurm", "Hand"), "A six-mana creature with two Swamps is not playable"): return false
+	if not check(flag.call("Lingering Souls", "Graveyard"), "A flashback card you can afford is playable from the graveyard"): return false
+	if not check(flag.call("Gravecrawler", "Command") and ui.hud_values[0].zones.Command.playable, "Your castable commander lights the command zone"): return false
+	var stone: Control = ui.cards[find_card("Mind Stone").id]
+	if not check(stone.data.get("playable", false), "The hand card view carries the playable glow"): return false
+	await capture("hand")
+	# Spend the mana: nothing that costs mana stays highlighted.
+	if not await tap("Swamp", 2): return false
+	if not await cast("Mind Stone"): return false
+	if not await settle(): return false
+	for index in range(20): await ui.get_tree().process_frame
+	return check(not flag.call("Lingering Souls", "Graveyard") and flag.call("Ornithopter", "Hand"), "After spending the mana only the free spell stays playable")
+
+## A board wipe is news for this seat only when it can reach one of its permanents.
+func wipe_events() -> Array:
+	return ui.snapshot.get("targetedEffects", []).filter(func(event): return event.get("kind", "") == "massRemoval")
+
+func wrath_hits() -> bool:
+	var events := wipe_events()
+	print("SCENARIO wipe events: ", events.map(func(event): return event.get("source", {}).get("name", "?")))
+	if not check(events.size() == 1 and events[0].get("source", {}).get("name", "") == "Wrath of God", "A wipe that reaches your creature is announced with its real source card"): return false
+	await capture("wipe")
+	return true
+
+func wrath_misses() -> bool:
+	return check(wipe_events().is_empty(), "A wipe that cannot reach any of your permanents is not announced to you: " + str(wipe_events()))
+
+## "Sacrifice Evolving Wilds?" attaches to the card as a terminal callout and answers with Y.
+func wilds() -> bool:
+	var wilds_card := find_card("Evolving Wilds", "Battlefield")
+	ui._click_card(wilds_card.id)
+	if not await wait_ready(): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and int(ui.snapshot.prompt.get("sourceCard", {}).get("id", -1)) == int(wilds_card.id), "Forge's sacrifice confirmation carries its card: " + JSON.stringify(ui.snapshot.prompt).left(300)): return false
+	if not check(panel.callout.visible and not panel.panel.visible, "The confirmation is a callout on the card, not the top banner"): return false
+	var card_rect: Rect2 = panel._card_rect(ui.cards[wilds_card.id])
+	var box := Rect2(panel.callout.position, panel.callout.size)
+	if not check(not box.intersects(card_rect) and box.grow(panel.CALLOUT_GAP + 4).intersects(card_rect), "The callout sits right beside the card without covering it: " + str([box, card_rect])): return false
+	if not check(panel.callout.title.text.contains("EVOLVING WILDS") and panel.callout.yes_button.text.begins_with("[Y]"), "The callout names the card and offers Y/N keys"): return false
+	await capture("callout")
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_Y
+	panel._unhandled_key_input(key)
+	if not await wait_ready(): return false
+	if not check(not panel.callout.visible or ui.snapshot.prompt.get("inputKind", "") != "InputConfirm", "Y answers the confirmation"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	print("SCENARIO search: input=", ui.snapshot.prompt.get("inputKind", ""), " asks=", ui.snapshot.asks.map(func(ask): return [ask.kind, ask.get("title", "")]), " modal=", (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) else "none"), " banner=", panel.panel.visible, " callout=", panel.callout.visible)
+	await capture("search")
+	if not await choose_named("Island"): return false
+	if not await settle(): return false
+	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")
