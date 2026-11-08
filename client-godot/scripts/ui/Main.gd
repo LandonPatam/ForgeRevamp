@@ -615,6 +615,10 @@ func _build_shell() -> void:
 	incoming_effect.blocked = func(): return modal.visible or opening_hand.visible or (live and snapshot.get("prompt", {}).get("inputKind", "") not in ["InputPassPriority", "InputLockUI", ""])
 	incoming_effect.inspect_requested.connect(_show_card_detail)
 	incoming_effect.card_view = func(id: int) -> Control: return cards.get(id)
+	incoming_effect.player_view = func(engine_id: int) -> Control:
+		for seat in hud_values:
+			if seat < snapshot.get("players", []).size() and int(snapshot.players[seat].get("engineId", seat)) == engine_id: return hud_values[seat].portrait
+		return null
 	response_target = preload("res://scripts/ui/ResponseTarget.gd").new()
 	add_child(response_target)
 	response_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

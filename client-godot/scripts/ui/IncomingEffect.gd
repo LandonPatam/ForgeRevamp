@@ -56,6 +56,12 @@ var wipe_resolve: Button
 var wipe_started := 0
 ## Main supplies the table's card views: func(id: int) -> Control (or null).
 var card_view: Callable
+## ...and player portraits by engine id, for effects that target a player.
+var player_view: Callable
+var wipe_heading: Label
+## The same table view for a spell or ability aimed at your things (Aether Spellbomb -> your Angel):
+## its card mid-table, a branch to each of your targets.
+var aimed := false
 const WIPE_LINE := Color("ffb978")
 const NOTICE_MAX_TARGETS := 3
 ## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
@@ -293,7 +299,8 @@ func _next() -> void:
 	rules.max_lines_visible = -1
 	face.update_card(source)
 	_update_actions()
-	wipe_mode = mass_removal and table_rect.has_area()
+	aimed = not mass_removal and not active.get("targets", []).is_empty()
+	wipe_mode = (mass_removal or aimed) and table_rect.has_area()
 	if wipe_mode: _show_wipe()
 	else: _hide_wipe()
 	_layout()
@@ -513,9 +520,9 @@ func _build_wipe() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	wipe_bar.add_child(column)
-	var heading := _label("BOARD-WIDE EFFECT", 12, WIPE_LINE)
-	heading.add_theme_font_override("font", Terminal.font())
-	column.add_child(heading)
+	wipe_heading = _label("BOARD-WIDE EFFECT", 12, WIPE_LINE)
+	wipe_heading.add_theme_font_override("font", Terminal.font())
+	column.add_child(wipe_heading)
 	wipe_title = _label("", 20, Color.WHITE)
 	wipe_title.add_theme_font_override("font", Terminal.font())
 	column.add_child(wipe_title)
@@ -545,6 +552,7 @@ func _show_wipe() -> void:
 	var source: Dictionary = active.get("source", {})
 	wipe_card.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
 	wipe_title.text = str(source.get("name", "Hidden source")).to_upper()
+	wipe_heading.text = "TARGETED EFFECT" if aimed else "BOARD-WIDE EFFECT"
 	_count_wipe()
 	wipe_started = Time.get_ticks_msec()
 	_set_wipe_visible(not responding.has(int(active.get("stackId", -1))))
@@ -556,6 +564,10 @@ func _show_wipe() -> void:
 
 ## Counted from the table each frame: the views settle after the snapshot that opened the wipe.
 func _count_wipe() -> void:
+	if aimed:
+		var names: Array = active.get("targets", []).map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
+		wipe_detail.text = "> from %s\n> targets %s" % [active.get("controllerName", "Opponent"), ", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()]
+		return
 	var reached := _wipe_views()
 	var yours := 0
 	for view in reached:
@@ -576,6 +588,14 @@ func _set_wipe_visible(value: bool) -> void:
 func _wipe_views() -> Array:
 	var views: Array = []
 	if not card_view.is_valid(): return views
+	if aimed:
+		for target in active.get("targets", []):
+			var aimed_view: Control = null
+			if target.get("kind", "") == "player":
+				if player_view.is_valid(): aimed_view = player_view.call(int(target.get("id", -1)))
+			else: aimed_view = card_view.call(int(target.get("id", -1)))
+			if is_instance_valid(aimed_view) and aimed_view.is_visible_in_tree() and not views.has(aimed_view): views.append(aimed_view)
+		return views
 	for id in active.get("affected", []):
 		var view: Control = card_view.call(int(id))
 		if is_instance_valid(view) and view.is_visible_in_tree() and not views.has(view): views.append(view)
@@ -595,7 +615,7 @@ func _draw() -> void:
 		# The card's own transform, so a tapped (turned) card gets its frame and branch where it is.
 		var card_transform: Transform2D = to_local * view.get_global_transform()
 		var target: Vector2 = card_transform * (view.size * 0.5)
-		var mine := int(view.data.get("owner", -1)) == 0
+		var mine := aimed or int(view.data.get("owner", -1)) == 0
 		var color := Color(WIPE_LINE, 1.0 if mine else 0.7)
 		var bend := origin.lerp(target, 0.5) + Vector2(0, -0.12 * origin.distance_to(target))
 		var points := PackedVector2Array()

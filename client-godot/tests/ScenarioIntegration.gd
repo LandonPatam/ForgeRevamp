@@ -988,7 +988,11 @@ func spellbomb() -> bool:
 			for wait in range(20): await ui.get_tree().process_frame
 			print("SCENARIO spellbomb waiting: autoPass=", ui.snapshot.get("autoPassStackId", -1), " popup=", effect.showing(), " angel=", find_card("Serra Angel", "Battlefield").is_empty() == false)
 			if effect.showing() and int(effect.active.get("stackId", -1)) == int(top.id) and not find_card("Serra Angel", "Battlefield").is_empty():
+				var angel := find_card("Serra Angel", "Battlefield")
+				if not check(effect.wipe_card.visible and not effect.panel.visible and effect.wipe_heading.text == "TARGETED EFFECT", "The targeted effect shows as its card on the table, like a wipe"): return false
+				if not check(effect._wipe_views().has(ui.cards.get(int(angel.id))), "A branch runs from Aether Spellbomb to your Serra Angel"): return false
 				warned = true
+				await ui.get_tree().create_timer(0.6).timeout
 				await capture("warned")
 				effect.dismiss() # I accept
 		if not find_card("Serra Angel", "Hand").is_empty() or (find_card("Serra Angel", "Battlefield").is_empty() and index > 5): break
