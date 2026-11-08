@@ -46,6 +46,7 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - `ui/PlayerAvatar.gd`, `Portraits.gd`, `ZoneBubble.gd`, `TargetOverlay.gd` — digital HP, Forge portraits, zone icons and combat/target arrows.
 - `ui/TerminalStyle.gd`, `TerminalRail.gd`, `StackActivityFeed.gd`, `StackFeedEntry.gd` — right terminal styling and keyed stack/activity entries.
 - `ui/InteractionPanel.gd`, `SidebarDecision.gd`, `BoardChoice.gd`, `IncomingEffect.gd` — hosted decisions, board choices and relevant opposing-effect previews.
+- `ui/CardCallout.gd` — terminal yes/no box attached to the card a Forge confirmation is about ("Sacrifice Evolving Wilds?"), placed beside it by InteractionPanel with a leader line, pulsing outline and Y/N keys; the top banner remains the fallback when the card is not on screen. The bridge reads InputConfirm's ability to supply the card.
 - `ui/Palette.gd`, `ReadableText.gd`, `SelectionPanel.gd`, `ManaPaymentPanel.gd`, `ManaColorPanel.gd` — popup themes, scrollable rules and card/mana choices.
 - `ui/CardImages.gd`, `RuntimeArtwork.gd` — gameplay artwork resources and runtime/token image loading.
 - Bridge `DeckLibrary.java`, `DeckFiles.java`, `CardArtwork.java` — deck/catalog/save/image operations, encoding-aware reads and card/token image URLs.

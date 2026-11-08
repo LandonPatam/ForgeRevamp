@@ -719,3 +719,31 @@ func wrath_hits() -> bool:
 
 func wrath_misses() -> bool:
 	return check(wipe_events().is_empty(), "A wipe that cannot reach any of your permanents is not announced to you: " + str(wipe_events()))
+
+## "Sacrifice Evolving Wilds?" attaches to the card as a terminal callout and answers with Y.
+func wilds() -> bool:
+	# The fixture loads turn 5 straight after the starting roll; let that animation finish first.
+	if ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
+		ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
+		ui._close_modal()
+	var wilds_card := find_card("Evolving Wilds", "Battlefield")
+	ui._click_card(wilds_card.id)
+	if not await wait_ready(): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and int(ui.snapshot.prompt.get("sourceCard", {}).get("id", -1)) == int(wilds_card.id), "Forge's sacrifice confirmation carries its card: " + JSON.stringify(ui.snapshot.prompt).left(300)): return false
+	if not check(panel.callout.visible and not panel.panel.visible, "The confirmation is a callout on the card, not the top banner"): return false
+	var card_rect: Rect2 = panel._card_rect(ui.cards[wilds_card.id])
+	var box := Rect2(panel.callout.position, panel.callout.size)
+	if not check(not box.intersects(card_rect) and box.grow(panel.CALLOUT_GAP + 4).intersects(card_rect), "The callout sits right beside the card without covering it: " + str([box, card_rect])): return false
+	if not check(panel.callout.title.text.contains("EVOLVING WILDS") and panel.callout.yes_button.text.begins_with("[Y]"), "The callout names the card and offers Y/N keys"): return false
+	await capture("callout")
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_Y
+	panel._unhandled_key_input(key)
+	if not await wait_ready(): return false
+	if not check(not panel.callout.visible or ui.snapshot.prompt.get("inputKind", "") != "InputConfirm", "Y answers the confirmation"): return false
+	if not await choose_named("Island"): return false
+	if not await settle(): return false
+	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")
