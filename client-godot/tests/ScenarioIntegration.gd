@@ -39,6 +39,10 @@ func prepared() -> bool:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
 		if scenario == "blocking" and state.prompt.get("inputKind", "") == "InputBlock": return true
+		# The fixture jumps to turn 5 straight after the starting roll; finish that animation as a player would.
+		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
+			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
+			ui._close_modal()
 		if scenario != "blocking" and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
@@ -47,7 +51,7 @@ func prepared() -> bool:
 		elif state.prompt.get("inputKind", "") == "InputConfirmMulligan": ui.opening_hand.submit("ok")
 		elif StartingPlayerDialog.needs_selection(state) and ui.modal_panel is StartingPlayerDialog: ui.modal_panel.buttons[0].pressed.emit()
 		elif state.prompt.okEnabled: ui._primary_action()
-	return check(false, "Prepared board did not load")
+	return check(false, "Prepared board did not load: turn=%s input=%s asks=%s modal=%s incoming=%s stack=%s" % [ui.snapshot.get("game", {}).get("turn", -1), ui.snapshot.get("prompt", {}).get("inputKind", ""), ui.snapshot.get("asks", []).map(func(ask): return [ask.kind, ask.get("title", "")]), (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), ui.incoming_effect.panel.visible, ui.snapshot.get("stack", []).size()])
 
 func settle() -> bool:
 	for index in range(80):
@@ -83,7 +87,7 @@ func select_named(name: String) -> bool:
 			ui.interaction_panel.confirm_button.pressed.emit()
 			return await wait_ready()
 		return true
-	if not check(ui.modal_panel is SelectionDialog and ui.modal.visible, "Expected visible card gallery for " + name + ": " + str(ui.snapshot.prompt)): return false
+	if not check(ui.modal_panel is SelectionDialog and ui.modal.visible, "Expected visible card gallery for " + name + " (open modal: " + (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none") + ", decision panel visible: " + str(ui.interaction_panel.panel.visible) + "): " + str(ui.snapshot.prompt)): return false
 	for index in range(ui.modal_panel.options.size()):
 		if ui.modal_panel.options[index].get("name", "") == name:
 			ui.modal_panel.option_buttons[index].pressed.emit()
@@ -722,10 +726,6 @@ func wrath_misses() -> bool:
 
 ## "Sacrifice Evolving Wilds?" attaches to the card as a terminal callout and answers with Y.
 func wilds() -> bool:
-	# The fixture loads turn 5 straight after the starting roll; let that animation finish first.
-	if ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
-		ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
-		ui._close_modal()
 	var wilds_card := find_card("Evolving Wilds", "Battlefield")
 	ui._click_card(wilds_card.id)
 	if not await wait_ready(): return false
@@ -744,6 +744,9 @@ func wilds() -> bool:
 	panel._unhandled_key_input(key)
 	if not await wait_ready(): return false
 	if not check(not panel.callout.visible or ui.snapshot.prompt.get("inputKind", "") != "InputConfirm", "Y answers the confirmation"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	print("SCENARIO search: input=", ui.snapshot.prompt.get("inputKind", ""), " asks=", ui.snapshot.asks.map(func(ask): return [ask.kind, ask.get("title", "")]), " modal=", (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) else "none"), " banner=", panel.panel.visible, " callout=", panel.callout.visible)
+	await capture("search")
 	if not await choose_named("Island"): return false
 	if not await settle(): return false
 	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")

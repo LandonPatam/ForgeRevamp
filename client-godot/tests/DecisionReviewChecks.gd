@@ -108,11 +108,36 @@ func run(ui: Control, directory: String = "") -> void:
 	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Choose an artifact from the cards viewed", "sourceCard": source, "cards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}], "revealedCards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}, {"id": 912, "name": "Island"}], "selMin": 0, "selMax": 1, "chosen": [], "okEnabled": true}
 	ui._apply_state(state)
 	var selection: Control = ui.modal_panel
-	assert(selection.source_view.custom_minimum_size == Vector2(288, 404) and selection.source_context.get_parent() == selection.body, "Source card belongs to the enlarged left section")
+	assert(selection.source_context.visible and selection.source_context.get_parent() == selection.source_column, "The source card stays visible under the results list")
 	assert(selection.options.size() == 2 and not selection.option_buttons[0].disabled and selection.option_buttons[1].disabled, "Viewed cards outside Forge's eligible set must remain visible and unselectable")
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("library-review-enlarged.png"))
 		assert(ui.get_global_rect().encloses(selection.get_global_rect()), "Source and library gallery must fit the table")
+	# Library search: identical cards stack into one row; each click picks one exact instance.
+	var wilds := {"id": 940, "name": "Evolving Wilds", "typeLine": "Land", "text": "{T}, Sacrifice Evolving Wilds: Search your library for a basic land card."}
+	var lands: Array = [{"id": 941, "name": "Forest", "typeLine": "Basic Land - Forest"}, {"id": 942, "name": "Forest", "typeLine": "Basic Land - Forest"}, {"id": 943, "name": "Mountain", "typeLine": "Basic Land - Mountain"}, {"id": 944, "name": "Forest", "typeLine": "Basic Land - Forest"}]
+	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Evolving Wilds (70)
+ - {T}, Sacrifice: search.
+Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin": 1, "selMax": 2, "chosen": [], "okEnabled": true}
+	ui._apply_state(state)
+	selection = ui.modal_panel
+	assert(selection.rows.size() == 2 and selection.option_buttons.size() == 4, "Three Forests and a Mountain make two rows but keep four exact instances")
+	assert(selection.rows[0].text.contains("FOREST") and selection.rows[0].text.contains("×3"), "A stacked row shows its count: " + selection.rows[0].text)
+	assert(selection.command.text.begins_with("C:\\EVOLVING_WILDS> select a card from your library"), "The header reads like a command line: " + selection.command.text)
+	var picked: Array[int] = []
+	selection.selected_card.connect(func(id): picked.append(id))
+	selection.rows[0].pressed.emit()
+	assert(picked == [941], "A stacked row picks its first copy: " + str(picked))
+	state.prompt.chosen = ["card:941"]
+	ui._apply_state(state)
+	selection = ui.modal_panel
+	assert(selection.rows[0].text.contains("[1✓]") and selection.hint.text.begins_with("1 selected"), "The row shows how many copies are picked: " + selection.rows[0].text + " | " + selection.hint.text)
+	selection._highlight(1)
+	assert(selection.preview.data.get("name", "") == "Mountain" and selection.preview_caption.text.contains("Mountain"), "The preview follows the highlighted row")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("library-search-grouped.png"))
+	selection.selected_card.connect(func(id): picked.append(id))
+	selection.rows[0].pressed.emit()
+	assert(picked == [941, 942], "Clicking a stacked row again picks the next copy, never the same instance: " + str(picked))
 	ui._close_modal()
 	var order := {"id": 950, "kind": "order", "title": "Select order for simultaneous abilities", "message": "Resolve first", "min": 3, "max": 3, "autoOrder": true, "abilityOrder": true, "options": [{"label": "Draw a card.", "card": {"id": 951, "name": "Fathom Mage"}}, {"label": "Gain life.", "card": {"id": 952, "name": "Soul Warden"}}, {"label": "Create a token.", "card": {"id": 953, "name": "Young Pyromancer"}}]}
 	ui._open_decision(order)
