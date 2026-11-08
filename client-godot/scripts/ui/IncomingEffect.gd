@@ -31,6 +31,15 @@ var browse_button: Button
 var responding: Array[int] = []
 var dismissed: Array[int] = []
 var current_state: Dictionary = {}
+## Non-blocking notices for untargeted effects on this player ("each opponent loses 1 life").
+var notice_panel: PanelContainer
+var notice_title: Label
+var notice_text: Label
+var notices: Array = []
+var notice_tween: Tween
+const NOTICE_SECONDS := 3.2
+## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
+const PLAYER_PORTRAIT_SIDE := 112.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -106,6 +115,19 @@ func _ready() -> void:
 	hover_preview.z_index = 1
 	add_child(hover_preview)
 	hover_preview.hide()
+	notice_panel = PanelContainer.new()
+	P.style_popup(notice_panel, 14)
+	notice_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var notice_column := VBoxContainer.new()
+	notice_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	notice_column.add_theme_constant_override("separation", 4)
+	notice_panel.add_child(notice_column)
+	notice_title = _label("", 13, Color("6d9fa3"))
+	notice_column.add_child(notice_title)
+	notice_text = _label("", 17, Color.WHITE)
+	notice_column.add_child(notice_text)
+	add_child(notice_panel)
+	notice_panel.hide()
 	panel.minimum_size_changed.connect(_layout)
 	get_viewport().size_changed.connect(_layout)
 	resized.connect(_layout)
@@ -127,7 +149,15 @@ func present(state: Dictionary) -> void:
 		if not stack_ids.has(completed): acknowledge_stack(completed)
 	responding.assign(responding.filter(func(id): return stack_ids.has(id)))
 	var events: Array = state.get("targetedEffects", [])
+	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
+		if event.get("kind", "") == "notice":
+			if int(event.id) > latest and initialized: _queue_notice(event)
+			latest = maxi(latest, int(event.id))
+			continue
+		if auto_resolve:
+			latest = maxi(latest, int(event.id)) # Auto-resolve: no after-the-fact notices.
+			continue
 		if int(event.id) > latest and (initialized or stack_ids.has(int(event.stackId))):
 			if dismissed.has(int(event.stackId)):
 				latest = maxi(latest, int(event.id))
@@ -154,18 +184,24 @@ func present(state: Dictionary) -> void:
 func _offer_priority(force: bool = false) -> void:
 	# Routine stack changes stay in the rail. Direct targets still get a visual
 	# interaction for opponents; our own choices remain in the rail.
-	if not force and (current_state.get("stack", []).is_empty() or current_state.stack[0].get("targets", []).is_empty()): return
+	if not force and not current_state.get("autoResolveAll", false) and (current_state.get("stack", []).is_empty() or current_state.stack[0].get("targets", []).is_empty()): return
 	var stack: Array = current_state.get("stack", [])
 	if int(current_state.get("pendingCastId", -1)) >= 0 or current_state.get("game", {}).get("gameOver", false): return
+	var auto_resolve: bool = current_state.get("autoResolveAll", false)
+	if not force and auto_resolve and not preload("res://scripts/bridge/LiveAdapter.gd").holds_for_response(current_state): return # Passing on its own.
 	if stack.is_empty() or current_state.get("prompt", {}).get("inputKind", "") != "InputPassPriority": return
 	var item: Dictionary = stack[0]
 	# Our target choices already show the effect; keep priority in the rail.
 	if not force and int(item.get("card", {}).get("owner", -1)) == 0: return
 	var id := int(item.id)
-	if not force and item.has("targetsLocal") and not item.targetsLocal: return
+	if not force and not auto_resolve and item.has("targetsLocal") and not item.targetsLocal: return
 	if not item.has("card") or (not force and (responding.has(id) or dismissed.has(id) or int(current_state.get("autoPassStackId", -1)) == id)): return
 	if int(active.get("stackId", -1)) == id: return
 	var notice := {"id": -id - 1, "stackId": id, "source": item.card, "effectText": item.get("text", ""), "controllerName": item.get("controllerName", "Player"), "ability": item.get("ability", false), "targets": item.get("targets", []), "kind": "effect"}
+	if auto_resolve:
+		# Keep the bridge's board-wide/targeted framing for the one popup auto-resolve still shows.
+		for event in current_state.get("targetedEffects", []):
+			if int(event.get("stackId", -1)) == id: notice = event.duplicate(true)
 	for queued in waiting:
 		if int(queued.stackId) == id:
 			notice = queued
@@ -224,7 +260,7 @@ func _next() -> void:
 		child.queue_free()
 	for target in active.get("targets", []):
 		if target.get("kind", "") == "player":
-			target_cards.add_child(_label(str(target.get("name", "You")), 24, P.TEXT))
+			target_cards.add_child(_player_target(target))
 			continue
 		var target_face := Card.new()
 		target_face.inspection = true
@@ -242,6 +278,42 @@ func _next() -> void:
 	panel.modulate.a = 0
 	create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
 
+## A targeted player reads like a card slot: their Forge portrait with their name beneath it.
+func _player_target(target: Dictionary) -> Control:
+	var engine_id := int(target.get("id", -1))
+	var player: Dictionary = {}
+	for candidate in current_state.get("players", []):
+		if int(candidate.get("engineId", candidate.get("id", -2))) == engine_id: player = candidate
+	if player.is_empty(): player = {"name": str(target.get("name", "Player")), "life": 0}
+	var tile := VBoxContainer.new()
+	tile.set_meta("player_target", true)
+	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tile.alignment = BoxContainer.ALIGNMENT_CENTER
+	tile.add_theme_constant_override("separation", 10)
+	var portrait := preload("res://scripts/ui/PlayerAvatar.gd").new()
+	portrait.name = "Portrait"
+	portrait.portrait_only = true
+	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	tile.add_child(portrait)
+	portrait.set_player(player, false)
+	portrait.tooltip_text = ""
+	var label := _label(str(player.get("name", target.get("name", "Player"))) + (" (you)" if int(player.get("id", -1)) == 0 else ""), 20, P.TEXT)
+	label.name = "PlayerName"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	tile.add_child(label)
+	_size_player_target(tile, face.custom_minimum_size)
+	return tile
+
+func _size_player_target(tile: Control, card_size: Vector2) -> void:
+	tile.custom_minimum_size = card_size
+	# Forge's avatar atlas cells are 100 px; scaling them to card size looks grainy, so stay near native.
+	var side := minf(PLAYER_PORTRAIT_SIDE, minf(card_size.x, card_size.y - 40))
+	tile.get_node("Portrait").custom_minimum_size = Vector2.ONE * side
+	tile.get_node("PlayerName").custom_minimum_size.x = card_size.x
+
 func dismiss() -> void:
 	var stack_id := int(active.get("stackId", -1))
 	acknowledge_stack(stack_id)
@@ -254,8 +326,31 @@ func acknowledge_stack(stack_id: int) -> void:
 	waiting = waiting.filter(func(event): return int(event.get("stackId", -1)) != stack_id)
 	if int(active.get("stackId", -1)) == stack_id: _next()
 
+func _queue_notice(event: Dictionary) -> void:
+	notices.append(event.duplicate(true))
+	if notice_tween == null or not notice_tween.is_running(): _next_notice()
+
+func _next_notice() -> void:
+	if notices.is_empty():
+		notice_panel.hide()
+		return
+	var event: Dictionary = notices.pop_front()
+	notice_title.text = "%s  ·  %s" % [event.get("controllerName", "Opponent"), event.get("source", {}).get("name", "Hidden source")]
+	notice_text.text = str(event.get("effectText", ""))
+	notice_panel.modulate.a = 0.0
+	notice_panel.show()
+	_layout()
+	notice_tween = create_tween()
+	notice_tween.tween_property(notice_panel, "modulate:a", 1.0, 0.15)
+	notice_tween.tween_interval(NOTICE_SECONDS)
+	notice_tween.tween_property(notice_panel, "modulate:a", 0.0, 0.35)
+	notice_tween.tween_callback(_next_notice)
+
 func reset() -> void:
 	_clear_hover()
+	notices.clear()
+	if notice_tween != null: notice_tween.kill()
+	if notice_panel != null: notice_panel.hide()
 	active = {}
 	waiting.clear()
 	stack_ids.clear()
@@ -270,11 +365,16 @@ func _layout() -> void:
 	if panel == null:
 		return
 	var available := get_viewport_rect().size
+	if notice_panel != null and notice_panel.visible:
+		notice_panel.size = Vector2(minf(520, available.x - 32), 0)
+		notice_text.custom_minimum_size.x = notice_panel.size.x - 36
+		notice_panel.position = Vector2((available.x - notice_panel.size.x) * 0.5, 24)
 	var width := minf(1040, maxf(580, available.x - 96))
 	var height := clampf(available.y - 340, 300, 540)
 	face.custom_minimum_size = Vector2(height * 144 / 202, height)
 	for target in target_cards.get_children():
 		if target is Card: target.custom_minimum_size = face.custom_minimum_size
+		elif target.has_meta("player_target"): _size_player_target(target, face.custom_minimum_size)
 	var columns := clampi(int((width - face.custom_minimum_size.x - 124) / (face.custom_minimum_size.x + 12)), 1, 3)
 	targets_scroll.configure(columns, columns)
 	# Reserve room for the header, card gallery, both page controls and response action.

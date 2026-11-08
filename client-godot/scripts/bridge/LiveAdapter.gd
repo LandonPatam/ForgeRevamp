@@ -37,6 +37,10 @@ var auto_priority_candidate := -1
 var auto_priority_due := 0
 var auto_priority_passes := 0
 var auto_priority_request := ""
+## Table setting: pass priority on every stack item; Forge still asks for every required decision.
+var auto_resolve_all := false
+## Table setting "Stack responses": 0 Everything, 1 Smart (the bridge's policy), 2 Only threats.
+var stack_mode := 1
 var acknowledged_effects: Array[int] = []
 var last_state_text := ""
 var sync_wait := 0.0
@@ -278,6 +282,7 @@ func _unlock() -> void:
 func _publish() -> void:
 	if state.is_empty():
 		return
+	_apply_stack_mode()
 	state.connectionReady = connected and not syncing and pending.is_empty() and not state.get("undoPending", false)
 	var automatic_payment: bool = prepaid_target >= 0 and state.asks.is_empty() and state.prompt.get("inputKind", "") in ["InputPassPriority", "InputPayManaOfCostPayment"]
 	state.connectionReady = state.connectionReady and not automatic_payment
@@ -286,6 +291,7 @@ func _publish() -> void:
 	var visible_state := state.duplicate(true)
 	visible_state.pendingCastId = prepaid_target
 	visible_state.pendingEquipId = equip_source
+	visible_state.autoResolveAll = auto_resolve_all
 	if prepaid_target >= 0:
 		# A card being paid for is provisional, not yet a committed stack item.
 		visible_state.autoPassStackId = -1
@@ -482,6 +488,7 @@ func normalize(raw: Dictionary) -> Dictionary:
 			entity.engineId = int(entity.id)
 			entity.id = seats.find(int(entity.id))
 		if entity.has("card"): entity.card = _card(entity.card, -1, "Selection")
+	result.bridgeAutoPassId = int(result.get("autoPassStackId", -1))
 	return result
 
 func _service_prepaid() -> void:
@@ -538,6 +545,26 @@ static func is_automatic_cast(state_value: Dictionary) -> bool:
 static func is_automatic_stack(state_value: Dictionary) -> bool:
 	return not state_value.get("stack", []).is_empty() and int(state_value.get("autoPassStackId", -1)) == int(state_value.stack[0].id) and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty()
 
+## Auto-resolve still stops for the stack top when it targets this seat's things or is a board
+## wipe AND Forge found a legal response (with none, the bridge already marks it autoPassStackId).
+static func holds_for_response(state_value: Dictionary) -> bool:
+	var stack: Array = state_value.get("stack", [])
+	if stack.is_empty() or int(state_value.get("autoPassStackId", -1)) == int(stack[0].id): return false
+	if stack[0].get("targetsLocal", false): return true
+	return state_value.get("targetedEffects", []).any(func(event): return int(event.get("stackId", -1)) == int(stack[0].id) and event.get("kind", "") == "massRemoval")
+
+## Auto-resolve everything else: any stack item at plain priority, never a decision, draw or your
+## own just-cast spell's undo window (that keeps its existing commit behavior).
+## Everything: an opponent's item the bridge would pass under Smart still waits when this seat can respond.
+func _apply_stack_mode() -> void:
+	state.autoPassStackId = int(state.get("bridgeAutoPassId", state.get("autoPassStackId", -1)))
+	var stack: Array = state.get("stack", [])
+	if stack_mode == 0 and state.get("canRespond", false) and not stack.is_empty() and int(stack[0].get("card", {}).get("owner", -1)) != 0:
+		state.autoPassStackId = -1
+
+static func can_resolve_all(state_value: Dictionary) -> bool:
+	return not holds_for_response(state_value) and state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
+
 static func can_auto_pass(state_value: Dictionary) -> bool:
 	if not state_value.get("takebackCast", {}).is_empty() and not is_automatic_cast(state_value):
 		return false # Unclassified effects retain their decision window.
@@ -549,7 +576,7 @@ func _service_auto_priority() -> void:
 	elif int(state.stack[0].id) != auto_priority_sent:
 		# A response creates a new priority cycle for the original effect.
 		auto_priority_sent = -1
-	if prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not can_auto_pass(state):
+	if prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not (can_auto_pass(state) or (auto_resolve_all and can_resolve_all(state))):
 		auto_priority_candidate = -1
 		return
 	var stack_id := int(state.stack[0].id)

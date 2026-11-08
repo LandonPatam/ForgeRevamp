@@ -58,6 +58,23 @@ func set_ready(value: bool) -> void:
 ## Players who have joined this host's lobby.
 func players() -> Array: return host_status.get("players", [])
 
+## Everyone at the table for the ready screen: {name, kind (host/bot/player/open), ready, you}.
+## Bots never confirm; only humans count toward readiness. The host passes its own profile and bots.
+func party(human: Dictionary = {}, bots: Array = []) -> Array:
+	var seats: Array = []
+	if is_hosting():
+		seats.append({"name": str(human.get("name", "HOST")), "kind": "host", "ready": is_ready(), "you": true})
+		for bot in bots: seats.append({"name": str(bot.get("name", "BOT")), "kind": "bot", "ready": true, "you": false})
+		for player in players(): seats.append({"name": str(player.get("name", "PLAYER")), "kind": "player", "ready": player.get("ready", false), "you": false})
+		for index in range(maxi(0, 4 - seats.size())): seats.append({"name": "OPEN SEAT", "kind": "open", "ready": false, "you": false})
+	elif is_joined():
+		for entry in roster:
+			var kind := str(entry.get("kind", "player"))
+			seats.append({"name": str(entry.get("name", "PLAYER")), "kind": kind, "ready": kind == "bot" or entry.get("ready", false),
+				"you": kind == "player" and int(entry.get("id", -1)) == you})
+		for index in range(open_seats): seats.append({"name": "OPEN SEAT", "kind": "open", "ready": false, "you": false})
+	return seats
+
 ## What the host reads out to friends. The port is left out when it is the one joining assumes.
 func share_address() -> String:
 	var ip: String = host_status.get("public", "")

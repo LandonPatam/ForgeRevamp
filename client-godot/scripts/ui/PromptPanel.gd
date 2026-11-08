@@ -412,7 +412,7 @@ func present(value: Dictionary) -> void:
 		buttons.add_child(mine_button)
 	if ask.kind in ["choose", "order"] and ask.get("min", 1) == 0 and not options.is_empty():
 		var decline := Button.new()
-		decline.text = "Cancel activation" if ask.get("manaChoice", false) else "Choose none"
+		decline.text = "Cancel activation" if _picks_immediately() else "Choose none"
 		decline.pressed.connect(func(): _emit_answer([]))
 		buttons.add_child(decline)
 	if ask.kind == "input" or ask.get("maySkip", false):
@@ -423,14 +423,14 @@ func present(value: Dictionary) -> void:
 	if ask.kind in ["choose", "order"]:
 		var clear := Button.new()
 		clear.text = "Clear"
-		clear.visible = not ask.get("manaChoice", false)
+		clear.visible = not _picks_immediately()
 		clear.pressed.connect(func():
 			chosen.clear()
 			_validate())
 		buttons.add_child(clear)
 	confirm_button = Button.new()
 	confirm_button.text = "Acknowledge" if ask.kind == "message" else "Confirm choice"
-	confirm_button.visible = not ask.get("manaChoice", false)
+	confirm_button.visible = not _picks_immediately()
 	confirm_button.custom_minimum_size = Vector2(190, 46)
 	P.style_popup_button(confirm_button, true)
 	confirm_button.pressed.connect(_submit)
@@ -447,6 +447,7 @@ func _with_modes_as_text(value: Dictionary) -> Dictionary:
 		if int(option.card.id) != int(options[0].card.id) or str(option.get("label", "")) == str(option.card.get("name", "")): return value
 	value.sourceCard = options[0].card
 	value.abilityChoice = true
+	value.modesAsText = true # Modes still use select-then-Confirm.
 	for option in options: option.erase("card")
 	return value
 
@@ -481,7 +482,13 @@ func _toggle(index: int) -> void:
 	elif chosen.size() < ask.max:
 		chosen.append(index)
 	_validate()
-	if ask.get("manaChoice", false) and not chosen.is_empty(): _submit()
+	if _picks_immediately() and not chosen.is_empty(): _submit()
+
+## Choosing one of a card's abilities (or mana colors) activates it on click, like Forge's own
+## ability menu; the answer is the same engine index a Confirm would send.
+func _picks_immediately() -> bool:
+	if ask.get("kind", "") != "choose" or int(ask.get("max", 1)) != 1 or ask.get("modesAsText", false): return false
+	return ask.get("manaChoice", false) or ask.get("abilityChoice", false) or ask.get("title", "") == "Choose ability"
 
 ## Hard-caps the assigned total at ask.amount: each box may only reach what the others leave.
 func _limit_distribution() -> void:
@@ -514,6 +521,7 @@ func _validate() -> void:
 				valid = false # Choosing nothing is a deliberate separate action.
 			hint.text = ("Select in order · " if ask.kind == "order" else "Choose · ") + str(chosen.size()) + " selected / " + str(ask.min) + "–" + str(ask.max)
 			if ask.get("manaChoice", false): hint.text = "Select the mana to add."
+			elif _picks_immediately(): hint.text = "Select the ability to activate."
 			for i in range(option_buttons.size()):
 				var selected := chosen.has(i)
 				var prefix := str(chosen.find(i) + 1) + ".  " if selected and ask.kind == "order" else ("✓  " if selected else "")

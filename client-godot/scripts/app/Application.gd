@@ -972,8 +972,12 @@ func _update_status() -> void:
 		elif parked: start_button.tooltip_text = "Resume or end the live game using its session disk first"
 	if computer != null:
 		var lobby := ""
-		if net.is_joined() or net.is_hosting(): lobby = "[READY] WAITING FOR PLAYERS" if net.is_ready() else "[NET] PRESS PLAY TO READY"
-		computer.set_console_status(status_message, online, lobby)
+		var party: Array = []
+		if net.is_joined() or net.is_hosting():
+			party = net.party(match_preferences.human, match_preferences.bots)
+			var humans := party.filter(func(seat): return seat.kind in ["host", "player"])
+			lobby = "[READY] WAITING FOR PLAYERS" if net.is_ready() else "[NET] PRESS PLAY TO READY  %d/%d READY" % [humans.filter(func(seat): return seat.ready).size(), humans.size()]
+		computer.set_console_status(status_message, online, lobby, party, net.is_ready() and not busy)
 	if status_label != null:
 		status_label.text = "Starting your Commander game…" if busy else (status_message if not status_message.is_empty() else ("Ready" if online else "Connecting to Forge…"))
 		if ending_session and end_visual_done: status_label.text = "ENGINE CLEANUP PENDING"

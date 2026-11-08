@@ -50,6 +50,8 @@ var HAND_CARD_SIZE := BASE_CARD_SIZE
 var TABLE_CARD_SIZE := BASE_CARD_SIZE
 const LOCAL_CONTROL_LANE_WIDTH := 88.0
 const LOCAL_CONTROL_GAP := 12.0
+## Opponent boards auto-pack; leave room for one card's hanging P/T badge and the next card's trait icons.
+const OPPONENT_CARD_GAP := 34.0
 const LOCAL_CONTROL_GROUP_GAP := 52.0
 const LOCAL_MANA_ROW_GAP := 9
 const LOCAL_CONTROL_TOP_GAP := 36.0
@@ -83,6 +85,8 @@ var drag_origin_parent: Node
 var manual_positions: Dictionary = {}
 var split_pile_cards: Dictionary = {}
 var victory_announced := false
+var defeat_announced := false
+var outcome_screen: Control
 var local_pile_members: Dictionary = {}
 ## Where a right-dragged pile sits, by its identity apart from tap and combat-round state.
 var pile_anchors: Dictionary = {}
@@ -97,7 +101,15 @@ const UI_LAYOUT_SETTINGS := [
 	{"key": "hand_angle", "title": "Hand angle", "low": "Flat", "high": "Curved", "min": 0.0, "max": 25.0, "step": 1.0, "default": 10.0},
 	{"key": "pile_spread", "title": "Space between stacked cards", "low": "Tight", "high": "Wide", "min": 8.0, "max": 60.0, "step": 2.0, "default": 26.0},
 	{"key": "pile_tap", "title": "Tapped cards in a stack", "low": "In place", "high": "Aside", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
+	{"key": "hud_x", "title": "Health and portrait position", "low": "Left", "high": "Right", "min": -1600.0, "max": 0.0, "step": 10.0, "default": 0.0},
+	{"key": "hud_y", "title": "Health and portrait height", "low": "Lower", "high": "Higher", "min": 0.0, "max": 900.0, "step": 10.0, "default": 0.0},
 	{"key": "notify_volume", "title": "Notification volume", "low": "Quiet", "high": "Loud", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.6},
+]
+## Table setting "Stack responses": when this seat stops to respond to the stack.
+const STACK_MODES := [
+	{"name": "Everything", "hint": "Stop for every spell and ability you could respond to."},
+	{"name": "Smart", "hint": "Stop for opponents' instants and sorceries, board wipes and anything aimed at your things. Routine abilities pass; effects like \"each opponent loses 1 life\" show a notice."},
+	{"name": "Only threats", "hint": "Pass everything except respondable effects aimed at your things and board wipes. Forge still asks for every required choice."},
 ]
 ## Built-in library backs: regions of Forge's sleeve atlas. The first is the original back.
 const CARD_BACKS := [
@@ -108,7 +120,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -383,7 +395,7 @@ func _build_shell() -> void:
 	rail.add_theme_constant_override("separation", 8)
 	rail_panel.add_child(rail)
 	var terminal = preload("res://scripts/ui/TerminalStyle.gd")
-	rail.add_child(_terminal_button("Table settings", _show_table_settings, "Move your hand and library. Your layout is saved for every game."))
+	rail.add_child(_terminal_button("Table settings", _show_table_settings, "Move your hand, library and health panel. Your layout is saved for every game."))
 	rail.add_child(_label("COMMANDER / TERMINAL",12,terminal.MUTED))
 	turn_label = _label("Turn 1", 30, terminal.INK)
 	turn_label.add_theme_font_override("font", terminal.font())
@@ -644,12 +656,19 @@ func _read_ui_layout(config: ConfigFile) -> void:
 		ui_layout[setting.key] = clampf(float(config.get_value("ui", setting.key, setting.default)), setting.min, setting.max)
 	ui_layout.card_back = float(clampi(int(config.get_value("ui", "card_back", 0)), 0, CARD_BACKS.size() - 1))
 	ui_layout.notify_sound = float(clampi(int(config.get_value("ui", "notify_sound", 0)), 0, NotificationSound.CHOICES.size() - 1))
+	# The earlier On/Off "auto_resolve" setting maps to Only threats.
+	var legacy_mode := 2 if float(config.get_value("ui", "auto_resolve", 0.0)) >= 0.5 else 1
+	ui_layout.stack_mode = float(clampi(int(config.get_value("ui", "stack_mode", legacy_mode)), 0, STACK_MODES.size() - 1))
 	_apply_table_style()
 
 ## Pushes pile and card-back preferences to the shared layout and library views.
 func _apply_table_style() -> void:
 	FieldLayout.pile_step = float(ui_layout.pile_spread)
 	FieldLayout.tap_aside = float(ui_layout.pile_tap) >= 0.5
+	if adapter != null and "stack_mode" in adapter:
+		adapter.stack_mode = int(ui_layout.stack_mode)
+		adapter.auto_resolve_all = int(ui_layout.stack_mode) == 2
+		if not snapshot.is_empty(): adapter._publish()
 	if notify_sound != null: notify_sound.configure(int(ui_layout.notify_sound), float(ui_layout.notify_volume))
 	var back := AtlasTexture.new()
 	back.atlas = preload("res://assets/forge-sleeves.png")
@@ -1217,7 +1236,7 @@ func _layout_board() -> void:
 		var creatures: Array = p.zones.Battlefield.filter(func(c): return not c.get("typeLine", "").contains("Land"))
 		var lands: Array = p.zones.Battlefield.filter(func(c): return c.get("typeLine", "").contains("Land"))
 		rows["lands" + str(id)].scroll.hide()
-		_row("enemy" + str(id), Vector2(left + 8, 98), Vector2(width - 16, top_height - 142), creatures + lands, 14, id)
+		_row("enemy" + str(id), Vector2(left + 8, 98), Vector2(width - 16, top_height - 142), creatures + lands, OPPONENT_CARD_GAP, id)
 	var you: Dictionary = snapshot.players[0]
 	var creatures: Array = you.zones.Battlefield.filter(func(c): return not c.get("typeLine", "").contains("Land"))
 	var lands: Array = you.zones.Battlefield.filter(func(c): return c.get("typeLine", "").contains("Land"))
@@ -1247,8 +1266,10 @@ func _layout_board() -> void:
 			if own_cast and not play_positions.has(id):
 				var center: Vector2 = board.get_global_transform().affine_inverse() * _bounded_card_center(retiring, retiring.get_global_rect().get_center())
 				play_positions[id] = {"position": Vector2(center.x / board.size.x, center.y), "age": 0.0}
-			var waiting_for_payment: bool = live and (not snapshot.get("connectionReady", false) or snapshot.prompt.get("inputKind", "").begins_with("InputPayMana"))
-			if play_positions.has(id) and (waiting_for_payment or snapshot.stack.any(func(item): return item.sourceId == id)):
+			# Presentation only: while Forge is still mid-cast (payment, targets, a cost/mode
+			# choice), the card sits provisionally in its Stack zone without a stack item yet.
+			var cast_in_progress: bool = live and (not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty() or snapshot.prompt.get("inputKind", "") != "InputPassPriority")
+			if play_positions.has(id) and (cast_in_progress or snapshot.stack.any(func(item): return item.sourceId == id)):
 				retiring.data.zone = "Stack"
 				retiring.data.pendingCast = true
 				retiring.data.availableActions = snapshot.get("takebackCast", {}).get("availableActions", {}) if int(snapshot.get("takebackCast", {}).get("id", -1)) == int(id) else {}
@@ -1418,12 +1439,22 @@ func _layout_hand(instant_id: int = -1) -> void:
 	hand_previous.size = Vector2(26, 36)
 	hand_next.size = Vector2(26, 36)
 	library_pile.position = Vector2(library_center - library_pile.size.x * 0.5, size.y - library_pile.size.y * ui_layout.library_show)
-	hud[0].position.y = size.y - 158
-	if library_pile.get_global_rect().intersects(hud_values[0].portrait.get_global_rect()):
-		hud[0].position.y = library_pile.position.y - hud_values[0].portrait.size.y - 12
+	_place_local_hud(table_right)
 	library_count.position = library_pile.position + Vector2(0, -30)
 	library_count.size = Vector2(library_pile.size.x, 24)
 	_order_hand_input()
+
+## Your health/portrait panel: bottom-right of the table by default, moved by Table settings,
+## always kept on the table and above the library.
+func _place_local_hud(table_right: float) -> void:
+	var table_left: float = board_scroller.global_position.x
+	var default_x: float = table_right - 228
+	hud[0].position.x = clampf(default_x + float(ui_layout.hud_x), table_left + 8, maxf(table_left + 8, default_x))
+	var lowest: float = size.y - 158
+	var highest: float = minf(board_scroller.global_position.y + 8, lowest)
+	hud[0].position.y = clampf(lowest - float(ui_layout.hud_y), highest, lowest)
+	if library_pile.get_global_rect().intersects(hud_values[0].portrait.get_global_rect()):
+		hud[0].position.y = maxf(highest, library_pile.position.y - hud_values[0].portrait.size.y - 12)
 
 func _library_drag_started(pointer: Vector2) -> void:
 	if targeting or modal.visible or library_draw_pending or not library_pile.enabled:
@@ -1607,7 +1638,8 @@ func _process(_delta: float) -> void:
 	_layout_mana_pool()
 	for id in play_positions.keys():
 		play_positions[id].age += _delta
-		if live and play_positions[id].age > 0.6 and snapshot.get("connectionReady", false) and snapshot.prompt.get("inputKind", "") == "InputPassPriority" and snapshot.players[0].zones.Hand.any(func(card): return card.id == id):
+		# A cost/mode popup keeps Forge at priority with the card still in hand; keep it on the board until answered.
+		if live and play_positions[id].age > 0.6 and snapshot.get("connectionReady", false) and snapshot.get("asks", []).is_empty() and snapshot.prompt.get("inputKind", "") == "InputPassPriority" and snapshot.players[0].zones.Hand.any(func(card): return card.id == id):
 			play_positions.erase(id)
 			_layout_board()
 	for id in pending_returns.keys():
@@ -1755,7 +1787,11 @@ func _sync_raised_card() -> void:
 		return
 	if not is_instance_valid(hovered_source) or not hovered_source.hover_active or hovered_source.hand_mode or hovered_source.zone_browser or _modal_covers_table() or opening_hand.visible or library_draw_pending:
 		raised_card.hide()
+		# A hovered table card hides its own face behind the raised copy; never leave it blank.
+		if is_instance_valid(hovered_source) and not hovered_source.hand_mode:
+			hovered_source.visual.show()
 		return
+	hovered_source.visual.hide()
 	# Mirror the animated card transform in the root overlay, outside every ScrollContainer.
 	# The original node continues to receive clicks, scrolling and mouse exit events.
 	var geometry_changed: bool = raised_card.size != hovered_source.size or raised_card.table_angle != hovered_source.table_angle
@@ -2331,6 +2367,9 @@ func _update_live_actions() -> void:
 	if outcome.get("title", "") == "Victory" and not victory_announced:
 		victory_announced = true
 		_announce_victory.call_deferred()
+	elif outcome.get("title", "") == "Defeated" and not defeat_announced:
+		defeat_announced = true
+		_show_outcome_screen.call_deferred(false)
 	if not outcome.is_empty():
 		# Forge sends no prompt once this seat is out, so offer a clear way to finish.
 		phase_title.text = outcome.title
@@ -2352,20 +2391,22 @@ func _update_live_actions() -> void:
 		modal_panel.set_submission_enabled(ready)
 	_update_turn_steps()
 
-## A win pops up once, then continues straight into the usual end-of-game wipe.
+## A win shows the YOU WIN screen once; I WON continues straight into the usual end-of-game wipe.
 func _announce_victory() -> void:
 	if not live or not is_instance_valid(app_host) or not app_host.has_method("end_after_victory"): return
-	var popup: Control = preload("res://scripts/app/GameConfirm.gd").new()
-	popup.title = "Victory!"
-	popup.dialog_text = "You won the game."
-	popup.ok_button_text = "Continue"
-	popup.show_cancel = false
-	popup.confirmed.connect(func():
-		popup.hide()
-		popup.queue_free()
-		app_host.end_after_victory())
-	add_child(popup)
-	popup.popup_centered()
+	_show_outcome_screen(true)
+
+## Full-screen YOU WIN / YOU LOSE. "I lost" closes it so the player can keep spectating.
+func _show_outcome_screen(won: bool) -> void:
+	if is_instance_valid(outcome_screen): outcome_screen.queue_free()
+	outcome_screen = preload("res://scripts/ui/OutcomeScreen.gd").new()
+	outcome_screen.z_index = 130
+	add_child(outcome_screen)
+	outcome_screen.present(won)
+	outcome_screen.acknowledged.connect(func():
+		outcome_screen.queue_free()
+		outcome_screen = null
+		if won and is_instance_valid(app_host) and app_host.has_method("end_after_victory"): app_host.end_after_victory())
 
 ## Defeat or game over for the local seat, as rail text; empty while still playing.
 func _match_outcome() -> Dictionary:
@@ -2387,6 +2428,9 @@ func _match_outcome() -> Dictionary:
 func _clear_live_session() -> void:
 	coin_toss_seen.clear()
 	victory_announced = false
+	defeat_announced = false
+	if is_instance_valid(outcome_screen): outcome_screen.queue_free()
+	outcome_screen = null
 	opening_hand_released = false
 	target_gallery_requested = false
 	target_gallery_on_board = false
@@ -2863,11 +2907,41 @@ func _show_table_settings() -> void:
 	sounds.add_child(sound_row)
 	sounds.add_child(_label("Drop an MP3 file onto this window to use it as Custom.", 12, Color("bfc4ca")))
 	extras.add_child(sounds)
+	var stack_box := VBoxContainer.new()
+	stack_box.add_child(_label("Stack responses", 14))
+	var stack_row := HBoxContainer.new()
+	stack_row.add_theme_constant_override("separation", 6)
+	var stack_buttons: Array = []
+	for index in range(STACK_MODES.size()):
+		var option := _button(STACK_MODES[index].name, func(): pass)
+		option.name = "StackMode" + str(index)
+		P.style_popup_button(option)
+		stack_row.add_child(option)
+		stack_buttons.append(option)
+	stack_box.add_child(stack_row)
+	var stack_hint := _label("", 12, Color("bfc4ca"))
+	stack_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack_hint.custom_minimum_size.x = 760
+	stack_box.add_child(stack_hint)
+	var mark_stack := func():
+		for index in range(stack_buttons.size()):
+			stack_buttons[index].modulate = Color.WHITE if index == int(ui_layout.stack_mode) else Color(1, 1, 1, 0.5)
+		stack_hint.text = STACK_MODES[int(ui_layout.stack_mode)].hint
+	for index in range(stack_buttons.size()):
+		stack_buttons[index].pressed.connect(func():
+			_set_ui_layout("stack_mode", float(index))
+			mark_stack.call())
+	mark_stack.call()
+	column.add_child(stack_box)
+	column.move_child(stack_box, position_in_column)
+	position_in_column += 1
 	var reset := _button("Reset to default", func():
 		for index in range(sliders.size()):
 			sliders[index].value = UI_LAYOUT_SETTINGS[index].default
 		_set_ui_layout("card_back", 0.0)
 		_set_ui_layout("notify_sound", 0.0)
+		_set_ui_layout("stack_mode", 1.0)
+		mark_stack.call()
 		mark_sound.call()
 		mark_back.call())
 	P.style_popup_button(reset)
@@ -3064,6 +3138,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if is_instance_valid(dragged_source):
 		return
+	if is_instance_valid(outcome_screen):
+		outcome_screen.handle_key(event)
+		get_viewport().set_input_as_handled()
+		return
 	if modal.visible:
 		if event.keycode == KEY_ESCAPE and decision_board_button.visible:
 			_set_decision_board(false)
@@ -3155,6 +3233,9 @@ func _smoke() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	size = Vector2(1600, 1000)
 	await get_tree().create_timer(0.2).timeout
+	if not _only_checks().is_empty():
+		await _run_only_checks("")
+		return
 	var layout_checks := preload("res://tests/LayoutLoopChecks.gd").new()
 	await layout_checks.run(self)
 	if layout_checks.failed:
@@ -3168,6 +3249,8 @@ func _smoke() -> void:
 	await preload("res://tests/StartupProgressChecks.gd").new().run(self)
 	await preload("res://tests/FormatLogChecks.gd").new().run(self)
 	await preload("res://tests/IncomingEffectChecks.gd").new().run(self)
+	await preload("res://tests/OutcomeScreenChecks.gd").new().run(self)
+	await preload("res://tests/ReadyScreenChecks.gd").new().run(self)
 	await preload("res://tests/CardFeedbackChecks.gd").new().run(self)
 	await preload("res://tests/StackFeedChecks.gd").new().run(self)
 	await preload("res://tests/PreviewChecks.gd").new().run(self)
@@ -3329,6 +3412,36 @@ func _smoke() -> void:
 	_reset()
 	await load("res://tests/LiveAdapterChecks.gd").new().run()
 	print("PASS: mock table smoke (state, play, stack, tap, attack, crowd, five prompt kinds, reset)")
+	get_tree().quit()
+
+## --only=Name[,Name] (with --smoke or --visual-checks=DIR) runs just tests/<Name>Checks.gd and quits.
+## Use it while iterating; the full sweep runs once before a push. See docs/testing.md.
+func _only_checks() -> PackedStringArray:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--only="): return arg.trim_prefix("--only=").split(",", false)
+	return PackedStringArray()
+
+func _run_only_checks(directory: String) -> void:
+	for check_name in _only_checks():
+		var path := "res://tests/%sChecks.gd" % check_name.strip_edges()
+		if not ResourceLoader.exists(path):
+			push_error("Unknown check %s (expected %s)" % [check_name, path])
+			get_tree().quit(1)
+			return
+		var check: Object = load(path).new()
+		var parameters: Array = []
+		for method in check.get_method_list():
+			if method.name == "run": parameters = method.args
+		var args: Array = []
+		if not parameters.is_empty(): args.append(self)
+		if parameters.size() > 1 and not directory.is_empty():
+			# The full visual run passes captures as a directory or a bool; match the signature.
+			args.append(true if int(parameters[1].type) == TYPE_BOOL else directory)
+			synthetic_hover = not check_name in ["HandPicking", "ZoneBrowser", "GameplayCleanup"]
+		await check.callv("run", args)
+		_reset()
+		await get_tree().process_frame
+	print("ONLY CHECKS DONE: ", ", ".join(_only_checks()))
 	get_tree().quit()
 
 func _click_phase_button(seat: int, step: String) -> void:
@@ -3602,6 +3715,9 @@ func _save_frame(path: String) -> void:
 	print("Screenshot saved: " + path)
 
 func _visual_checks(directory: String) -> void:
+	if not _only_checks().is_empty():
+		await _run_only_checks(directory)
+		return
 	await preload("res://tests/HandPickingChecks.gd").new().run(self, true)
 	await preload("res://tests/ZoneBrowserChecks.gd").new().run(self, directory)
 	await preload("res://tests/GameplayCleanupChecks.gd").new().run(self)
@@ -3615,6 +3731,8 @@ func _visual_checks(directory: String) -> void:
 	await preload("res://tests/StartingPlayerChecks.gd").new().run(self, directory)
 	await preload("res://tests/TapAnimationChecks.gd").new().run(self, true)
 	await preload("res://tests/IncomingEffectChecks.gd").new().run(self, directory)
+	await preload("res://tests/OutcomeScreenChecks.gd").new().run(self, directory)
+	await preload("res://tests/ReadyScreenChecks.gd").new().run(self, directory)
 	await preload("res://tests/CardFeedbackChecks.gd").new().run(self, directory)
 	await preload("res://tests/StackFeedChecks.gd").new().run(self, directory)
 	await preload("res://tests/PendingDrawChecks.gd").new().run(self, directory)

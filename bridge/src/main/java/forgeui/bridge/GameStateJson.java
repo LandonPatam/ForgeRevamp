@@ -118,6 +118,9 @@ final class GameStateJson {
             }
         }
         root.addProperty("autoPassStackId", autoPassStackId);
+        // Whether Forge found any legal response for this seat ("Everything" stack mode on the client).
+        root.addProperty("canRespond", gui.getGameController() instanceof PlayerControllerHuman responder
+                && responder.getPlayer().getView().hasAvailableActions());
 
         JsonArray combat = new JsonArray();
         CombatView cv = gv.getCombat();

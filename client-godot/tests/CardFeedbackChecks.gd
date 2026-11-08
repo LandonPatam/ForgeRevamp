@@ -59,9 +59,14 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(reef_button.effect_view.text == "Add X mana in any combination of {U} and/or {B}.", "Variable production must retain its quantity and combination rules")
 	assert(ui.modal_panel.option_buttons[0].effect_view.text.contains("one colorless mana"))
 	assert(reef_button.effect_view.runs.any(func(run): return not run.icon.is_empty()), "Rules must render inline mana symbols")
-	ui.modal_panel._toggle(2)
-	assert(ui.modal_panel.chosen == [2] and reef_button.text.is_empty(), "Selecting a formatted ability must preserve the exact engine index and formatting")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("dreadship-reef-abilities.png"))
+	assert(not ui.modal_panel.confirm_button.visible, "Choosing an ability needs no separate Confirm")
+	var activated: Array = []
+	var reef_panel: Control = ui.modal_panel
+	reef_panel.answered.connect(func(id, value): activated.append([id, value]))
+	reef_panel._toggle(2)
+	assert(reef_panel.chosen == [2] and reef_button.text.is_empty(), "Selecting a formatted ability must preserve the exact engine index and formatting")
+	assert(activated == [[998, [2]]], "Clicking an ability activates exactly that ability")
 	ui._close_modal()
 	ui._open_decision({"id": 9999, "kind": "choose", "title": "Manifold Insights", "sourceCard": {"id": 9898, "name": "Manifold Insights", "text": "Reveal the top ten cards of your library. Starting with the next opponent in turn order, each opponent chooses a different nonland card from among them. Put the chosen cards into your hand and the rest on the bottom of your library in a random order."}, "message": "Choose a nonland card", "min": 1, "max": 1, "options": [{"label": creature.name, "card": creature}]})
 	assert(ui.modal_panel.source_view.data.name == "Manifold Insights", "Intervention dialogs must retain the source card beside the choice")

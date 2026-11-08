@@ -454,8 +454,10 @@ func render_selection(info: Dictionary, player_count: int = 3) -> void:
 	var selected: Array = decks.filter(func(deck): return deck.id == selected_id)
 	console.present(info, player_count, decks.is_empty(), str(selected[0].name) if not selected.is_empty() else "")
 
-func set_console_status(message: String, connected: bool, lobby: String = "") -> void:
-	if is_instance_valid(console): console.set_status(message, connected, lobby)
+func set_console_status(message: String, connected: bool, lobby: String = "", party: Array = [], lobby_ready := false) -> void:
+	if is_instance_valid(console):
+		console.set_status(message, connected, lobby)
+		console.set_party(party, lobby_ready)
 
 func show_loading() -> Control:
 	normal_body.hide()

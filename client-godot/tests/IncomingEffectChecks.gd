@@ -10,6 +10,16 @@ func run(ui: Control, directory: String = "") -> void:
 	popup.review()
 	assert(popup.panel.visible, "An unrelated effect remains available for explicit review when responding")
 	popup.reset()
+	# A targeted player shows as a portrait tile with their name, never a word-wrapped "Y o u".
+	var at_player := {"connectionReady": true, "prompt": {"inputKind": "InputPassPriority"}, "players": [{"id": 0, "engineId": 41, "name": "Landon", "avatar": 3, "life": 40}], "stack": [], "targetedEffects": [{"id": 1, "stackId": 8100, "controllerName": "Opponent", "source": {"id": 8101, "name": "Lightning Bolt"}, "targets": [{"id": 41, "kind": "player", "name": "Landon"}]}]}
+	popup.present({"stack": [], "targetedEffects": []})
+	popup.present(at_player)
+	var tile: Control = popup.target_cards.get_child(0)
+	assert(tile.has_meta("player_target") and tile.get_node("Portrait").portrait != null, "A targeted player shows their Forge portrait")
+	assert(tile.get_node("Portrait").custom_minimum_size.x <= 112.0, "The 100 px Forge portrait is not stretched to card size")
+	assert(tile.get_node("PlayerName").text.begins_with("Landon") and tile.get_node("PlayerName").autowrap_mode == TextServer.AUTOWRAP_OFF, "The player's name sits under the portrait on one line")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-player-target.png"))
+	popup.reset()
 	var acknowledged: Array[int] = []
 	popup.acknowledged.connect(func(stack_id): acknowledged.append(stack_id))
 	popup.present({"stack": [], "targetedEffects": []})
@@ -95,9 +105,52 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(popup.targets_scroll.page == 1 and popup.target_cards.get_child(popup.targets_scroll.page_size).visible, "Later affected cards are accessible without scrolling")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-many-cards-paged-1280.png"))
 	assert(popup.panel.get_global_rect().end.y <= ui.size.y and popup.panel.get_global_rect().end.x <= ui.size.x, "Multi-card effect and long rules fit the viewport: " + str([popup.panel.get_global_rect(), ui.size, popup.panel.get_combined_minimum_size(), popup.rules.size, popup.rules_pages.scroll.size]))
+	_check_auto_resolve(popup)
+	_check_notice(popup)
 	popup.queue_free()
 	if not directory.is_empty():
 		ui.capture_size = Vector2i(1600, 1000)
 		ui.get_window().size = ui.capture_size
 	await ui.get_tree().process_frame
 	print("PASS: incoming spell image/target, fast resolution, deduplication, queue, reconnect and dialog suspension")
+
+## Auto-resolve: no after-the-fact notices; only a held, respondable effect on our things shows the popup.
+func _check_auto_resolve(popup: Control) -> void:
+	popup.reset()
+	var removal := {"id": 9700, "targetsLocal": true, "card": {"id": 9701, "name": "Murder", "owner": 1}, "targets": [{"id": 9702, "kind": "card", "name": "Our creature"}], "controllerName": "Bot"}
+	var base := {"autoResolveAll": true, "connectionReady": true, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": [], "stack": [], "targetedEffects": []}
+	popup.present(base)
+	var passing := base.duplicate(true)
+	passing.stack = [removal]
+	passing.autoPassStackId = 9700
+	passing.targetedEffects = [{"id": 40, "stackId": 9700, "kind": "targeted", "source": removal.card, "targets": removal.targets}]
+	popup.present(passing)
+	assert(not popup.panel.visible and popup.active.is_empty(), "With no legal response, auto-resolve shows no popup")
+	popup.reset()
+	popup.present(base)
+	var held := passing.duplicate(true)
+	held.autoPassStackId = -1
+	popup.present(held)
+	assert(popup.panel.visible and int(popup.active.stackId) == 9700 and popup.browse_button.visible, "A respondable spell aimed at us still offers Resolve / respond")
+	popup.reset()
+	popup.present(base)
+	var wipe := base.duplicate(true)
+	wipe.stack = [{"id": 9710, "targetsLocal": false, "card": {"id": 9711, "name": "Wrath of God", "owner": 1}, "targets": []}]
+	wipe.targetedEffects = [{"id": 41, "stackId": 9710, "kind": "massRemoval", "source": wipe.stack[0].card, "targets": []}]
+	popup.present(wipe)
+	assert(popup.panel.visible and popup.eyebrow.text == "BOARD-WIDE EFFECT", "A respondable board wipe keeps its board-wide popup")
+	popup.reset()
+
+## "Each opponent loses 1 life": a timed notice, never the blocking popup or a decision.
+func _check_notice(popup: Control) -> void:
+	popup.reset()
+	var base := {"stack": [], "targetedEffects": []}
+	popup.present(base)
+	var drain := {"stack": [], "targetedEffects": [{"id": 60, "stackId": 9800, "kind": "notice", "controllerName": "Bot", "source": {"id": 9801, "name": "Blood Artist"}, "effectText": "Target player loses 1 life and you gain 1 life.", "targets": []}]}
+	popup.present(drain)
+	assert(popup.notice_panel.visible and not popup.panel.visible and popup.active.is_empty(), "A player notice shows without blocking or asking")
+	assert(popup.notice_title.text.contains("Blood Artist") and popup.notice_panel.mouse_filter == Control.MOUSE_FILTER_IGNORE)
+	popup.present(drain)
+	assert(popup.notices.is_empty(), "A repeated snapshot never repeats a notice")
+	popup.reset()
+	assert(not popup.notice_panel.visible)

@@ -465,6 +465,55 @@ public final class BridgeChecks {
         check(!gui.isUiSetToSkipPhase(defender.getView(), forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS), "An explicit own-turn blocker stop still pauses with no legal response");
         var attacker = testCreature(attackerPlayer, "Attacker");
         var blocker = testCreature(defender, "Blocker");
+        // Stinkdrinker Bandit: "Whenever a Rogue you control attacks and isn't blocked, it gets +2/+1."
+        var bandit = testCreature(attackerPlayer, "Stinkdrinker Bandit");
+        var banditPump = forge.game.ability.AbilityFactory.getAbility("DB$ Pump | NumAtt$ +2 | NumDef$ +1 | Defined$ TriggeredAttacker", bandit);
+        banditPump.setActivatingPlayer(attackerPlayer);
+        banditPump.setTriggeringObject(forge.game.ability.AbilityKey.Attacker, attacker);
+        check(StackInteractionPolicy.isSelfContained(banditPump), "A trigger pumping the opponent's own attacker is self-only");
+        check(StackInteractionPolicy.mayAutoPass(banditPump, false, true, false, false), "An opponent's own-attacker pump must not hold a seat with an unrelated instant");
+        check(!StackInteractionPolicy.mayAutoPass(banditPump, false, true, true, false), "Holding a Stifle-like response keeps the pump trigger window");
+        banditPump.setTriggeringObject(forge.game.ability.AbilityKey.Attacker, blocker);
+        check(!StackInteractionPolicy.isSelfContained(banditPump), "A triggered pump on our creature keeps the response window");
+        var unfilled = forge.game.ability.AbilityFactory.getAbility("DB$ Pump | NumAtt$ +1 | Defined$ Remembered", bandit);
+        unfilled.setActivatingPlayer(attackerPlayer);
+        check(!StackInteractionPolicy.isSelfContained(unfilled), "A reference not yet filled in keeps the response window");
+        // Smart stack mode: another player's instants and sorceries always offer a response window.
+        var instantRules = forge.card.CardRules.fromScript(List.of("Name:Test Insight", "ManaCost:U", "Types:Instant", "A:SP$ Draw | NumCards$ 1"));
+        var instant = forge.game.card.CardFactory.getCard(new forge.item.PaperCard(instantRules, "", forge.card.CardRarity.Common), attackerPlayer, game);
+        var insight = instant.getFirstSpellAbility();
+        insight.setActivatingPlayer(attackerPlayer);
+        check(StackInteractionPolicy.isInstantOrSorcery(insight) && !StackInteractionPolicy.mayAutoPass(insight, false, true, false, false), "An opponent's instant offers a response window even when harmless");
+        check(StackInteractionPolicy.mayAutoPass(insight, false, false, false, false), "An opponent's instant still passes when we have no response");
+        // A counter on target creature the controller controls is routine; on our creature it is not.
+        var ownCounter = forge.game.ability.AbilityFactory.getAbility("DB$ PutCounter | ValidTgts$ Creature | CounterType$ P1P1 | CounterNum$ 1", bandit);
+        ownCounter.setActivatingPlayer(attackerPlayer);
+        ownCounter.getTargets().add(attacker);
+        check(StackInteractionPolicy.isSelfContained(ownCounter) && StackInteractionPolicy.mayAutoPass(ownCounter, false, true, false, false), "A counter targeting the controller's own creature passes");
+        ownCounter.getTargets().clear();
+        ownCounter.getTargets().add(blocker);
+        check(!StackInteractionPolicy.isSelfContained(ownCounter), "A counter targeting our creature keeps the window");
+        ownCounter.getTargets().clear();
+        check(!StackInteractionPolicy.isSelfContained(ownCounter), "An unchosen target keeps the window");
+        // Untargeted effects on players pass with a notice for the affected seats.
+        var drain = forge.game.ability.AbilityFactory.getAbility("DB$ LoseLife | Defined$ Opponent | LifeAmount$ 1", bandit);
+        drain.setActivatingPlayer(attackerPlayer);
+        check(StackInteractionPolicy.noticePlayers(drain).contains(defender) && StackInteractionPolicy.mayAutoPass(drain, false, true, false, false), "Each opponent losing life is a notice, not a stop");
+        var everyoneDraws = forge.game.ability.AbilityFactory.getAbility("DB$ Draw | Defined$ Player | NumCards$ 1", bandit);
+        everyoneDraws.setActivatingPlayer(attackerPlayer);
+        check(StackInteractionPolicy.isPlayerNotice(everyoneDraws), "Each player drawing is a notice");
+        var everyoneDiscards = forge.game.ability.AbilityFactory.getAbility("DB$ Discard | Defined$ Player | NumCards$ 1 | Mode$ TgtChoose", bandit);
+        everyoneDiscards.setActivatingPlayer(attackerPlayer);
+        check(!StackInteractionPolicy.isPlayerNotice(everyoneDiscards) && !StackInteractionPolicy.mayAutoPass(everyoneDiscards, false, true, false, false), "Each player discarding keeps the window to cast first");
+        var notices = new TargetedEffectHistory();
+        var drainItem = new forge.game.spellability.StackItemView(990, null);
+        drainItem.set(forge.trackable.TrackableProperty.ActivatingPlayer, attackerPlayer.getView());
+        drainItem.set(forge.trackable.TrackableProperty.SourceCard, bandit.getView());
+        notices.record(drainItem, defender.getView(), drain);
+        check(notices.snapshot().size() == 1 && notices.snapshot().get(0).getAsJsonObject().get("kind").getAsString().equals("notice"), "The drained seat receives a notice event");
+        var controllerNotices = new TargetedEffectHistory();
+        controllerNotices.record(drainItem, attackerPlayer.getView(), drain);
+        check(controllerNotices.snapshot().isEmpty(), "The effect's controller gets no notice about their own effect");
         var scry = forge.game.ability.AbilityFactory.getAbility("SP$ Scry | Cost$ U | ScryNum$ 1", blocker);
         scry.setSubAbility(new forge.game.spellability.AbilitySub(forge.game.ability.ApiType.Draw, blocker, null, Map.of("NumCards", "1")));
         check(GameStateJson.isRoutineInteraction(scry), "A local scry-then-draw chain must proceed into its real engine choices");

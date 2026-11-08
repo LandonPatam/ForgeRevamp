@@ -17,6 +17,7 @@ func run(ui: Control, directory: String = "") -> void:
 	await check_face_down(ui, directory)
 	await check_stacking_and_colors(ui, directory)
 	await check_victory_popup(ui)
+	await check_opponent_spacing(ui, directory)
 	if not directory.is_empty(): await _capture(ui, directory)
 	print("PASS: trait vector glyphs and + / - card zoom")
 
@@ -113,6 +114,37 @@ func _capture(ui: Control, directory: String) -> void:
 	ui._fill_inspection_traits({})
 	for view in views: view.queue_free()
 	await ui.get_tree().process_frame
+
+## Opponent boards pack automatically: one card's hanging P/T must clear the next card's trait icons,
+## and P/T draws above any icon it could still touch.
+func check_opponent_spacing(ui: Control, directory: String) -> void:
+	var original: Dictionary = ui.snapshot.duplicate(true)
+	var state: Dictionary = ui.snapshot.duplicate(true)
+	var seat := -1
+	for index in range(state.players.size()):
+		if int(state.players[index].id) == 1: seat = index
+	var crowd: Array = []
+	for i in range(7):
+		crowd.append({"id": 9950 + i, "name": "Trait Beast %d" % i, "zone": "Battlefield", "owner": 1, "color": "G", "typeLine": "Creature - Beast",
+			"stats": "10/10", "power": 10, "toughness": 10, "keywords": ["FLYING", "TRAMPLE", "LIFELINK"], "tapped": false, "counters": {}})
+	state.players[seat].zones.Battlefield = crowd
+	ui._apply_state(state)
+	await ui.get_tree().create_timer(0.4).timeout
+	var neighbors := 0
+	for i in range(6):
+		var left: Control = ui.cards[9950 + i]
+		var right: Control = ui.cards[9951 + i]
+		assert(left.stats_layer.z_index > left.trait_layer.z_index, "Power/toughness draws above trait icons")
+		if absf(left.global_position.y - right.global_position.y) > 1.0: continue
+		neighbors += 1
+		var font_size: int = maxi(8, int(left.STATS_FONT * left.size.x / 144.0))
+		var stats_end: float = left.global_position.x + left.stats_rect("10/10", font_size).end.x
+		var traits_start: float = right.global_position.x - right._trait_badge_size() * 0.5
+		assert(stats_end <= traits_start + 0.5, "Opponent cards leave room between P/T and the next card's traits: %s > %s" % [stats_end, traits_start])
+	assert(neighbors > 0, "The crowded opponent row places cards side by side")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("opponent-trait-spacing.png"))
+	ui._apply_state(original)
+	await ui.get_tree().create_timer(0.3).timeout
 
 ## A face-down permanent shows the standard Magic back and its public 2/2, never the real card.
 func check_face_down(ui: Control, directory: String) -> void:

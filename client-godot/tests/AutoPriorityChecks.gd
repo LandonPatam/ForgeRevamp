@@ -120,4 +120,63 @@ func run() -> void:
 	effect_adapter.state.stack.pop_front()
 	effect_adapter._service_effect_acknowledgment()
 	assert(effect_adapter.sent.size() == 3 and effect_adapter.acknowledged_effects.is_empty(), "An earlier acknowledged effect must retain its priority pass after a response resolves")
+	_check_resolve_all()
+	_check_stack_modes()
 	print("PASS: automatic routine priority and required-choice/damage/empty-stack guards")
+
+## Table setting "Auto-resolve the stack": passes any stack item, never a decision.
+func _check_resolve_all() -> void:
+	var held := {"connectionReady": true, "game": {}, "stack": [{"id": 70}], "autoPassStackId": -1, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": []}
+	assert(Live.can_resolve_all(held) and not Live.can_auto_pass(held))
+	var adapter := RecordingLive.new()
+	adapter.connected = true
+	adapter.syncing = false
+	adapter.state = held
+	adapter._service_auto_priority()
+	adapter.auto_priority_due = 0
+	adapter._service_auto_priority()
+	assert(adapter.sent.is_empty(), "With the setting off, a held stack item keeps its response window")
+	adapter.auto_resolve_all = true
+	adapter._service_auto_priority()
+	adapter.auto_priority_due = 0
+	adapter._service_auto_priority()
+	assert(adapter.sent == [{"action": "ok"}], "With the setting on, any stack item passes priority once")
+	adapter.pending = ""
+	adapter._service_auto_priority()
+	assert(adapter.sent.size() == 1, "Never pass the same stack item twice")
+	var aimed := held.duplicate(true)
+	aimed.stack[0].targetsLocal = true
+	assert(Live.holds_for_response(aimed) and not Live.can_resolve_all(aimed), "Auto-resolve stops for a respondable spell aimed at our things")
+	aimed.autoPassStackId = 70
+	assert(not Live.holds_for_response(aimed) and Live.can_auto_pass(aimed), "With no legal response even a spell aimed at us passes on its own")
+	var wipe := held.duplicate(true)
+	wipe.targetedEffects = [{"id": 3, "stackId": 70, "kind": "massRemoval"}]
+	assert(Live.holds_for_response(wipe) and not Live.can_resolve_all(wipe), "Auto-resolve stops for a respondable board wipe")
+	wipe.targetedEffects[0].kind = "targeted"
+	assert(not Live.holds_for_response(wipe), "Another player's targeted effect does not stop auto-resolve")
+	for blocked in [{"asks": [{"kind": "choose"}]}, {"pendingDraws": [5]}, {"takebackCast": {"id": 9}}, {"stack": []}, {"prompt": {"inputKind": "InputSelectTargets", "okEnabled": true}}, {"prompt": {"inputKind": "InputPayManaOfCostPayment", "okEnabled": false}}]:
+		var state := held.duplicate(true)
+		state.merge(blocked, true)
+		assert(not Live.can_resolve_all(state), "Auto-resolve never answers a decision, draw, own undo window or empty stack: %s" % [blocked])
+
+## "Stack responses": Everything waits on any opponent item this seat can answer; Smart keeps the bridge's pass.
+func _check_stack_modes() -> void:
+	var adapter := RecordingLive.new()
+	adapter.state = {"connectionReady": true, "game": {}, "stack": [{"id": 50, "card": {"owner": 1}}], "bridgeAutoPassId": 50, "autoPassStackId": 50, "canRespond": true, "prompt": {"inputKind": "InputPassPriority", "okEnabled": true}, "asks": [], "pendingDraws": []}
+	adapter.stack_mode = 1
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Smart keeps the bridge's routine pass")
+	adapter.stack_mode = 0
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == -1, "Everything waits on a routine opponent item when we can respond")
+	adapter.state.canRespond = false
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Everything still passes when we have no response")
+	adapter.state.canRespond = true
+	adapter.state.stack[0].card.owner = 0
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Everything leaves our own routine casts' automatic commit alone")
+	adapter.stack_mode = 1
+	adapter.state.stack[0].card.owner = 1
+	adapter._apply_stack_mode()
+	assert(int(adapter.state.autoPassStackId) == 50, "Switching back to Smart restores the bridge's decision")

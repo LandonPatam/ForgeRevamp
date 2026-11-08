@@ -573,6 +573,28 @@ func pass_turn() -> bool:
 			return check(not find_card("Llanowar Elves").is_empty(), "Passing the turn must not play anything for you")
 	return check(false, "Space did not pass the turn without further clicks: " + str(ui.snapshot.game) + " " + str(ui.snapshot.prompt))
 
+## Reported bug: picking an ability in the "Choose ability" popup did nothing (Mind Stone stayed
+## untapped, no mana). One click on the ability must activate it in Forge.
+func mind_stone() -> bool:
+	var stone := find_card("Mind Stone", "Battlefield")
+	if not check(not stone.is_empty(), "Mind Stone missing from the prepared board"): return false
+	ui._click_card(stone.id)
+	if not await wait_ready(): return false
+	if not check(not ui.snapshot.asks.is_empty(), "Clicking Mind Stone must ask which ability: " + str(ui.snapshot.prompt)): return false
+	var options: Array = ui.snapshot.asks[0].get("options", [])
+	var index := -1
+	for i in range(options.size()):
+		if str(options[i].get("label", "")).contains("Add {C}"): index = i
+	if not check(index >= 0 and index < ui.modal_panel.option_buttons.size(), "The popup must offer the {C} ability: " + str(options)): return false
+	await capture("choose-ability")
+	ui.modal_panel.option_buttons[index].pressed.emit() # Exactly what a player's click does; no Confirm.
+	if not await wait_ready(): return false
+	await capture("result")
+	var after := find_card("Mind Stone", "Battlefield")
+	if not check(after.get("tapped", false), "Choosing the ability must tap Mind Stone"): return false
+	if not check(int(ui.snapshot.players[0].mana.get("C", 0)) == 1, "Choosing the ability must add {C}: " + str(ui.snapshot.players[0].mana)): return false
+	return check(ui.snapshot.asks.is_empty(), "No further decision may remain after the ability resolves")
+
 func run_scenario(table: Control, name: String) -> void:
 	ui = table
 	scenario = name
@@ -602,7 +624,11 @@ func run_scenario(table: Control, name: String) -> void:
 		"combat": passed = await combat()
 		"greater-good": passed = await greater_good()
 		"pass-turn": passed = await pass_turn()
-		_: passed = check(false, "Scenario driver not implemented: " + name)
+		_:
+			# New scenarios need no registration: tests/scenarios/<name>.state + func <name_with_underscores>().
+			var driver := name.replace("-", "_")
+			if has_method(driver): passed = await call(driver)
+			else: passed = check(false, "Scenario driver not implemented: " + driver)
 	if not passed: return
 	print("PASS: Godot live integration (prepared ", name, " card-combination scenario; UI choices and exact resulting game state)")
 	ui.get_tree().quit()
