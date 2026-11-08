@@ -592,8 +592,9 @@ func _draw() -> void:
 	grow = 1.0 - pow(1.0 - grow, 3.0)
 	var pulse := 0.55 + 0.45 * sin(age * 4.0)
 	for view in _wipe_views():
-		var rect: Rect2 = to_local * view.get_global_rect()
-		var target := rect.get_center()
+		# The card's own transform, so a tapped (turned) card gets its frame and branch where it is.
+		var card_transform: Transform2D = to_local * view.get_global_transform()
+		var target: Vector2 = card_transform * (view.size * 0.5)
 		var mine := int(view.data.get("owner", -1)) == 0
 		var color := Color(WIPE_LINE, 1.0 if mine else 0.7)
 		var bend := origin.lerp(target, 0.5) + Vector2(0, -0.12 * origin.distance_to(target))
@@ -611,7 +612,9 @@ func _draw() -> void:
 			draw_circle(spark, 6.0 if mine else 4.5, Color(1, 0.9, 0.75, 0.95))
 			var frame := P.box(Color(WIPE_LINE, 0.12 * pulse), Color(WIPE_LINE, 0.4 + 0.6 * pulse), 8, 0)
 			frame.set_border_width_all(4 if mine else 3)
-			draw_style_box(frame, rect.grow(4))
+			draw_set_transform_matrix(card_transform)
+			draw_style_box(frame, Rect2(Vector2.ZERO, view.size).grow(4))
+			draw_set_transform_matrix(Transform2D.IDENTITY)
 
 func _layout_wipe() -> void:
 	if wipe_card == null or not table_rect.has_area(): return
