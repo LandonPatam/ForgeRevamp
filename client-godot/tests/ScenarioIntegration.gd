@@ -58,7 +58,7 @@ func settle() -> bool:
 		if not await wait_ready(): return false
 		if ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": return true
 		if not await step(): return false
-	return check(false, "Interaction did not settle: " + str(ui.snapshot.prompt))
+	return check(false, "Interaction did not settle: " + str(ui.snapshot.prompt) + " modal=" + str(ui.modal.visible) + " " + (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none") + " effect=" + str(ui.incoming_effect.showing()) + " responding=" + str(ui.incoming_effect.responding) + " interaction=" + str(ui.interaction_panel.panel.visible) + " autoPass=" + str(ui.snapshot.get("autoPassStackId", -1)) + " acked=" + str(ui.adapter.acknowledged_effects) + " stack=" + str(ui.snapshot.stack.map(func(item): return [item.id, item.get("sourceName", "")])))
 
 func tap(name: String, count: int = 1) -> bool:
 	var sources: Array = zone("Battlefield").filter(func(card): return card.name == name and not card.get("tapped", false))
@@ -595,9 +595,10 @@ func mind_stone() -> bool:
 	var index := -1
 	for i in range(options.size()):
 		if str(options[i].get("label", "")).contains("Add {C}"): index = i
-	if not check(index >= 0 and index < ui.modal_panel.option_buttons.size(), "The popup must offer the {C} ability: " + str(options)): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(index >= 0 and tether.visible and not ui.modal.visible and index < tether.mode_buttons.size(), "The ability choice must be a tether on Mind Stone offering {C}: " + str(options)): return false
 	await capture("choose-ability")
-	ui.modal_panel.option_buttons[index].pressed.emit() # Exactly what a player's click does; no Confirm.
+	tether.mode_buttons[index].pressed.emit() # Exactly what a player's click does; no Confirm.
 	if not await wait_ready(): return false
 	await capture("result")
 	var after := find_card("Mind Stone", "Battlefield")
@@ -667,18 +668,10 @@ func enclave() -> bool:
 	var land := find_card("Bonders' Enclave", "Battlefield")
 	ui._click_card(land.id)
 	if not await wait_ready(): return false
-	if not check(ui.modal.visible and ui.snapshot.asks.any(func(ask): return ask.get("title", "") == "Choose ability"), "Clicking Bonders' Enclave opens Forge's ability choice"): return false
-	ui.modal_panel.board_requested.emit()
-	for index in range(60): await ui.get_tree().process_frame
-	describe_ui("viewing board")
-	var button: Rect2 = ui.decision_board_button.get_global_rect()
-	var table: Rect2 = ui.board_scroller.get_global_rect()
-	if not check(ui.decision_board_button.is_visible_in_tree() and not ui.modal_center.visible, "Viewing the board keeps a Return to decision control"): return false
-	if not check(button.get_center().distance_to(table.get_center()) < 4.0 and button.size.x >= 300, "Return to decision sits large in the middle of the table: " + str(button) + " / " + str(table)): return false
-	if not check(ui.decision_board_button.modulate.a < 0.9, "Return to decision is see-through over the table"): return false
-	await capture("return")
-	ui.decision_board_button.pressed.emit()
-	if not check(ui.modal_center.visible and not ui.decision_board_button.visible and ui.modal_panel.get_script().resource_path.ends_with("PromptPanel.gd"), "Return to decision restores the same ability choice"): return false
+	# The ability choice is a tether on the land, not a popup (Return to decision is covered by the
+	# DecisionReview UI check for popups).
+	if not check(not ui.modal.visible and ui.interaction_panel.callout.visible and ui.snapshot.asks.any(func(ask): return ask.get("title", "") == "Choose ability"), "Clicking Bonders' Enclave opens its ability choice as a tether"): return false
+	await capture("tether")
 	var hand := int(ui.snapshot.players[0].handCount)
 	if not await choose_named("Draw"): return false
 	for index in range(40):
@@ -979,3 +972,26 @@ func wrath_counter() -> bool:
 	var creatures: Array = []
 	for player in ui.snapshot.players: creatures.append_array(player.zones.Battlefield.filter(func(card): return card.name in ["Grizzly Bears", "Llanowar Elves", "Goblin Guide"]))
 	return check(creatures.size() == 4, "Countered: every creature survives: " + str(creatures.map(func(card): return card.name)))
+
+## Only threats: an opponent's ability aimed at your creature (Aether Spellbomb's bounce) waits for you
+## even with no response, so you see it before your creature leaves, not after.
+func spellbomb() -> bool:
+	ui.ui_layout.stack_mode = 2.0 # Only threats, for this run only.
+	ui.adapter.stack_mode = 2
+	ui.adapter.auto_resolve_all = true
+	var effect: Control = ui.incoming_effect
+	var warned := false
+	for index in range(200):
+		if not await wait_ready(): return false
+		var top: Dictionary = ui.snapshot.stack[0] if not ui.snapshot.stack.is_empty() else {}
+		if str(top.get("sourceName", "")) == "Aether Spellbomb":
+			for wait in range(20): await ui.get_tree().process_frame
+			print("SCENARIO spellbomb waiting: autoPass=", ui.snapshot.get("autoPassStackId", -1), " popup=", effect.showing(), " angel=", find_card("Serra Angel", "Battlefield").is_empty() == false)
+			if effect.showing() and int(effect.active.get("stackId", -1)) == int(top.id) and not find_card("Serra Angel", "Battlefield").is_empty():
+				warned = true
+				await capture("warned")
+				effect.dismiss() # I accept
+		if not find_card("Serra Angel", "Hand").is_empty() or (find_card("Serra Angel", "Battlefield").is_empty() and index > 5): break
+		await ui.get_tree().create_timer(0.1).timeout
+	if not check(not find_card("Serra Angel", "Hand").is_empty(), "The fixture needs the AI to bounce Serra Angel"): return false
+	return check(warned, "The bounce aimed at your creature must be shown before it resolves, while it waits for you")

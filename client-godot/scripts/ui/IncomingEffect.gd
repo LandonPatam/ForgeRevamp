@@ -77,8 +77,8 @@ func _ready() -> void:
 	top.add_child(eyebrow)
 	var close := Button.new()
 	browse_button = close
-	close.text = "View battlefield"
-	close.tooltip_text = "Keep priority and return to the battlefield to cast a response or activate an ability"
+	close.text = "Respond with action"
+	close.tooltip_text = "Keep priority and go to the table to cast a spell or activate an ability in response."
 	P.style_popup_button(close)
 	close.custom_minimum_size = Vector2(56, 30)
 	close.add_theme_font_size_override("font_size", 16)
@@ -251,7 +251,7 @@ func respond() -> void:
 
 func _update_actions() -> void:
 	var pending_effect: bool = stack_ids.has(int(active.get("stackId", -1)))
-	resolve_button.text = "Resolve" if pending_effect else "Close"
+	resolve_button.text = "I accept" if pending_effect else "Close"
 	browse_button.visible = pending_effect
 
 func _next() -> void:

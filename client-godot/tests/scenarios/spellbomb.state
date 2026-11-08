@@ -1,0 +1,13 @@
+# Only threats: the opponent's Aether Spellbomb bounces your blocker in their Main 1; you must see it coming
+activeplayer=p1
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Serra Angel;Grizzly Bears;Plains;Plains
+p0library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p1life=40
+p1battlefield=Aether Spellbomb;Island;Island;Craw Wurm;Shivan Dragon
+p1library=Island;Island;Island;Island;Island;Island;Island;Island;Island;Island;Island;Island
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

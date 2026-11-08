@@ -111,7 +111,7 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(not popup.panel.visible, "Routine abilities remain in the stack rail until explicitly reviewed")
 	popup.review()
 	assert(popup.panel.visible and popup.active.stackId == 500 and popup.rules.text == item.text, "Any pending ability needs its actual effect text and source, without a targeted-event special case")
-	assert(not popup.targets_scroll.visible and popup.resolve_button.text == "Resolve")
+	assert(not popup.targets_scroll.visible and popup.resolve_button.text != "Close", "A pending effect offers its accept button, not Close")
 	var acknowledged: Array = []
 	popup.acknowledged.connect(func(id): acknowledged.append(id))
 	popup.browse_button.pressed.emit()
