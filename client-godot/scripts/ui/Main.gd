@@ -120,7 +120,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0, "mana_overlay": 0.0, "playable_glow": 1.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -566,10 +566,13 @@ func _build_shell() -> void:
 	modal_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(modal_center)
 	decision_board_button = _terminal_button("Return to decision", _toggle_decision_board, "Go back to the decision you were making (Escape).", true)
-	decision_board_button.add_theme_font_size_override("font_size", 15)
+	decision_board_button.add_theme_font_size_override("font_size", 24)
 	decision_board_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	decision_board_button.autowrap_mode = TextServer.AUTOWRAP_OFF
 	decision_board_button.clip_text = true
+	# See-through over the table so covered cards stay readable; solid while pointed at.
+	decision_board_button.mouse_entered.connect(func(): _pulse_decision_board(true))
+	decision_board_button.mouse_exited.connect(func(): _pulse_decision_board(false))
 	decision_board_button.hide()
 	modal.add_child(decision_board_button)
 	notify_sound = NotificationSound.new()
@@ -659,12 +662,24 @@ func _read_ui_layout(config: ConfigFile) -> void:
 	# The earlier On/Off "auto_resolve" setting maps to Only threats.
 	var legacy_mode := 2 if float(config.get_value("ui", "auto_resolve", 0.0)) >= 0.5 else 1
 	ui_layout.stack_mode = float(clampi(int(config.get_value("ui", "stack_mode", legacy_mode)), 0, STACK_MODES.size() - 1))
+	ui_layout.mana_overlay = 1.0 if float(config.get_value("ui", "mana_overlay", 0.0)) >= 0.5 else 0.0
+	ui_layout.playable_glow = 1.0 if float(config.get_value("ui", "playable_glow", 1.0)) >= 0.5 else 0.0
 	_apply_table_style()
 
 ## Pushes pile and card-back preferences to the shared layout and library views.
 func _apply_table_style() -> void:
 	FieldLayout.pile_step = float(ui_layout.pile_spread)
 	FieldLayout.tap_aside = float(ui_layout.pile_tap) >= 0.5
+	var overlays_changed: bool = Card.mana_overlay != (float(ui_layout.mana_overlay) >= 0.5) or Card.playable_glow != (float(ui_layout.playable_glow) >= 0.5)
+	Card.mana_overlay = float(ui_layout.mana_overlay) >= 0.5
+	Card.playable_glow = float(ui_layout.playable_glow) >= 0.5
+	if overlays_changed:
+		for view in cards.values() + zone_views.values() + hand_copies.values():
+			if is_instance_valid(view): view._redraw_layers()
+		if not snapshot.is_empty() and snapshot.has("players"):
+			for p in snapshot.players:
+				if hud_values.has(p.id):
+					for zone in hud_values[p.id].zones: hud_values[p.id].zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
 	if adapter != null and "stack_mode" in adapter:
 		adapter.stack_mode = int(ui_layout.stack_mode)
 		adapter.auto_resolve_all = int(ui_layout.stack_mode) == 2
@@ -870,6 +885,7 @@ func _apply_state(value: Dictionary) -> void:
 		token_artwork.match_active = not is_instance_valid(app_host) or not app_host.parked
 		token_artwork.observe(snapshot)
 	_close_accepted_commander_browser()
+	_announce_returned_lands()
 	incoming_effect.present(snapshot)
 	stack_attention.present(snapshot)
 	# Sound once when the stack starts waiting on this player, not on every snapshot.
@@ -888,8 +904,9 @@ func _apply_state(value: Dictionary) -> void:
 		values.info.text = ""
 		values.info.hide()
 		for zone in values.zones:
+			values.zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
 			values.zones[zone].text = str(p.zones[zone].size())
-			values.zones[zone].tooltip_text = zone + " / " + str(p.zones[zone].size()) + " cards. Click to browse."
+			values.zones[zone].tooltip_text = zone + " / " + str(p.zones[zone].size()) + " cards." + (" Something here can be cast now." if values.zones[zone].playable else "") + " Click to browse."
 	library_count.text = str(snapshot.players[0].libraryCount) + " Library"
 	library_pile.show()
 	library_count.show()
@@ -986,6 +1003,7 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		var c: Dictionary = values[i].duplicate(true)
 		c.owner = owner
 		c.zone = zone
+		c.playable = _playable(c, owner, zone)
 		if snapshot.prompt.get("inputKind", "") == "InputBlock" and snapshot.prompt.get("chosen", []).has("card:" + str(c.id)):
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
 		c.stackCount = int(anchored_counts.get(c.id, packed.counts.get(c.id, 1)))
@@ -1636,6 +1654,7 @@ func _process(_delta: float) -> void:
 		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing): _present_interaction()
 	_layout_zone_browser()
 	_layout_mana_pool()
+	if is_instance_valid(decision_board_button) and decision_board_button.visible: _place_decision_board_button()
 	for id in play_positions.keys():
 		play_positions[id].age += _delta
 		# A cost/mode popup keeps Forge at priority with the card still in hand; keep it on the board until answered.
@@ -1658,11 +1677,13 @@ func _sync_hand_copies() -> void:
 			hand_copies.erase(id)
 	for view in cards.values():
 		if not view.hand_mode:
+			view.trait_layer.show() # A card that left the hand while lifted draws its table traits again.
 			continue
 		var lifted: bool = view.visible and not view.drag_active and not _modal_covers_table() and (view.hover_active or view.hand_hover_amount > 0.001)
 		if not hand_copies.has(view.data.id):
 			var copy := Card.new()
 			copy.inspection = true
+			copy.hand_copy = true
 			copy.table_angle = false
 			copy.gui_input.connect(_hand_copy_input.bind(view))
 			hand_root.add_child(copy)
@@ -1674,6 +1695,7 @@ func _sync_hand_copies() -> void:
 		hand_copies[view.data.id].surface.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		if not lifted:
 			view.visual.show()
+			view.trait_layer.show()
 			if hand_copies.has(view.data.id):
 				hand_copies[view.data.id].hide()
 			continue
@@ -1697,6 +1719,7 @@ func _sync_hand_copies() -> void:
 		visual.mouse_filter = Control.MOUSE_FILTER_STOP if view.hover_active else Control.MOUSE_FILTER_IGNORE
 		visual.show()
 		view.visual.hide()
+		view.trait_layer.hide() # Pips and the playable glow travel with the lifted copy.
 	_order_hand_input()
 
 func _order_hand_input() -> void:
@@ -2454,6 +2477,7 @@ func _clear_live_session() -> void:
 	pile_anchors.clear()
 	pile_drag_ids.clear()
 	play_positions.clear()
+	announced_land_returns.clear()
 	pending_returns.clear()
 	hand_order.clear()
 	hand_offset = 0
@@ -2494,6 +2518,7 @@ func _reset() -> void:
 	pile_anchors.clear()
 	pile_drag_ids.clear()
 	play_positions.clear()
+	announced_land_returns.clear()
 	pending_returns.clear()
 	board_scroller.scroll_vertical = 0
 	for row in rows.values():
@@ -2523,13 +2548,44 @@ func _notify(message: String) -> void:
 		_layout_board()
 	if live and open_ask >= 0 and is_instance_valid(modal_panel):
 		modal_panel.show_error(message)
+	_show_toast(message)
+
+func _show_toast(message: String, seconds: float = 1.8) -> void:
 	toast.text = message
 	toast.modulate.a = 1
 	if toast_tween != null:
 		toast_tween.kill()
 	toast_tween = create_tween()
-	toast_tween.tween_interval(1.8)
+	toast_tween.tween_interval(seconds)
 	toast_tween.tween_property(toast, "modulate:a", 0.0, 0.3)
+
+var announced_land_returns: Dictionary = {}
+
+## Forge's own priority-time scan (the bridge's weakSelection) marks what this seat can cast or
+## play right now with its available mana: hand, commander and graveyard/exile casts.
+func _playable(card: Dictionary, owner: int, zone: String) -> bool:
+	if not live or owner != 0 or zone == "Battlefield" or card.get("hidden", false): return false
+	if snapshot.get("prompt", {}).get("inputKind", "") != "InputPassPriority" or not snapshot.get("asks", []).is_empty(): return false
+	return int(card.get("weakSelection", 0)) > 0
+
+## A land you played that bounced straight back (Dimir Aqueduct with no other land) looks like a
+## rejected play; Forge's log says it was accepted, so explain that the land drop is spent.
+func _announce_returned_lands() -> void:
+	if not live or snapshot.get("players", []).is_empty(): return
+	var me: Dictionary = snapshot.players[0]
+	for entry in snapshot.get("log", []):
+		var text := str(entry)
+		# Forge's log may use a different display name; the instance ID identifies the card.
+		if not text.begins_with("Land: ") or not text.contains(" played ") or announced_land_returns.has(text + str(snapshot.game.get("turn", 0))): continue
+		var id := int(text.get_slice("(", text.get_slice_count("(") - 1).trim_suffix(")"))
+		# Still entering: decide once its trigger has resolved. A land that stayed is settled.
+		if me.get("zones", {}).get("Battlefield", []).any(func(card): return int(card.get("id", -1)) == id):
+			if snapshot.get("stack", []).is_empty(): announced_land_returns[text + str(snapshot.game.get("turn", 0))] = true
+			continue
+		announced_land_returns[text + str(snapshot.game.get("turn", 0))] = true
+		var card_name := text.get_slice(" played ", 1).get_slice(" (", 0)
+		if me.get("zones", {}).get("Hand", []).any(func(card): return int(card.get("id", -1)) == id):
+			_show_toast("%s returned to your hand. Your land drop for this turn is used." % card_name, 5.0)
 
 func _reject_card_action(id: int) -> void:
 	var view: Control = cards.get(id, zone_views.get(id))
@@ -2601,18 +2657,32 @@ func _set_decision_board(show_board: bool) -> void:
 	if decision_board_pulse != null: decision_board_pulse.kill()
 	decision_board_button.modulate = Color.WHITE
 	if not show_board: return
-	# A large, gently pulsing button over the top of the right rail: easy to find, off the field.
+	# A large, gently pulsing, see-through button in the middle of the table: impossible to miss.
 	var title := ""
 	if not snapshot.get("asks", []).is_empty(): title = str(snapshot.asks[0].get("title", ""))
 	if title.is_empty(): title = str(snapshot.get("prompt", {}).get("message", "")).get_slice("\n", 0)
-	decision_board_button.text = "◀  RETURN TO DECISION" + ("\n" + (title.left(23) + ("…" if title.length() > 23 else "")) if not title.is_empty() else "")
-	var rail_rect: Rect2 = rail.get_global_rect() if is_instance_valid(rail) and rail.is_visible_in_tree() else Rect2(Vector2(size.x - 300, 0), Vector2(280, 0))
-	var origin: Vector2 = modal.get_global_transform().affine_inverse() * rail_rect.position
-	decision_board_button.position = origin + Vector2(0, 8)
-	decision_board_button.size = Vector2(maxf(220.0, rail_rect.size.x), 84)
+	decision_board_button.text = "◀  RETURN TO DECISION" + ("\n" + (title.left(34) + ("…" if title.length() > 34 else "")) if not title.is_empty() else "")
+	_place_decision_board_button()
+	_pulse_decision_board(decision_board_button.get_global_rect().has_point(get_global_mouse_position()))
+
+func _place_decision_board_button() -> void:
+	var table: Rect2 = board_scroller.get_global_rect() if is_instance_valid(board_scroller) and board_scroller.is_visible_in_tree() else get_global_rect()
+	var button_size := Vector2(minf(480.0, table.size.x - 32.0), 124)
+	var center: Vector2 = modal.get_global_transform().affine_inverse() * table.get_center()
+	decision_board_button.size = button_size
+	decision_board_button.position = (center - button_size * 0.5).round()
+
+func _pulse_decision_board(hovered: bool) -> void:
+	if decision_board_pulse != null: decision_board_pulse.kill()
+	decision_board_pulse = null
+	if not decision_board_button.visible: return
+	if hovered:
+		decision_board_button.modulate = Color(1.15, 1.15, 1.15, 1.0)
+		return
+	decision_board_button.modulate = Color(1, 1, 1, 0.55)
 	decision_board_pulse = create_tween().set_loops()
-	decision_board_pulse.tween_property(decision_board_button, "modulate", Color(1.25, 1.25, 1.25), 0.7)
-	decision_board_pulse.tween_property(decision_board_button, "modulate", Color.WHITE, 0.7)
+	decision_board_pulse.tween_property(decision_board_button, "modulate:a", 0.75, 0.8)
+	decision_board_pulse.tween_property(decision_board_button, "modulate:a", 0.5, 0.8)
 
 func _board_ask(ask: Dictionary) -> bool:
 	return ask.get("kind", "") == "choose" and ask.get("bulkSelection", false) and ask.get("options", []).all(func(option): return option.has("playerId") or (cards.has(int(option.get("cardId", -1))) and cards[int(option.cardId)].data.get("zone", "") == "Battlefield"))
@@ -2907,6 +2977,30 @@ func _show_table_settings() -> void:
 	sounds.add_child(sound_row)
 	sounds.add_child(_label("Drop an MP3 file onto this window to use it as Custom.", 12, Color("bfc4ca")))
 	extras.add_child(sounds)
+	var hand_box := VBoxContainer.new()
+	hand_box.add_child(_label("Hand cards", 14))
+	var hand_row := HBoxContainer.new()
+	hand_row.add_theme_constant_override("separation", 6)
+	var toggle_buttons: Dictionary = {}
+	for toggle in [{"key": "mana_overlay", "name": "Mana cost overlay", "hint": "Large mana symbols across each hand card: a gray number for generic mana, then one symbol per colored mana."}, {"key": "playable_glow", "name": "Highlight playable", "hint": "Purple glow on cards you can cast or play right now with your available mana, including your commander and graveyard casts."}]:
+		var option := _button("", func(): pass)
+		option.name = "Toggle_" + toggle.key
+		option.tooltip_text = toggle.hint
+		P.style_popup_button(option)
+		hand_row.add_child(option)
+		toggle_buttons[toggle.key] = [option, toggle.name]
+	var mark_toggles := func():
+		for key in toggle_buttons:
+			var on: bool = float(ui_layout[key]) >= 0.5
+			toggle_buttons[key][0].text = "%s: %s" % [toggle_buttons[key][1], "On" if on else "Off"]
+			toggle_buttons[key][0].modulate = Color.WHITE if on else Color(1, 1, 1, 0.6)
+	for key in toggle_buttons:
+		toggle_buttons[key][0].pressed.connect(func():
+			_set_ui_layout(key, 0.0 if float(ui_layout[key]) >= 0.5 else 1.0)
+			mark_toggles.call())
+	mark_toggles.call()
+	hand_box.add_child(hand_row)
+	extras.add_child(hand_box)
 	var stack_box := VBoxContainer.new()
 	stack_box.add_child(_label("Stack responses", 14))
 	var stack_row := HBoxContainer.new()
@@ -2941,6 +3035,9 @@ func _show_table_settings() -> void:
 		_set_ui_layout("card_back", 0.0)
 		_set_ui_layout("notify_sound", 0.0)
 		_set_ui_layout("stack_mode", 1.0)
+		_set_ui_layout("mana_overlay", 0.0)
+		_set_ui_layout("playable_glow", 1.0)
+		mark_toggles.call()
 		mark_stack.call()
 		mark_sound.call()
 		mark_back.call())
@@ -3079,6 +3176,7 @@ func _refresh_zone_browser() -> void:
 		var data: Dictionary = source.duplicate(true)
 		data.owner = zone_owner
 		data.zone = zone_name
+		data.playable = _playable(data, zone_owner, zone_name)
 		if zone_name == "Command" and data.get("commander", false):
 			view.tooltip_text = "Commander tax: +{%d} generic mana in addition to the printed cost when cast from the command zone. Previous command-zone casts: %d." % [int(data.get("commanderTax", 0)), int(data.get("commanderCasts", 0))]
 		view.update_card(data)

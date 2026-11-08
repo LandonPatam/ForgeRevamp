@@ -38,6 +38,8 @@ var notice_text: Label
 var notices: Array = []
 var notice_tween: Tween
 const NOTICE_SECONDS := 3.2
+## An opposing effect that hit your things without a stop stays up long enough to read.
+const TARGETED_NOTICE_SECONDS := 5.5
 ## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
 const PLAYER_PORTRAIT_SIDE := 112.0
 
@@ -156,7 +158,12 @@ func present(state: Dictionary) -> void:
 			latest = maxi(latest, int(event.id))
 			continue
 		if auto_resolve:
-			latest = maxi(latest, int(event.id)) # Auto-resolve: no after-the-fact notices.
+			# Only threats: a held, respondable effect gets the blocking popup from _offer_priority.
+			# One that passes because this seat cannot answer it still tells the player, without a stop.
+			if int(event.id) > latest and initialized and not _held_here(state, int(event.stackId)):
+				var notice := _passing_notice(event)
+				if not notice.is_empty(): _queue_notice(notice)
+			latest = maxi(latest, int(event.id))
 			continue
 		if int(event.id) > latest and (initialized or stack_ids.has(int(event.stackId))):
 			if dismissed.has(int(event.stackId)):
@@ -326,6 +333,24 @@ func acknowledge_stack(stack_id: int) -> void:
 	waiting = waiting.filter(func(event): return int(event.get("stackId", -1)) != stack_id)
 	if int(active.get("stackId", -1)) == stack_id: _next()
 
+func _held_here(state: Dictionary, stack_id: int) -> bool:
+	var stack: Array = state.get("stack", [])
+	return not stack.is_empty() and int(stack[0].get("id", -1)) == stack_id and preload("res://scripts/bridge/LiveAdapter.gd").holds_for_response(state)
+
+## "Bot · Murder → your Llanowar Elves": what an auto-passed opposing effect did to this seat's things.
+func _passing_notice(event: Dictionary) -> Dictionary:
+	var kind: String = event.get("kind", "")
+	if kind not in ["targeted", "massRemoval"]: return {}
+	var names: Array = event.get("targets", []).map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
+	var notice: Dictionary = event.duplicate(true)
+	notice.eyebrow = "BOARD-WIDE EFFECT" if kind == "massRemoval" else "TARGETED YOU · NO RESPONSE AVAILABLE"
+	var lead := "Affects permanents on the battlefield." if kind == "massRemoval" else "Targets " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + "."
+	var rules := str(event.get("effectText", ""))
+	notice.effectText = lead + ("
+" + rules if not rules.is_empty() else "")
+	notice.seconds = TARGETED_NOTICE_SECONDS
+	return notice
+
 func _queue_notice(event: Dictionary) -> void:
 	notices.append(event.duplicate(true))
 	if notice_tween == null or not notice_tween.is_running(): _next_notice()
@@ -335,14 +360,15 @@ func _next_notice() -> void:
 		notice_panel.hide()
 		return
 	var event: Dictionary = notices.pop_front()
-	notice_title.text = "%s  ·  %s" % [event.get("controllerName", "Opponent"), event.get("source", {}).get("name", "Hidden source")]
+	notice_title.text = ("%s  ·  " % event.eyebrow if event.has("eyebrow") else "") + "%s  ·  %s" % [event.get("controllerName", "Opponent"), event.get("source", {}).get("name", "Hidden source")]
+	notice_title.add_theme_color_override("font_color", Color("ffb978") if event.has("eyebrow") else Color("6d9fa3"))
 	notice_text.text = str(event.get("effectText", ""))
 	notice_panel.modulate.a = 0.0
 	notice_panel.show()
 	_layout()
 	notice_tween = create_tween()
 	notice_tween.tween_property(notice_panel, "modulate:a", 1.0, 0.15)
-	notice_tween.tween_interval(NOTICE_SECONDS)
+	notice_tween.tween_interval(float(event.get("seconds", NOTICE_SECONDS)))
 	notice_tween.tween_property(notice_panel, "modulate:a", 0.0, 0.35)
 	notice_tween.tween_callback(_next_notice)
 

@@ -114,7 +114,7 @@ func run(ui: Control, directory: String = "") -> void:
 	await ui.get_tree().process_frame
 	print("PASS: incoming spell image/target, fast resolution, deduplication, queue, reconnect and dialog suspension")
 
-## Auto-resolve: no after-the-fact notices; only a held, respondable effect on our things shows the popup.
+## Only threats: a held, respondable effect on our things shows the popup; one we cannot answer shows a timed notice.
 func _check_auto_resolve(popup: Control) -> void:
 	popup.reset()
 	var removal := {"id": 9700, "targetsLocal": true, "card": {"id": 9701, "name": "Murder", "owner": 1}, "targets": [{"id": 9702, "kind": "card", "name": "Our creature"}], "controllerName": "Bot"}
@@ -125,13 +125,17 @@ func _check_auto_resolve(popup: Control) -> void:
 	passing.autoPassStackId = 9700
 	passing.targetedEffects = [{"id": 40, "stackId": 9700, "kind": "targeted", "source": removal.card, "targets": removal.targets}]
 	popup.present(passing)
-	assert(not popup.panel.visible and popup.active.is_empty(), "With no legal response, auto-resolve shows no popup")
+	assert(not popup.panel.visible and popup.active.is_empty(), "With no legal response, auto-resolve never stops on a blocking popup")
+	assert(popup.notice_panel.visible and popup.notice_title.text.contains("Murder") and popup.notice_text.text.contains("your Our creature") and popup.notice_panel.mouse_filter == Control.MOUSE_FILTER_IGNORE, "Only threats still tells you a spell targeted your things, without a stop: " + popup.notice_title.text + " / " + popup.notice_text.text)
+	popup.present(passing)
+	assert(popup.notices.is_empty(), "A repeated snapshot never repeats the targeted notice")
 	popup.reset()
 	popup.present(base)
 	var held := passing.duplicate(true)
 	held.autoPassStackId = -1
 	popup.present(held)
 	assert(popup.panel.visible and int(popup.active.stackId) == 9700 and popup.browse_button.visible, "A respondable spell aimed at us still offers Resolve / respond")
+	assert(not popup.notice_panel.visible and popup.notices.is_empty(), "A held effect shows only its blocking popup, not a duplicate notice")
 	popup.reset()
 	popup.present(base)
 	var wipe := base.duplicate(true)
