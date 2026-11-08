@@ -41,6 +41,11 @@ var source_column: VBoxContainer
 var list_box: VBoxContainer
 var instance_box: Control
 var list_scroll: ScrollContainer
+var preview_column: VBoxContainer
+## Library searches show a carousel of the stacked groups instead of the list and preview.
+var carousel: Control
+var carousel_caption: Label
+var carousel_mode := false
 
 func _ready() -> void:
 	Terminal.panel(self, 18)
@@ -60,6 +65,15 @@ func _ready() -> void:
 	title.max_lines_visible = 2
 	column.add_child(title)
 	column.add_child(HSeparator.new())
+	carousel = preload("res://scripts/ui/CardCarousel.gd").new()
+	carousel.focus_requested.connect(_highlight)
+	carousel.pick_requested.connect(func(index): if not rows[index].disabled: _pick_row(index))
+	carousel.hide()
+	column.add_child(carousel)
+	carousel_caption = _label(16, Terminal.INK)
+	carousel_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	carousel_caption.hide()
+	column.add_child(carousel_caption)
 	body = HBoxContainer.new()
 	body.add_theme_constant_override("separation", 22)
 	column.add_child(body)
@@ -103,7 +117,7 @@ func _ready() -> void:
 	source_rules.hide()
 	source_context.hide()
 	# Right: the highlighted card, large.
-	var preview_column := VBoxContainer.new()
+	preview_column = VBoxContainer.new()
 	preview_column.add_theme_constant_override("separation", 8)
 	body.add_child(preview_column)
 	preview_column.add_child(_label(12, Terminal.MUTED, "PREVIEW"))
@@ -200,6 +214,7 @@ func present(snapshot: Dictionary) -> void:
 		entry.ref = str(entry.kind) + ":" + str(int(entry.get("engineId", entry.id)))
 		if entry.kind == "stack": entry.name = entry.get("sourceName", entry.get("card", {}).get("name", "Spell or ability"))
 		cards.append(entry)
+	_set_carousel_mode(_from_library(snapshot, cards))
 	if cards != options: _rebuild(cards)
 	var refs: Array = options.map(func(option): return str(option.ref))
 	chosen_refs = prompt.get("chosen", []).filter(func(ref): return refs.has(str(ref)))
@@ -207,6 +222,7 @@ func present(snapshot: Dictionary) -> void:
 		option_buttons[i].disabled = not ready or not options[i].get("eligible", true)
 		option_buttons[i].text = ("✓ " if chosen_refs.has(str(options[i].ref)) else "") + str(options[i].get("name", "Face-down card"))
 	for r in range(rows.size()): _paint_row(r, ready)
+	if carousel_mode: _sync_carousel()
 	(source_column.get_node("ResultsCaption") as Label).text = "RESULTS (%d)" % options.size()
 	hint.text = "%d selected" % chosen_refs.size() if prompt.get("inputKind", "") == "InputSelectStackItems" else "%d selected / %d–%d required" % [chosen_refs.size(), prompt.get("selMin", 0), prompt.get("selMax", 0)]
 	confirm_button.disabled = not ready or not prompt.get("okEnabled", false) or chosen_refs.is_empty()
@@ -226,7 +242,7 @@ func present(snapshot: Dictionary) -> void:
 	board_button.text = "Choose on board" if prompt.get("inputKind", "") == "InputSelectTargets" else "View battlefield"
 	board_button.visible = true
 	board_button.disabled = not ready
-	keys.text = "↑↓ move   ENTER pick" + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else "")
+	keys.text = ("←→ browse   ENTER or click the middle card to pick" if carousel_mode else "↑↓ move   ENTER pick") + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else "")
 
 func _rebuild(cards: Array) -> void:
 	options = cards.duplicate(true)
@@ -312,12 +328,60 @@ func _highlight(r: int) -> void:
 	if previous != r and previous < rows.size(): _paint_row(previous, last_ready)
 	_paint_row(r, last_ready)
 	list_scroll.ensure_control_visible(rows[r])
+	if carousel_mode:
+		carousel.set_focus(r)
+		_caption_carousel()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or rows.is_empty() or not event is InputEventKey or not event.pressed: return
 	match event.keycode:
-		KEY_DOWN: _highlight(mini(highlighted + 1, rows.size() - 1))
-		KEY_UP: _highlight(maxi(highlighted - 1, 0))
+		KEY_DOWN, KEY_RIGHT: _highlight(mini(highlighted + 1, rows.size() - 1))
+		KEY_UP, KEY_LEFT: _highlight(maxi(highlighted - 1, 0))
 		KEY_ENTER, KEY_KP_ENTER: if not rows[highlighted].disabled: _pick_row(highlighted)
 		_: return
 	get_viewport().set_input_as_handled()
+
+## Cards that appear in no visible zone (hand, battlefield, graveyard, exile, command) come from a
+## library search; those get the carousel. Players, stack items or board cards keep the list.
+func _from_library(snapshot: Dictionary, cards: Array) -> bool:
+	if cards.is_empty() or cards.any(func(card): return card.get("kind", "card") != "card"): return false
+	var visible := {}
+	for player in snapshot.get("players", []):
+		for zone in player.get("zones", {}).values():
+			for card in zone: visible[int(card.get("id", -1))] = true
+	return not cards.any(func(card): return visible.has(int(card.id)))
+
+func _set_carousel_mode(value: bool) -> void:
+	carousel_mode = value
+	carousel.visible = value
+	carousel_caption.visible = value
+	list_scroll.visible = not value
+	preview_column.visible = not value
+	(source_column.get_node("ResultsCaption") as Label).visible = not value
+
+func _sync_carousel() -> void:
+	var items: Array = []
+	var copies: Array = []
+	var picked: Array = []
+	for group in groups:
+		var data: Dictionary = options[group[0]]
+		items.append(data if not data.get("hidden", false) else {"id": -1, "hidden": true})
+		copies.append(group.size())
+		picked.append(group.filter(func(i): return chosen_refs.has(str(options[i].ref))).size())
+	carousel.set_items(items, copies, picked)
+	carousel.set_focus(highlighted)
+	_caption_carousel()
+
+func _caption_carousel() -> void:
+	if groups.is_empty() or highlighted >= groups.size():
+		carousel_caption.text = ""
+		return
+	var group: Array = groups[highlighted]
+	var first: Dictionary = options[group[0]]
+	var picked := group.filter(func(i): return chosen_refs.has(str(options[i].ref))).size()
+	var parts := [str(first.get("name", "Face-down card")).to_upper()]
+	if not str(first.get("typeLine", "")).is_empty(): parts.append(str(first.typeLine))
+	if group.size() > 1: parts.append("×%d" % group.size())
+	if picked > 0: parts.append("✓ picked" + (" %d" % picked if group.size() > 1 else ""))
+	if not first.get("eligible", true): parts.append("viewed only")
+	carousel_caption.text = "   ·   ".join(parts) + "      [%d / %d]" % [highlighted + 1, groups.size()]
