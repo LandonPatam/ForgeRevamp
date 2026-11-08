@@ -1,0 +1,16 @@
+# Only threats + a wipe you can answer: View battlefield, cast Heroic Intervention (Forest + Forest) or Counterspell (Island + Island), then Resolve
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears;Llanowar Elves;Forest;Forest;Island;Island
+p0hand=Heroic Intervention;Counterspell
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Grizzly Bears;Plains
+p1putonstack=Wrath of God
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Goblin Guide;Mountain
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

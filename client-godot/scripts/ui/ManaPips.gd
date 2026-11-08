@@ -16,6 +16,34 @@ static func parse(cost: String) -> PackedStringArray:
 		symbols.append(code)
 	return symbols
 
+## Whether the floating pool alone pays this printed cost plus `extra_generic` (commander tax).
+## X counts as 0 and Phyrexian symbols as payable with life. Cost changes from other cards
+## (reductions, taxes) aren't in the text, so this is a close reading, not Forge's payment check.
+static func pool_covers(cost: String, pool: Dictionary, extra_generic: int = 0) -> bool:
+	var left := {}
+	for key in ManaCounter.KEYS: left[key] = int(pool.get(key, 0))
+	var generic := extra_generic
+	var hybrids: Array = []
+	for code in parse(cost):
+		if code.is_valid_int(): generic += int(code)
+		elif code in ["X", "Y", "Z"]: continue
+		elif code.ends_with("/P"): continue
+		elif code.contains("/"): hybrids.append(code.split("/"))
+		elif left.has(code):
+			if left[code] <= 0: return false
+			left[code] -= 1
+		else: return false # Snow and other symbols the pool doesn't track.
+	for parts in hybrids:
+		var best := ""
+		for part in parts:
+			if left.has(part) and left[part] > 0 and (best.is_empty() or left[part] > left[best]): best = part
+		if not best.is_empty(): left[best] -= 1
+		elif str(parts[0]).is_valid_int(): generic += int(parts[0])
+		else: return false
+	var total := 0
+	for key in left: total += left[key]
+	return total >= generic
+
 static func _fill(code: String) -> Color:
 	var index := ManaCounter.KEYS.find(code)
 	return ManaCounter.FILLS[index] if index >= 0 else GENERIC_FILL

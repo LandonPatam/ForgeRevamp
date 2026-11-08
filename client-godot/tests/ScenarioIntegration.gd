@@ -14,7 +14,7 @@ func step() -> bool:
 		var ask: Dictionary = state.asks[0]
 		print("SCENARIO choice: ", ask.kind, " ", ask.get("title", ""), " / ", ask.get("message", ""))
 		if ask.kind == "choose" and ask.get("min", 0) == 0:
-			ui.modal_panel._emit_answer([])
+			if not answer_off_popup([]): ui.modal_panel._emit_answer([])
 		else: submit_choice()
 		return true
 	if ui.modal_panel is SelectionDialog and ui.modal.visible:
@@ -356,8 +356,13 @@ func triland() -> bool:
 		for code in ["W", "B", "G"]:
 			if label.contains("{" + code + "}"): count += 1
 		if not check(count == 1 and not label.contains(" or "), "Each tri-land choice describes only its actual selected mana: " + label): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 3 and not tether.yes_button.visible, "The mana choice is a tether on the land, picked with one click: no popup"): return false
+	if not check(tether.title.text.contains("SANDSTEPPE CITADEL"), "The tether names its card: " + tether.title.text): return false
 	await capture("mana-options")
-	if not await choose_named("Green"): return false
+	for i in range(tether.mode_buttons.size()):
+		if str(ask.options[i].label).begins_with("Green"): tether.mode_buttons[i].pressed.emit()
+	if not await wait_ready(): return false
 	return check(ui.snapshot.players[0].mana.get("G", 0) == 1 and ui.snapshot.players[0].mana.get("W", 0) == 0 and ui.snapshot.players[0].mana.get("B", 0) == 0, "Selecting green produces precisely green mana")
 
 func insights() -> bool:
@@ -423,9 +428,10 @@ func await_spell(name: String) -> bool:
 	for index in range(60):
 		if not await wait_ready(): return false
 		if not ui.snapshot.stack.is_empty() and ui.snapshot.stack[0].get("sourceName", "") == name and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority":
-			if not check(ui.incoming_effect.panel.visible and ui.incoming_effect.active.get("stackId", -1) == ui.snapshot.stack[0].id, "The response popup must identify " + name): return false
+			# A wipe shows as its card mid-table, anything else as the response popup; both name the spell.
+			if not check(ui.incoming_effect.showing() and ui.incoming_effect.active.get("stackId", -1) == ui.snapshot.stack[0].id, "The response popup must identify " + name): return false
 			await capture("incoming")
-			ui.incoming_effect.browse_button.pressed.emit()
+			ui.incoming_effect.respond() # View battlefield / Respond with action
 			return true
 		if not await step(): return false
 	return check(false, "The opponent did not cast " + name)
@@ -703,8 +709,22 @@ func playable() -> bool:
 	var stone: Control = ui.cards[find_card("Mind Stone").id]
 	if not check(stone.data.get("playable", false), "The hand card view carries the playable glow"): return false
 	await capture("hand")
+	if not check(not stone.data.get("ready", false), "Nothing is teal before any mana is tapped"): return false
+	# Teal once the tapped mana pays for it: one Swamp pays Gravecrawler ({B}), not Mind Stone ({2}).
+	if not await tap("Swamp", 1): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var ready := func(name: String) -> bool:
+		for zone_name in ["Hand", "Command"]:
+			for card in ui.snapshot.players[0].zones[zone_name]:
+				if card.name == name: return ui._playable(card, 0, zone_name) and ui._ready_now(card, zone_name)
+		return false
+	if not check(ready.call("Gravecrawler") and ui.hud_values[0].zones.Command.castable_now and not ready.call("Mind Stone") and not ready.call("Ornithopter"), "One floating B: the commander is ready, Mind Stone isn't, free spells stay purple"): return false
+	if not await tap("Swamp", 1): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(ready.call("Mind Stone"), "Two floating mana: Mind Stone turns teal"): return false
+	if not check(stone.data.get("ready", false), "The hand card view carries the teal glow"): return false
+	await capture("ready")
 	# Spend the mana: nothing that costs mana stays highlighted.
-	if not await tap("Swamp", 2): return false
 	if not await cast("Mind Stone"): return false
 	if not await settle(): return false
 	for index in range(20): await ui.get_tree().process_frame
@@ -891,3 +911,71 @@ func concord() -> bool:
 		if not await step(): return false
 	if not check(zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")), "Both picked modes must resolve: a Spirit token"): return false
 	return check(zone("Hand").size() > hand_before, "… and a drawn card")
+
+## Only threats with an answer in hand: the wipe waits, View battlefield lets you cast Heroic
+## Intervention on top of it, and your creatures survive while everyone else's die.
+func wrath_response() -> bool:
+	ui.ui_layout.stack_mode = 2.0 # Only threats, for this run only (not saved).
+	ui.adapter.stack_mode = 2
+	ui.adapter.auto_resolve_all = true
+	var effect: Control = ui.incoming_effect
+	for index in range(30): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(not ui.snapshot.stack.is_empty() and effect.wipe_card.visible, "Only threats still stops for a wipe you can answer"): return false
+	await capture("wipe")
+	effect.respond() # View battlefield
+	if not await tap("Forest", 2) or not await cast("Heroic Intervention"): return false
+	for index in range(20):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.size() >= 2: break
+		await ui.get_tree().create_timer(0.2).timeout
+	print("SCENARIO stack after casting: ", ui.snapshot.stack.map(func(item): return item.get("sourceName", "?")))
+	if not check(ui.snapshot.stack.size() >= 2, "Heroic Intervention goes on the stack above the wipe"): return false
+	await capture("responded")
+	# Pass priority until Intervention resolves; then the wipe is back on top.
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.size() <= 1: break
+		if not await step(): return false
+	await ui.get_tree().create_timer(0.8).timeout
+	print("SCENARIO wipe back on top: stack=", ui.snapshot.stack.map(func(item): return item.get("sourceName", "?")), " overlay=", effect.wipe_card.visible, " autoPass=", ui.snapshot.get("autoPassStackId", -1), " input=", ui.snapshot.prompt.get("inputKind", ""), " responding=", effect.responding)
+	await capture("wipe-again")
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.is_empty(): break
+		if effect.wipe_card.visible: effect.wipe_resolve.pressed.emit()
+		elif not await step(): return false
+		await ui.get_tree().create_timer(0.3).timeout
+	var mine: Array = zone("Battlefield").filter(func(card): return card.name in ["Grizzly Bears", "Llanowar Elves"])
+	var theirs: Array = ui.snapshot.players.slice(1).map(func(player): return player.zones.Battlefield.filter(func(card): return card.name in ["Grizzly Bears", "Goblin Guide"]).size())
+	print("SCENARIO survivors: mine=", mine.map(func(card): return card.name), " theirs=", theirs)
+	return check(mine.size() == 2 and theirs == [0, 0], "Your creatures survive (indestructible), everyone else's die")
+
+## Counterspell over a wipe: the target choice hangs off Counterspell and names the spell it answers.
+func wrath_counter() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(30): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(effect.wipe_card.visible, "The wipe waits on you"): return false
+	effect.respond()
+	if not await tap("Island", 2) or not await cast("Counterspell"): return false
+	for index in range(10):
+		if not await wait_ready(): return false
+	await ui.get_tree().create_timer(0.5).timeout
+	var answer: Control = ui.response_target
+	if not check(answer.visible and not ui.modal.visible, "Counterspell's target hangs off Counterspell, not a popup: " + JSON.stringify(ui.snapshot.asks).left(400)): return false
+	if not check(answer.spell_card.data.get("name", "") == "Counterspell" and answer.target_view.data.get("name", "") == "Wrath of God", "Card A (Counterspell) answers card B (Wrath of God)"): return false
+	if not check(answer.confirm.text.contains("COUNTERSPELL") and answer.confirm.text.contains("WRATH OF GOD"), "The confirm names both cards: " + answer.confirm.text): return false
+	if not check(answer.stack_rect.call(int(ui.snapshot.asks[0].options[0].stackId)).has_area(), "The branch reaches the Wrath on the stack"): return false
+	await ui.get_tree().create_timer(0.6).timeout
+	await capture("target")
+	answer.confirm.pressed.emit()
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty(): break
+		if not ui.snapshot.asks.is_empty(): return check(false, "Unexpected decision: " + JSON.stringify(ui.snapshot.asks).left(300))
+		if not await step(): return false
+	if not check(not answer.visible, "The callout closes once answered"): return false
+	var creatures: Array = []
+	for player in ui.snapshot.players: creatures.append_array(player.zones.Battlefield.filter(func(card): return card.name in ["Grizzly Bears", "Llanowar Elves", "Goblin Guide"]))
+	return check(creatures.size() == 4, "Countered: every creature survives: " + str(creatures.map(func(card): return card.name)))

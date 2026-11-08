@@ -48,6 +48,8 @@ var carousel_caption: Label
 var carousel_mode := false
 ## Carousel picks are marked here first (exact option indexes); OK sends them to Forge one at a time.
 var staged: Array = []
+## Marks adopted from Forge's own chosen list; when Forge drops one, the mark goes too.
+var forge_held: Array = []
 var committing := false
 var awaiting_ref := ""
 var last_prompt: Dictionary = {}
@@ -231,7 +233,12 @@ func present(snapshot: Dictionary) -> void:
 		# Anything Forge already holds as chosen counts as marked, so OK can complete it.
 		if not committing:
 			for i in range(options.size()):
-				if chosen_refs.has(str(options[i].ref)) and not staged.has(i): staged.append(i)
+				if chosen_refs.has(str(options[i].ref)):
+					if not staged.has(i): staged.append(i)
+					if not forge_held.has(i): forge_held.append(i)
+				elif forge_held.has(i):
+					forge_held.erase(i)
+					staged.erase(i)
 		elif ready: _advance_commit()
 	for i in range(options.size()):
 		option_buttons[i].disabled = not ready or not options[i].get("eligible", true)
@@ -269,6 +276,7 @@ func present(snapshot: Dictionary) -> void:
 func _rebuild(cards: Array) -> void:
 	options = cards.duplicate(true)
 	staged.clear()
+	forge_held.clear()
 	committing = false
 	awaiting_ref = ""
 	for child in list_box.get_children() + instance_box.get_children():

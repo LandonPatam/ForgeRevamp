@@ -113,7 +113,7 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		panel.hide()
 		callout_card = mode_view
 		callout.visible = true
-		callout.present_modes(str(mode_ask.options[0].card.get("name", "Card")), mode_ask, state.get("connectionReady", false))
+		callout.present_modes(str(mode_ask.get("sourceCard", mode_ask.options[0].get("card", {})).get("name", "Card")), mode_ask, state.get("connectionReady", false))
 		_place_callout()
 		queue_redraw()
 		return
@@ -184,6 +184,9 @@ func _picks_from_board() -> bool:
 static func mode_source(ask: Dictionary) -> int:
 	var options: Array = ask.get("options", [])
 	if ask.get("kind", "") != "choose" or options.size() < 2: return -1
+	# A card's abilities or mana colors (Canopy Vista: green or white) tether to that card too.
+	if ask.get("abilityChoice", false) and not ask.get("sourceCard", {}).is_empty() and not ask.sourceCard.get("hidden", false) and options.all(func(option): return not option.has("card")):
+		return int(ask.sourceCard.get("id", -1))
 	for option in options:
 		if not option.has("card") or option.has("cardId") or option.has("stackId") or not option.card.has("id"): return -1
 		if int(option.card.id) != int(options[0].card.id) or str(option.get("label", "")) == str(option.card.get("name", "")): return -1

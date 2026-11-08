@@ -67,9 +67,18 @@ func wait_ready() -> bool:
 				return true
 	return check(false, "Timed out waiting for Forge: " + ui.status_label.text)
 
+## Choices shown without a popup (a tether on the card, or the response callout) answer like their
+## own buttons: the same engine answer through the adapter.
+func answer_off_popup(value: Variant) -> bool:
+	if ui.modal.visible or ui.snapshot.asks.is_empty(): return false
+	if not (ui.response_target.visible or ui.interaction_panel.callout.visible): return false
+	ui._intent("answer", {"id": ui.snapshot.asks[0].id, "value": value})
+	return true
+
 func submit_choice() -> void:
 	var ask: Dictionary = ui.snapshot.asks[0]
 	print("Forge decision: ", ask.kind, " ", ask.get("title", ""))
+	if ask.kind == "choose" and answer_off_popup(range(maxi(1, int(ask.min))) if int(ask.min) > 0 else [0]): return
 	var panel: Control = ui.modal_panel
 	if ask.kind in ["choose", "order"]:
 		panel.chosen.clear()

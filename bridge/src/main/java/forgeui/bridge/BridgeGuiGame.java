@@ -520,6 +520,20 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     // ---------------------------------------------------------------- asks
 
+    private CardView castingCard() {
+        if (!(getGameController() instanceof PlayerControllerHuman human)) return null;
+        var game = human.getGame();
+        for (var card : game.getCardsIn(ZoneType.Stack)) {
+            if (!human.getPlayer().equals(card.getController())) continue;
+            boolean placed = false;
+            for (var instance : game.getStack()) {
+                if (instance.getSourceCard() == card) { placed = true; break; }
+            }
+            if (!placed) return card.getView();
+        }
+        return null;
+    }
+
     private JsonElement ask(JsonObject ask) {
         if (abandoned) return BridgeProtocol.fallbackAnswer(ask);
         if (ask.has("kind") && ask.get("kind").getAsString().equals("choose") && !ask.has("revealedCards")) {
@@ -535,6 +549,12 @@ final class BridgeGuiGame extends AbstractGuiGame {
                 ask.addProperty("effectText", resolving.toString());
             } else if (decisionCard != null) {
                 source = decisionCard;
+            }
+            if (source == null) {
+                // A spell this seat is casting (its targets, modes, X) sits in the stack zone before it
+                // becomes a stack item: name it, so the client can show "Counterspell -> Wrath of God".
+                source = castingCard();
+                if (source != null) ask.addProperty("casting", true);
             }
             if (source != null) ask.add("sourceCard", GameStateJson.describeCard(source, mayView(source)));
         }

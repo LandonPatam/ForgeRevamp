@@ -1,9 +1,10 @@
+# Tap Sandsteppe Citadel or Canopy Vista: the mana choice is a tether on the land, one click adds that color
 activeplayer=p0
 activephase=MAIN1
 turn=5
 removesummoningsickness=true
 p0life=40
-p0battlefield=Sandsteppe Citadel
+p0battlefield=Sandsteppe Citadel;Canopy Vista
 p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
 p1life=40
 p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

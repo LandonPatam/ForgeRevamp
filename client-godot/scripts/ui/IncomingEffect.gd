@@ -527,14 +527,14 @@ func _build_wipe() -> void:
 	row.add_theme_constant_override("separation", 8)
 	column.add_child(row)
 	var view := Button.new()
-	view.text = "View battlefield"
-	view.tooltip_text = browse_button.tooltip_text
+	view.text = "Respond with action"
+	view.tooltip_text = "Keep priority and go to the table to cast a spell or activate an ability in response."
 	Terminal.button(view)
 	view.pressed.connect(respond)
 	row.add_child(view)
 	wipe_resolve = Button.new()
-	wipe_resolve.text = "Resolve"
-	wipe_resolve.tooltip_text = resolve_button.tooltip_text
+	wipe_resolve.text = "I accept"
+	wipe_resolve.tooltip_text = "Pass priority: you accept that this board-wide effect resolves."
 	Terminal.button(wipe_resolve, true)
 	wipe_resolve.pressed.connect(dismiss)
 	row.add_child(wipe_resolve)

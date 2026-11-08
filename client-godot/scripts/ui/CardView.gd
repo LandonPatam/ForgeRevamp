@@ -47,6 +47,8 @@ const ManaPips = preload("res://scripts/ui/ManaPips.gd")
 static var mana_overlay := false
 static var playable_glow := true
 const PLAYABLE_GLOW := Color("b48cff")
+## Teal: the mana you have already tapped pays for it, so it can be played right now.
+const READY_GLOW := Color("3fe6d4")
 const PICK_DISCARD := Color("ff3b3b")
 var surface: SubViewport
 var visual: TextureRect
@@ -176,7 +178,7 @@ func _draw_hand_overlays() -> void:
 			var grow := (1.5 + ring * 2.2) * unit
 			var box := StyleBoxFlat.new()
 			box.bg_color = Color.TRANSPARENT
-			box.border_color = Color(PLAYABLE_GLOW, 0.85 - ring * 0.2)
+			box.border_color = Color(READY_GLOW if data.get("ready", false) else PLAYABLE_GLOW, 0.85 - ring * 0.2)
 			box.set_border_width_all(maxi(1, int(round(2.2 * unit))))
 			box.set_corner_radius_all(int((7 + ring * 2) * unit))
 			box.anti_aliasing = true

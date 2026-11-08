@@ -1,5 +1,6 @@
 extends PanelContainer
-## A yes/no Forge confirmation attached to the card it asks about ("Sacrifice Evolving Wilds?"):
+## A TETHER: the project's name for a decision box tied to its card by a leader line, instead of a
+## popup. A yes/no Forge confirmation attached to the card it asks about ("Sacrifice Evolving Wilds?"):
 ## a small terminal box beside the card, joined to it by a leader line drawn by InteractionPanel.
 ## It also lists a card's modes ("choose one or more —"): number keys or clicks toggle them and
 ## Confirm sends every picked mode as one answer.
@@ -50,7 +51,12 @@ func _ready() -> void:
 		else: _send_modes())
 	Terminal.button(yes_button, true)
 	row.add_child(yes_button)
-	no_button = _button(func(): answered.emit("cancel"))
+	no_button = _button(func():
+		if mode_ask.is_empty(): answered.emit("cancel")
+		elif not mode_sent:
+			mode_sent = true
+			_refresh_modes()
+			modes_answered.emit(int(mode_ask.id), []))
 	row.add_child(no_button)
 	hide()
 
@@ -118,13 +124,26 @@ func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 	var low := int(ask.get("min", 1))
 	var high := int(ask.get("max", 1))
 	question = "> choose " + ("one" if high == 1 else ("one or more" if low <= 1 and high >= mode_buttons.size() else ("%d" % high if low == high else "%d to %d" % [low, high]))) + (" mode" if high == 1 else " modes")
+	if _instant(): question = "> choose mana to add" if ask.get("manaChoice", false) else "> choose ability"
 	_show_line()
-	no_button.visible = false
+	# Abilities and mana act on click, like Forge's own menu; [N] backs out when Forge allows it.
+	yes_button.visible = not _instant()
+	no_button.text = "[N] Cancel"
+	no_button.visible = low == 0
 	mode_ready = ready
 	_refresh_modes()
 
+## Ability and mana choices answer on click; card modes toggle and wait for Confirm.
+func _instant() -> bool:
+	return mode_ask.get("abilityChoice", false) and int(mode_ask.get("max", 1)) == 1
+
 func _toggle_mode(index: int) -> void:
 	if mode_sent or mode_ask.is_empty() or index >= mode_buttons.size(): return
+	if _instant():
+		if not mode_ready: return
+		mode_picks = [index]
+		_send_modes()
+		return
 	if mode_picks.has(index): mode_picks.erase(index)
 	elif int(mode_ask.get("max", 1)) == 1: mode_picks = [index]
 	elif mode_picks.size() < int(mode_ask.get("max", 1)): mode_picks.append(index)
@@ -137,13 +156,14 @@ func _refresh_modes() -> void:
 	var ready := mode_ready
 	for i in range(mode_buttons.size()):
 		var picked := mode_picks.has(i)
-		mode_buttons[i].text = "%d [%s] %s" % [i + 1, "x" if picked else " ", mode_buttons[i].get_meta("text")]
+		mode_buttons[i].text = ("%d  %s" % [i + 1, mode_buttons[i].get_meta("text")]) if _instant() else "%d [%s] %s" % [i + 1, "x" if picked else " ", mode_buttons[i].get_meta("text")]
 		Terminal.button(mode_buttons[i], picked)
 		mode_buttons[i].icon = null
 		mode_buttons[i].disabled = mode_sent or not ready
 	var count := mode_picks.size()
 	yes_button.text = "[Y] Confirm" + ("" if int(mode_ask.get("max", 1)) == 1 else " %d" % count)
 	yes_button.disabled = mode_sent or not ready or not _picks_valid()
+	no_button.disabled = mode_sent or not ready
 
 func _send_modes() -> void:
 	if mode_sent or not _picks_valid(): return

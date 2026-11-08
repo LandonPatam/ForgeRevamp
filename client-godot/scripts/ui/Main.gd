@@ -181,6 +181,8 @@ var stack_waiting := false
 var token_artwork: Node
 var stack_scroll: ScrollContainer
 var incoming_effect: Control
+## "Counterspell -> Wrath of God": target choices for a spell you are casting at the stack.
+var response_target: Control
 var interaction_panel: Control
 var decision_scroll: ScrollContainer
 var rail_space: Control
@@ -613,6 +615,13 @@ func _build_shell() -> void:
 	incoming_effect.blocked = func(): return modal.visible or opening_hand.visible or (live and snapshot.get("prompt", {}).get("inputKind", "") not in ["InputPassPriority", "InputLockUI", ""])
 	incoming_effect.inspect_requested.connect(_show_card_detail)
 	incoming_effect.card_view = func(id: int) -> Control: return cards.get(id)
+	response_target = preload("res://scripts/ui/ResponseTarget.gd").new()
+	add_child(response_target)
+	response_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	response_target.answered.connect(func(id: int, value: Variant): _intent("answer", {"id": id, "value": value}))
+	response_target.stack_rect = func(id: int) -> Rect2:
+		var entry: Control = stack_box.entries.get(id)
+		return entry.get_global_rect() if is_instance_valid(entry) and entry.is_visible_in_tree() else Rect2()
 	incoming_effect.acknowledged.connect(func(stack_id: int):
 		if live: adapter.acknowledge_effect(stack_id))
 	interaction_panel = preload("res://scripts/ui/InteractionPanel.gd").new()
@@ -705,7 +714,9 @@ func _apply_table_style() -> void:
 		if not snapshot.is_empty() and snapshot.has("players"):
 			for p in snapshot.players:
 				if hud_values.has(p.id):
-					for zone in hud_values[p.id].zones: hud_values[p.id].zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+					for zone in hud_values[p.id].zones:
+						hud_values[p.id].zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+						hud_values[p.id].zones[zone].castable_now = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone) and _ready_now(card, zone))
 	if adapter != null and "stack_mode" in adapter:
 		adapter.stack_mode = int(ui_layout.stack_mode)
 		adapter.auto_resolve_all = int(ui_layout.stack_mode) == 2
@@ -931,6 +942,7 @@ func _apply_state(value: Dictionary) -> void:
 		values.info.hide()
 		for zone in values.zones:
 			values.zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+			values.zones[zone].castable_now = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone) and _ready_now(card, zone))
 			values.zones[zone].text = str(p.zones[zone].size())
 			values.zones[zone].tooltip_text = zone + " / " + str(p.zones[zone].size()) + " cards." + (" Something here can be cast now." if values.zones[zone].playable else "") + " Click to browse."
 	library_count.text = str(snapshot.players[0].libraryCount) + " Library"
@@ -972,7 +984,13 @@ func _apply_state(value: Dictionary) -> void:
 	if not snapshot.asks.is_empty():
 		var ask: Dictionary = snapshot.asks[0]
 		var mode_card: Control = cards.get(interaction_panel.mode_source(ask)) if live else null
-		if is_instance_valid(mode_card) and mode_card.is_visible_in_tree():
+		var answering: bool = live and response_target.accepts(ask)
+		response_target.present(ask if answering else {}, snapshot.get("connectionReady", false))
+		if answering:
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes({})
+		elif is_instance_valid(mode_card) and mode_card.is_visible_in_tree():
 			# Mode choices hang off the card itself, not a popup.
 			if modal.visible: _close_modal()
 			board_choice.hide()
@@ -989,6 +1007,7 @@ func _apply_state(value: Dictionary) -> void:
 			board_choice.hide()
 			if ask.id != open_ask or not modal.visible or not is_instance_valid(modal_panel): _open_decision(ask)
 	else:
+		response_target.present({})
 		interaction_panel.show_modes({})
 		board_choice.hide()
 		if open_ask >= 0: _close_modal()
@@ -1044,6 +1063,7 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		c.owner = owner
 		c.zone = zone
 		c.playable = _playable(c, owner, zone)
+		c.ready = c.playable and _ready_now(c, zone)
 		if snapshot.prompt.get("inputKind", "") == "InputBlock" and snapshot.prompt.get("chosen", []).has("card:" + str(c.id)):
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
 		if hand_pick and zone == "Hand" and owner == 0:
@@ -1629,6 +1649,7 @@ func _layout_inspection() -> void:
 		# Small effect cards sit in the middle of the table, never over the rail.
 		if is_instance_valid(board_scroller):
 			var table: Rect2 = get_global_transform().affine_inverse() * board_scroller.get_global_rect()
+			response_target.table_rect = table
 			if incoming_effect.table_rect != table:
 				incoming_effect.table_rect = table
 				incoming_effect._layout()
@@ -2621,6 +2642,19 @@ func _playable(card: Dictionary, owner: int, zone: String) -> bool:
 	if snapshot.get("prompt", {}).get("inputKind", "") != "InputPassPriority" or not snapshot.get("asks", []).is_empty(): return false
 	return int(card.get("weakSelection", 0)) > 0
 
+## A playable card your floating mana already pays for (teal instead of purple). Lands and other
+## free plays stay purple: tapping mana changes nothing for them. Graveyard/exile casts use other
+## costs (flashback, escape) than the printed one, so only hand and commander casts turn teal.
+func _ready_now(card: Dictionary, zone: String) -> bool:
+	if zone not in ["Hand", "Command"]: return false
+	var pool: Dictionary = snapshot.get("players", [{}])[0].get("mana", {})
+	if pool.values().all(func(amount): return int(amount) <= 0): return false
+	if str(card.get("typeLine", "")).contains("Land") and not str(card.get("typeLine", "")).contains("//"): return false
+	var cost := str(card.get("manaCost", ""))
+	var ManaPips = preload("res://scripts/ui/ManaPips.gd")
+	if ManaPips.parse(cost).is_empty(): return false
+	return ManaPips.pool_covers(cost, pool, int(card.get("commanderTax", 0)) if zone == "Command" else 0)
+
 ## A land you played that bounced straight back (Dimir Aqueduct with no other land) looks like a
 ## rejected play; Forge's log says it was accepted, so explain that the land drop is spent.
 func _announce_returned_lands() -> void:
@@ -3307,6 +3341,7 @@ func _refresh_zone_browser() -> void:
 		data.owner = zone_owner
 		data.zone = zone_name
 		data.playable = _playable(data, zone_owner, zone_name)
+		data.ready = data.playable and _ready_now(data, zone_name)
 		if zone_name == "Command" and data.get("commander", false):
 			view.tooltip_text = "Commander tax: +{%d} generic mana in addition to the printed cost when cast from the command zone. Previous command-zone casts: %d." % [int(data.get("commanderTax", 0)), int(data.get("commanderCasts", 0))]
 		view.update_card(data)
