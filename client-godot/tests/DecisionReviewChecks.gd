@@ -142,15 +142,17 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	var order := {"id": 950, "kind": "order", "title": "Select order for simultaneous abilities", "message": "Resolve first", "min": 3, "max": 3, "autoOrder": true, "abilityOrder": true, "options": [{"label": "Draw a card.", "card": {"id": 951, "name": "Fathom Mage"}}, {"label": "Gain life.", "card": {"id": 952, "name": "Soul Warden"}}, {"label": "Create a token.", "card": {"id": 953, "name": "Young Pyromancer"}}]}
 	ui._open_decision(order)
 	var panel: Control = ui.modal_panel
-	panel._toggle(1)
-	assert(panel.option_buttons[1].text.contains("1") and panel.order_preview.text.contains("Soul Warden"), "Order numbers and arrows must identify the resolution sequence without repeated card text")
+	assert(panel.order_stack != null and panel.order_stack.order == [0, 1, 2] and not panel.confirm_button.disabled, "Simultaneous abilities open as a stack in Forge's order, ready to confirm")
+	panel.order_stack.move(1, 0)
+	assert(panel.order_stack.order == [1, 0, 2] and panel.order_stack.numbers[1].text == "1", "Moving a row renumbers the pile; the top resolves first")
 	var answers: Array = []
 	panel.answered.connect(func(_id, value): answers.append(value))
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("simultaneous-abilities-large.png"))
-		assert(ui.get_global_rect().encloses(panel.get_global_rect()), "Large simultaneous-ability cards must fit the viewport")
-	panel.auto_button.pressed.emit()
-	assert(answers == [[1, 0, 2]], "Auto preserves chosen order and appends Forge's remaining order exactly once")
+		assert(ui.get_global_rect().encloses(panel.get_global_rect()), "The simultaneous-ability stack must fit the viewport")
+	assert(answers.is_empty(), "Reordering never answers Forge by itself")
+	panel.confirm_button.pressed.emit()
+	assert(answers == [[1, 0, 2]], "Confirm sends the whole pile, first to resolve first")
 	ui._close_modal()
 	ui.live = false
 	ui._apply_state(saved)
@@ -170,4 +172,4 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 		ui.cancel_button = saved_cancel
 	ui._apply_state(saved)
 	await ui.get_tree().process_frame
-	print("PASS: authorized hand reveal, retained battlefield review, enlarged source/gallery, eligible-only selection, Forge Auto ordering and hover keyboard action")
+	print("PASS: authorized hand reveal, retained battlefield review, enlarged source/gallery, eligible-only selection, stacked ability ordering and hover keyboard action")

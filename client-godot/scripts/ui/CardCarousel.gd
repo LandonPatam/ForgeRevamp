@@ -31,7 +31,8 @@ var press_cursor := 0.0
 var wheel_at := 0
 var pan_at := 0
 var views: Array = []
-var badges: Array = []
+var badges: Array = []      ## Copies in a stacked group: a dark terminal tag off the top-right corner.
+var mark_badges: Array = [] ## Your marks: a solid purple banner across the bottom edge.
 
 func _ready() -> void:
 	clip_contents = true
@@ -44,19 +45,30 @@ func _ready() -> void:
 		view.size = CARD_SIZE
 		view.custom_minimum_size = CARD_SIZE
 		add_child(view)
-		var badge := Label.new()
-		badge.add_theme_font_override("font", Terminal.font())
-		badge.add_theme_font_size_override("font_size", 20)
-		badge.add_theme_color_override("font_color", Color("0b0d12"))
-		var box := StyleBoxFlat.new()
-		box.bg_color = Color("b48cff")
-		box.set_corner_radius_all(6)
-		box.set_content_margin_all(6)
-		badge.add_theme_stylebox_override("normal", box)
-		badge.hide()
+		var badge := _badge(Color("0b1418"), Terminal.INK, Terminal.EDGE.lightened(0.35), 18)
 		view.add_child(badge)
+		var mark := _badge(Color("b48cff"), Color("0b0d12"), Color("e9ddff"), 20)
+		view.add_child(mark)
 		views.append(view)
 		badges.append(badge)
+		mark_badges.append(mark)
+
+func _badge(fill: Color, ink: Color, edge: Color, font_size: int) -> Label:
+	var badge := Label.new()
+	badge.add_theme_font_override("font", Terminal.font())
+	badge.add_theme_font_size_override("font_size", font_size)
+	badge.add_theme_color_override("font_color", ink)
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.border_color = edge
+	box.set_border_width_all(2)
+	box.set_corner_radius_all(6)
+	box.set_content_margin_all(6)
+	box.content_margin_left = 10
+	box.content_margin_right = 10
+	badge.add_theme_stylebox_override("normal", box)
+	badge.hide()
+	return badge
 
 func set_items(value: Array, copies: Array, marks: Array) -> void:
 	var rebuilt := value != items
@@ -92,6 +104,7 @@ func _arrange() -> void:
 		# Each group keeps the same pooled view while it stays in range, so faces aren't repainted as it moves.
 		var view: Control = views[posmod(index, POOL)]
 		var badge: Label = badges[posmod(index, POOL)]
+		var mark: Label = mark_badges[posmod(index, POOL)]
 		if index < 0 or index >= items.size():
 			view.hide()
 			continue
@@ -105,11 +118,14 @@ func _arrange() -> void:
 		_place(view, distance)
 		var count := int(counts[index])
 		var picks := int(marked[index])
-		badge.visible = picks > 0 or count > 1
-		badge.text = ("✓ %d/%d" % [picks, count] if count > 1 else "✓ SELECTED") if picks > 0 else "×%d" % count
-		# Hangs off the top-right corner so it never covers the card's name.
+		badge.visible = count > 1
+		badge.text = "×%d" % count
 		badge.reset_size()
 		badge.position = Vector2(CARD_SIZE.x - badge.size.x + 10, -18)
+		mark.visible = picks > 0
+		mark.text = "✓ %d OF %d SELECTED" % [picks, count] if count > 1 else "✓ SELECTED"
+		mark.reset_size()
+		mark.position = Vector2((CARD_SIZE.x - mark.size.x) * 0.5, CARD_SIZE.y - mark.size.y * 0.5).round()
 
 ## The home carousel's curve: everything follows one smooth closeness value, so there are no steps.
 func _place(view: Control, distance: float) -> void:

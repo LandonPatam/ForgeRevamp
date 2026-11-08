@@ -100,7 +100,7 @@ Decision asks may include visibility-filtered `sourceCard` and `effectText`; nat
 
 Delayed-reveal choices carry `revealedCards` separately from eligible `options`; native selections may carry the same context in `prompt.revealedCards`. Context is frozen from an authorized reveal and scoped to the same resolving spell ability. Viewed cards outside the eligible set cannot be selected. Hand reveals delivered through `showRevealedCards` plus `InputConfirm` display the authorized faces before sending native `ok`. Viewing the battlefield retains the unanswered decision and restores it on request.
 
-Full ordering asks expose `autoOrder`; `abilityOrder` identifies simultaneous abilities. Auto appends remaining original option indices to the user's chosen prefix and submits the resulting permutation, matching Forge's desktop Auto button. Numbered card tiles and arrows describe first-to-last resolution without duplicating printed rules on the tiles.
+Full ordering asks expose `autoOrder`; `abilityOrder` identifies simultaneous abilities. Auto appends remaining original option indices to the user's chosen prefix and submits the resulting permutation, matching Forge's desktop Auto button. A full `abilityOrder` ask opens as the stack builder (`OrderStack.gd`) already in Forge's order, so Confirm alone answers like Auto; other orderings use numbered card tiles in click sequence.
 
 Incoming-effect previews use a bottom Resolve action; View battlefield hides the preview while retaining priority for a response. A player's own target choices do not automatically reopen the same effect as another preview. Own effects with no legal response can pass their priority window automatically; Forge's optional-use confirmations, payments and selections remain required.
 

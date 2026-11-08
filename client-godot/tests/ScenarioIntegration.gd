@@ -825,3 +825,28 @@ func cultivate() -> bool:
 	if not await settle(): return false
 	var found: Array = zone("Battlefield").map(func(card): return card.name) + zone("Hand").map(func(card): return card.name)
 	return check(found.has("Island") and found.has("Swamp") and ui.snapshot.players[0].libraryCount == 8, "Forge must fetch exactly the marked Island and Swamp: " + str(found))
+
+## Four of your own abilities trigger at once: the stack builder orders them, nothing is sent until
+## Confirm, and Forge stacks them so the top row resolves first.
+func triggers() -> bool:
+	if not await tap("Forest", 2) or not await cast("Elvish Visionary"): return false
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order": break
+		if not await step(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order", "Simultaneous triggers must ask for an order: " + str(ui.snapshot.asks)): return false
+	var panel: Control = ui.modal_panel
+	if not check(panel.get("order_stack") != null, "The order must open as the stack builder"): return false
+	print("SCENARIO order options: ", ui.snapshot.asks[0].options.map(func(option): return option.label))
+	await capture("stack")
+	var wanted: Array[int] = panel.order_stack.order.duplicate()
+	wanted.reverse()
+	panel.order_stack.set_order(wanted)
+	if not await wait_ready(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order", "Reordering must not answer Forge"): return false
+	var answers: Array = []
+	panel.answered.connect(func(_id, value): answers.append(value))
+	panel.confirm_button.pressed.emit()
+	if not check(answers == [wanted], "Confirm must send the whole pile, top first: %s vs %s" % [answers, wanted]): return false
+	if not await wait_ready(): return false
+	return check(not ui.snapshot.asks.any(func(ask): return ask.kind == "order"), "Forge must accept the order and close the question")

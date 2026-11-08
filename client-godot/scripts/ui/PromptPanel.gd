@@ -20,6 +20,10 @@ var mine_button: Button
 var source_view: Control
 var order_preview: Label
 var auto_button: Button
+## Simultaneous abilities: a drag-to-reorder pile (OrderStack.gd) instead of click-in-sequence.
+var order_stack: Control
+var order_focus_card: Control
+var order_focus_text: Control
 var gallery: Control
 ## Long plain lists such as creature types: searchable, compact rows, ten to a page.
 const LIST_PAGE := 10
@@ -73,6 +77,10 @@ func present(value: Dictionary) -> void:
 	divider.add_theme_stylebox_override("separator", P.box(Color("32676c"), Color.TRANSPARENT, 0, 0))
 	divider.custom_minimum_size.y = 1
 	column.add_child(divider)
+	order_stack = null
+	if _stack_builder():
+		_present_stack_builder(column, face_size)
+		return
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 12)
 	column.add_child(body)
@@ -451,6 +459,107 @@ func _with_modes_as_text(value: Dictionary) -> Dictionary:
 	for option in options: option.erase("card")
 	return value
 
+## A full ordering of simultaneous abilities (every option placed, nothing left to Forge).
+func _stack_builder() -> bool:
+	var count: int = ask.get("options", []).size()
+	return ask.get("kind", "") == "order" and ask.get("abilityOrder", false) and count >= 2 and int(ask.get("min", -1)) == count and int(ask.get("max", -1)) == count
+
+## Left: the focused ability's card and full text. Right: the pile, top resolves first. It opens in
+## Forge's order, so Confirm alone matches Auto; Reverse and Forge order rearrange it in one step.
+func _present_stack_builder(column: VBoxContainer, face_size: Vector2) -> void:
+	var options: Array = ask.options
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 18)
+	column.add_child(body)
+	var side := VBoxContainer.new()
+	side.add_theme_constant_override("separation", 10)
+	body.add_child(side)
+	order_focus_card = preload("res://scripts/ui/CardView.gd").new()
+	order_focus_card.inspection = true
+	order_focus_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	order_focus_card.custom_minimum_size = face_size
+	side.add_child(order_focus_card)
+	order_focus_text = preload("res://scripts/ui/ReadableText.gd").new()
+	side.add_child(order_focus_text)
+	body.add_child(VSeparator.new())
+	var pile_column := VBoxContainer.new()
+	pile_column.add_theme_constant_override("separation", 8)
+	body.add_child(pile_column)
+	var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+	var top := Label.new()
+	top.text = "▲  RESOLVES FIRST"
+	top.add_theme_font_override("font", Terminal.font())
+	top.add_theme_font_size_override("font_size", 14)
+	top.add_theme_color_override("font_color", Terminal.ACCENT)
+	pile_column.add_child(top)
+	order_stack = preload("res://scripts/ui/OrderStack.gd").new()
+	var initial: Array[int] = []
+	for i in range(options.size()): initial.append(i)
+	order_stack.setup(options, initial)
+	var scroller := ScrollContainer.new()
+	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroller.custom_minimum_size = Vector2(order_stack.custom_minimum_size.x + 12, minf(order_stack.custom_minimum_size.y, maxf(face_size.y, get_viewport().get_visible_rect().size.y * 0.55)))
+	scroller.add_child(order_stack)
+	pile_column.add_child(scroller)
+	var bottom := Label.new()
+	bottom.text = "▼  RESOLVES LAST"
+	bottom.add_theme_font_override("font", Terminal.font())
+	bottom.add_theme_font_size_override("font_size", 14)
+	bottom.add_theme_color_override("font_color", Terminal.MUTED)
+	pile_column.add_child(bottom)
+	hint = Label.new()
+	hint.text = "Drag a row to move it  ·  ↑↓ choose  ·  Shift+↑↓ move  ·  Enter confirm"
+	hint.add_theme_color_override("font_color", Color("6d9fa3"))
+	hint.add_theme_font_size_override("font_size", 12)
+	pile_column.add_child(hint)
+	error_label = Label.new()
+	error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	error_label.add_theme_color_override("font_color", Color("f2a18a"))
+	error_label.hide()
+	column.add_child(error_label)
+	var buttons := HFlowContainer.new()
+	buttons.alignment = FlowContainer.ALIGNMENT_END
+	column.add_child(buttons)
+	var board := Button.new()
+	board.text = "View battlefield"
+	P.style_popup_button(board)
+	board.pressed.connect(func(): board_requested.emit())
+	buttons.add_child(board)
+	var reverse := Button.new()
+	reverse.text = "Reverse"
+	reverse.tooltip_text = "Flip the whole order."
+	P.style_popup_button(reverse)
+	reverse.pressed.connect(func():
+		var flipped: Array[int] = order_stack.order.duplicate()
+		flipped.reverse()
+		order_stack.set_order(flipped))
+	buttons.add_child(reverse)
+	var reset := Button.new()
+	reset.text = "Forge order"
+	reset.tooltip_text = "Back to the order Forge suggested."
+	P.style_popup_button(reset)
+	reset.pressed.connect(func(): order_stack.set_order(initial))
+	buttons.add_child(reset)
+	confirm_button = Button.new()
+	confirm_button.text = "Confirm order"
+	confirm_button.custom_minimum_size = Vector2(190, 46)
+	P.style_popup_button(confirm_button, true)
+	confirm_button.pressed.connect(_submit)
+	buttons.add_child(confirm_button)
+	order_stack.order_changed.connect(_validate)
+	order_stack.focus_changed.connect(_show_order_focus)
+	order_stack.submit_requested.connect(_submit)
+	_show_order_focus(order_stack.focus)
+	_validate()
+	order_stack.grab_focus.call_deferred()
+	reset_size()
+
+func _show_order_focus(option: int) -> void:
+	var data: Dictionary = ask.options[option]
+	order_focus_card.visible = data.has("card")
+	if data.has("card"): order_focus_card.update_card(data.card)
+	order_focus_text.present(preload("res://scripts/ui/OrderStack.gd").ability_text(data), order_focus_card.custom_minimum_size.x, 90, 15)
+
 ## Types on the table first, most common first; the rest keep Forge's order. Answers still use the original index.
 func _order_list(grid: Container, options: Array) -> void:
 	var order: Array = range(options.size())
@@ -512,6 +621,11 @@ func _select_mine() -> void:
 
 func _validate() -> void:
 	if confirm_button == null:
+		return
+	if order_stack != null:
+		chosen.assign(order_stack.order)
+		order_stack.locked = not submissions_enabled
+		confirm_button.disabled = chosen.size() != int(ask.max) or not submissions_enabled
 		return
 	var valid := true
 	match ask.kind:
