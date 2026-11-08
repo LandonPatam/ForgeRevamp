@@ -29,7 +29,7 @@ Don't rerun the whole suite after every edit. When one check fails, rerun just t
 | Bridge Java (`bridge/src/...`) | `bridge`, plus a `scenario` if gameplay changed. Restart the game afterwards |
 | Online lobby, seats, protocol, hidden information | `bridge` then `online` (serially; they share the online port) |
 | Phase stops / auto-pass on bot turns | `solo` |
-| Home/computer/editor/app flow | `node client-godot/tools/app-check.mjs --render` / `library-check.mjs --render` (not wrapped yet) |
+| Home/computer/editor/app flow, online lobby/ready | `node client-godot/tools/app-check.mjs --render` / `library-check.mjs --render` (not wrapped yet; about 5 min). Always pass `--render`: headless runs can't click onto the 3D monitor and fail at the search-bar check |
 | Docs only | Nothing; review the diff and links |
 
 `ui` with no names runs the whole headless smoke suite, and `visual` with no names runs every rendered check. Leave those to `all`.

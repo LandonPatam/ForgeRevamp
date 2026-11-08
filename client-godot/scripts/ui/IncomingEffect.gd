@@ -38,6 +38,8 @@ var notice_text: Label
 var notices: Array = []
 var notice_tween: Tween
 const NOTICE_SECONDS := 3.2
+## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
+const PLAYER_PORTRAIT_SIDE := 112.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -307,7 +309,8 @@ func _player_target(target: Dictionary) -> Control:
 
 func _size_player_target(tile: Control, card_size: Vector2) -> void:
 	tile.custom_minimum_size = card_size
-	var side := minf(card_size.x, card_size.y - 40)
+	# Forge's avatar atlas cells are 100 px; scaling them to card size looks grainy, so stay near native.
+	var side := minf(PLAYER_PORTRAIT_SIDE, minf(card_size.x, card_size.y - 40))
 	tile.get_node("Portrait").custom_minimum_size = Vector2.ONE * side
 	tile.get_node("PlayerName").custom_minimum_size.x = card_size.x
 

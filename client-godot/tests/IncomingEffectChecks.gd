@@ -16,6 +16,7 @@ func run(ui: Control, directory: String = "") -> void:
 	popup.present(at_player)
 	var tile: Control = popup.target_cards.get_child(0)
 	assert(tile.has_meta("player_target") and tile.get_node("Portrait").portrait != null, "A targeted player shows their Forge portrait")
+	assert(tile.get_node("Portrait").custom_minimum_size.x <= 112.0, "The 100 px Forge portrait is not stretched to card size")
 	assert(tile.get_node("PlayerName").text.begins_with("Landon") and tile.get_node("PlayerName").autowrap_mode == TextServer.AUTOWRAP_OFF, "The player's name sits under the portrait on one line")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("incoming-player-target.png"))
 	popup.reset()

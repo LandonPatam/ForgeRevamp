@@ -27,6 +27,10 @@ var search_query := ""
 var search_focused := false
 var search_matches := 0
 var blink := 0.0
+## Online lobby seats ({name, kind, ready, you}) and whether this seat has pressed PLAY.
+var party: Array = []
+var lobby_ready := false
+var pulse := 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -35,6 +39,11 @@ func _ready() -> void:
 	resized.connect(queue_redraw)
 
 func _process(delta: float) -> void:
+	if lobby_ready:
+		# The ready screen's cursor and waiting dots step a few times a second, not every frame.
+		var step := int(pulse * 3.0)
+		pulse += delta
+		if int(pulse * 3.0) != step: queue_redraw()
 	if not search_focused: return
 	var was_on := fmod(blink, 1.0) < 0.5
 	blink += delta
@@ -89,6 +98,13 @@ func set_status(message: String, connected: bool, lobby: String = "") -> void:
 	online = connected
 	queue_redraw()
 
+func set_party(seats: Array, ready_now: bool) -> void:
+	if seats == party and ready_now == lobby_ready: return
+	if ready_now and not lobby_ready: pulse = 0.0
+	party = seats
+	lobby_ready = ready_now
+	queue_redraw()
+
 func _fit(text: String, font: Font, font_size: int, width: float) -> String:
 	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= width: return text
 	var clipped := text
@@ -125,6 +141,11 @@ func _draw() -> void:
 	_text("CMDR", Vector2(64, 144), 28, DIM, 106)
 	var lines := _commander_lines(764)
 	for index in range(lines.size()): _text(lines[index], Vector2(196, 144 + index * 32), 30, INK, 764)
+	if lobby_ready and online and status_message.is_empty():
+		_draw_ready()
+		_draw_search()
+		draw_set_transform(Vector2.ZERO)
+		return
 	_text("FORMAT  COMMANDER    PLAYERS  %d" % player_count, Vector2(64, 210), 28, DIM)
 	var colors := ""
 	for index in range(5):
@@ -155,6 +176,38 @@ func _draw() -> void:
 	preload("res://scripts/app/TerminalMeter.gd").paint(self, Rect2(64, 614, 896, 12), ratio)
 	_draw_search()
 	draw_set_transform(Vector2.ZERO)
+
+## Online lobby after PLAY: a big READY banner, how many humans are ready, and each seat's state.
+func _draw_ready() -> void:
+	var humans := party.filter(func(seat): return seat.kind in ["host", "player"])
+	var ready_count := humans.filter(func(seat): return seat.ready).size()
+	var waiting := humans.filter(func(seat): return not seat.ready).map(func(seat): return str(seat.name).to_upper())
+	var cursor_on := fmod(pulse, 1.0) < 0.5
+	draw_line(Vector2(64, 186), Vector2(960, 186), EDGE, 1)
+	var banner_rect := Rect2(64, 204, 896, 92)
+	draw_rect(banner_rect, Color("0b2320"))
+	draw_rect(banner_rect, INK, false, 2)
+	var font := get_theme_default_font()
+	_text(">> READY", Vector2(92, 274), 64, INK, 420)
+	if cursor_on: draw_rect(Rect2(92 + font.get_string_size(">> READY", HORIZONTAL_ALIGNMENT_LEFT, -1, 64).x + 14, 274 - font.get_ascent(64) + 10, 30, font.get_ascent(64) - 12), INK)
+	_right_text("%d/%d READY" % [ready_count, humans.size()], 932, 266, 40, INK)
+	var dots := ".".repeat(int(pulse * 3.0) % 4)
+	var line := "ALL PLAYERS READY - STARTING" + dots if waiting.is_empty() else "WAITING FOR " + ", ".join(waiting) + dots
+	_text(line, Vector2(64, 336), 28, INK if waiting.is_empty() else DIM, 896)
+	preload("res://scripts/app/TerminalMeter.gd").paint(self, Rect2(64, 352, 896, 12), float(ready_count) / maxi(1, humans.size()))
+	for index in range(mini(party.size(), 4)):
+		var seat: Dictionary = party[index]
+		var baseline := 412.0 + index * 46
+		var tag: String = {"host": "HOST", "player": "NET", "bot": "BOT", "open": "----"}.get(seat.kind, "NET")
+		var state: String = "OPEN" if seat.kind == "open" else ("AUTO" if seat.kind == "bot" else ("READY" if seat.ready else "WAITING" + dots))
+		var mark: String = "[ -- ]" if seat.kind == "open" else ("[ OK ]" if seat.ready else ("[ .. ]" if cursor_on else "[    ]"))
+		var color: Color = EDGE if seat.kind == "open" else (INK if seat.ready else Color("bd9bf2"))
+		_text(mark, Vector2(64, baseline), 30, color, 120)
+		_text(tag, Vector2(188, baseline), 24, DIM, 80)
+		_text(str(seat.name).to_upper() + ("  (YOU)" if seat.get("you", false) else ""), Vector2(272, baseline), 30, INK if seat.kind != "open" else EDGE, 470)
+		_right_text(state, 960, baseline, 28, color)
+	draw_line(Vector2(64, 600), Vector2(960, 600), EDGE, 1)
+	_text("> SELECTING ANOTHER DISK CANCELS READY", Vector2(64, 628), 22, DIM, 896)
 
 func _draw_search() -> void:
 	draw_rect(SEARCH_RECT, Color("0b2320"))
