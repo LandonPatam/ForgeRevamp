@@ -158,7 +158,7 @@ Zero-card bottom selections (including the first free Commander mulligan) are ac
 
 ## Verification and completion test
 
-Prepared difficult card combinations can be run with `node client-godot/tools/live-check.mjs --scenario=proliferate --render`. Available scenarios are `proliferate`, `tokens`, `reanimate`, `protection`, `blink`, and `combat`; omit `--render` for headless runs. Each uses an isolated match and checks the actual UI choices and exact resulting game state. See [the interaction test report](../docs/interaction-test-report.md) for card combinations, outcomes, limitations and a command to run all six.
+Prepared difficult card combinations can be run with `node client-godot/tools/live-check.mjs --scenario=proliferate --render`. Available scenarios are `proliferate`, `tokens`, `reanimate`, `protection`, `blink`, and `combat`; omit `--render` for headless runs. Each uses an isolated match and checks the actual UI choices and exact resulting game state. See [the interaction test report](../docs/archive/interaction-test-report.md) for card combinations, outcomes, limitations and a command to run all six.
 
 `node client-godot/tools/live-check.mjs --colorless-payment` reproduces Sol Ring plus Plains and Forest paying Forgotten Ancient's `{3}{G}` with W/G/C/C. Colorless pool payments use the bridge's corrected wire-to-Forge mapping. Ordinary artifacts now resolve automatically like creatures, and clicked casts keep a pending board card while on the stack. `--takeback` checks automatic artifact commitment and rejects undo after resolution.
 

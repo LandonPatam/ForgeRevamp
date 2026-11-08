@@ -128,9 +128,9 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Online checks: `node bridge/tools/online-check.mjs` (real lobby, seats and hidden information; contacts no router).
 - Run suites that host online lobbies serially: they share Forge's configured online port. On Windows, test helpers must resolve `java.home` and launch its actual JVM; killing a PATH launcher shim can orphan its JVM and keep inherited output pipes open.
 - Windows build: `.\client-godot\tools\package.ps1` (add `-SkipBuild` if the bridge is already built) writes `dist/ForgeUI/` and `dist/ForgeUI-windows.zip`; needs the Godot 4.7.2 export templates (`client-godot/export_presets.cfg`) and JDK 17. It bundles a jlink runtime and Forge `res/` without `adventure/`. Installed builds keep logs/startup status in Godot's `user://service`. Keep `tests/` in the export (`Main.gd` preloads it) and list non-resource files such as JSON in the preset's include filter. To check a package, run app-check with `FORGE_EXPORTED_EXE=dist/ForgeUI/ForgeUI.exe`; release builds print almost no script errors, so a broken script just hangs.
-- Java checks: `node client-godot/tools/check.mjs bridge` (or `.\bridge\tools\test.ps1`). If incremental Maven classes are stale, use the direct javac commands in CLAUDE_HANDOFF.txt. Restart services after Java changes.
+- Java checks: `node client-godot/tools/check.mjs bridge` (or `.\bridge\tools\test.ps1`). If incremental Maven classes are stale, use the direct javac commands in `docs/testing.md`. Restart services after Java changes.
 - Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`, `testing.md`.
-- HANDOFF.md is historical and may contain superseded details. Prefer current source, this file and NOTES.md.
+- `docs/archive/` holds historical handoffs and reports (HANDOFF.md, CLAUDE_HANDOFF.txt, Mac handoffs, audits); don't read them unless a task needs that history. Prefer current source, this file and NOTES.md.
 
 ## Session notes
 

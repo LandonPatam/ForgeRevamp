@@ -46,7 +46,7 @@ Original beveled-drive verification: the drive fixture, `node client-godot/tools
 - `scripts/app/ComputerWorld.gd`: reusable rounded recess, straight walls/occlusion, full-width flap, removal of the stepped pocket/eject cap, shared canonical disk rotation and earlier alignment.
 - `tests/DriveGeometryChecks.gd`: isolated procedural geometry/alignment/capture fixture.
 - `tools/drive-check.mjs`: bounded native fixture runner; no Forge service or installed deck writes.
-- `AGENTS.md`, `CLAUDE_HANDOFF.txt`, `docs/computer-menu.md`, this document: current construction, fixed coordinates and verification guidance.
+- `AGENTS.md`, `docs/computer-menu.md`, this document: current construction, fixed coordinates and verification guidance.
 
 Continuous-slot follow-up: the drive fixture passed; it checks removal of both eject nodes, original feed clearance, unchanged pinhole location, and PLAY/resume/FORMAT/ejection at both sizes and room modes.
 

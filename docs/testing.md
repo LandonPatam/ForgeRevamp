@@ -58,6 +58,17 @@ Adding one (no other registration needed):
 
 `mind_stone()` is the template: it clicks Mind Stone, clicks the "Add {C}" ability in the real Forge popup, and asserts that the stone tapped and `{C}` is floating. With the old Confirm-required popup it fails with "Choosing the ability must tap Mind Stone".
 
+## Stale bridge classes
+
+If incremental Maven output looks stale (source changes seem absent), compile the bridge directly before retesting (PowerShell), then restart any running service:
+
+```
+$bridgeSources = @(Get-ChildItem -LiteralPath bridge/src/main/java -Filter *.java -Recurse | ForEach-Object { $_.FullName })
+javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/classes @bridgeSources
+javac -encoding UTF-8 -cp 'bridge/target/classes;bridge/target/lib/*' -d bridge/target/test-classes bridge/src/test/java/forgeui/bridge/BridgeChecks.java
+java -cp 'bridge/target/test-classes;bridge/target/classes;bridge/target/lib/*' forgeui.bridge.BridgeChecks
+```
+
 ## Other tools
 
 - `node bridge/tools/playtest.mjs`: plays whole precon games as the human seat and reports text/engine mismatches. Use it for broad sweeps, not single bugs (`docs/playtest.md`).
