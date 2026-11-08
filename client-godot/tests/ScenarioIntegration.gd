@@ -999,3 +999,27 @@ func spellbomb() -> bool:
 		await ui.get_tree().create_timer(0.1).timeout
 	if not check(not find_card("Serra Angel", "Hand").is_empty(), "The fixture needs the AI to bounce Serra Angel"): return false
 	return check(warned, "The bounce aimed at your creature must be shown before it resolves, while it waits for you")
+
+## Your commander dies: Forge's "move it to the command zone?" is a tether from the commander, not a banner.
+func commander_zone() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(40):
+		if not await wait_ready(): return false
+		if effect.showing(): effect.dismiss() # I accept the Bolt
+		var kind: String = ui.snapshot.prompt.get("inputKind", "")
+		if not ui.snapshot.asks.is_empty() or kind == "InputConfirm": break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and ui.snapshot.prompt.get("sourceCard", {}).get("name", "") == "Gravecrawler", "Forge asks about moving the commander: " + JSON.stringify(ui.snapshot.prompt).left(300)): return false
+	for index in range(20): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(panel.callout.visible and not panel.panel.visible, "The commander question is a tether, not the top banner"): return false
+	if not check(panel.callout_card == ui.hud_values[0].zones.Graveyard, "It hangs off your graveyard, where the commander is now"): return false
+	if not check(panel.callout.face.visible and panel.callout.face.data.get("name", "") == "Gravecrawler", "The tether shows the commander's card"): return false
+	if not check(panel.callout.yes_button.text.contains("Command zone"), "Yes reads as moving it to the command zone: " + panel.callout.yes_button.text): return false
+	await capture("ask")
+	panel.callout.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone")

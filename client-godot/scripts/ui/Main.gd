@@ -636,6 +636,11 @@ func _build_shell() -> void:
 	interaction_panel.action_requested.connect(func(action):
 		_primary_action() if action == "ok" else _secondary_action())
 	interaction_panel.entity_selected.connect(func(action, id): _intent(action, {"id": id}))
+	interaction_panel.zone_view = func(id: int) -> Control:
+		if snapshot.get("players", []).is_empty() or not hud_values.has(0): return null
+		for zone_name in hud_values[0].zones:
+			if snapshot.players[0].get("zones", {}).get(zone_name, []).any(func(card): return int(card.get("id", -1)) == id): return hud_values[0].zones[zone_name]
+		return null
 	interaction_panel.modes_answered.connect(func(id, picks): _intent("answer", {"id": id, "value": picks}))
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()

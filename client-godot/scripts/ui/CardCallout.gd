@@ -16,6 +16,8 @@ var no_button: Button
 var question := ""
 var cursor_on := true
 var blink := 0.0
+## The card itself, shown in the box when the tether hangs off a zone icon (its card isn't on the table).
+var face: Control
 var mode_list: VBoxContainer
 var mode_buttons: Array[Button] = []
 var mode_ask: Dictionary = {}
@@ -38,6 +40,14 @@ func _ready() -> void:
 	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	column.add_child(title)
+	var face_center := CenterContainer.new()
+	column.add_child(face_center)
+	face = preload("res://scripts/ui/CardView.gd").new()
+	face.inspection = true
+	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	face.custom_minimum_size = Vector2(144, 202)
+	face_center.add_child(face)
+	face.hide()
 	line = _label(16, Terminal.INK)
 	column.add_child(line)
 	mode_list = VBoxContainer.new()
@@ -79,7 +89,9 @@ func _button(callback: Callable) -> Button:
 	return button
 
 ## `card_name` labels the box; labels come from Forge's own Yes/No (or custom) button text.
-func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool) -> void:
+func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool, card: Dictionary = {}) -> void:
+	face.visible = not card.is_empty()
+	if face.visible: face.update_card(card)
 	mode_ask = {}
 	mode_list.hide()
 	line.custom_minimum_size.x = 250
@@ -105,6 +117,7 @@ func _process(delta: float) -> void:
 
 ## A card's modes as toggles. Picks stay local until Confirm; a new ask id starts fresh.
 func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
+	face.hide()
 	if int(ask.get("id", -1)) != int(mode_ask.get("id", -2)):
 		mode_picks = []
 		mode_sent = false

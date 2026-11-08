@@ -32,6 +32,9 @@ var callout: PanelContainer
 var callout_card: Control
 ## A card's modes ("choose one or more —") also attach to that card when it is on the table.
 var mode_ask: Dictionary = {}
+## Main supplies your zone icon holding a card id (graveyard, exile...), so a decision about a card
+## that already left the table tethers to where it is: func(id: int) -> Control (or null).
+var zone_view: Callable
 const CALLOUT_GAP := 34.0
 const RAIL_WIDTH := 316.0
 
@@ -124,7 +127,18 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		panel.hide()
 		var ask: Dictionary = state.prompt
 		var ready_now: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
-		callout.present(str(ask.get("sourceCard", {}).get("name", "Card")), str(ask.get("message", "")), str(ask.get("okLabel", "Yes")), str(ask.get("cancelLabel", "No")), ready_now and ask.get("okEnabled", false), ready_now and ask.get("cancelEnabled", false))
+		var source: Dictionary = ask.get("sourceCard", {})
+		var in_zone: bool = callout_card != cards.get(int(source.get("id", -1)))
+		var question := str(ask.get("message", ""))
+		var ok_label := str(ask.get("okLabel", "Yes"))
+		var cancel_label := str(ask.get("cancelLabel", "No"))
+		# Forge words the commander choice as its rule text; ask it plainly.
+		if source.get("commander", false) and question.to_lower().contains("command zone"):
+			var where := str(callout_card.get("kind")).to_lower() if in_zone and callout_card.get("kind") != null else "its zone"
+			question = "Move %s to the command zone?" % str(source.get("name", "your commander"))
+			ok_label = "Command zone"
+			cancel_label = "Leave in " + where
+		callout.present(str(source.get("name", "Card")), question, ok_label, cancel_label, ready_now and ask.get("okEnabled", false), ready_now and ask.get("cancelEnabled", false), source if in_zone else {})
 		_place_callout()
 	if not panel.visible:
 		queue_redraw()
@@ -208,7 +222,11 @@ func _callout_card() -> Control:
 	var prompt: Dictionary = state.get("prompt", {})
 	if description.get("kind", "") != "InputConfirm" or prompt.get("sourceCard", {}).is_empty() or prompt.get("sourceCard", {}).get("hidden", false): return null
 	var view: Control = cards.get(int(prompt.sourceCard.get("id", -1)))
-	return view if is_instance_valid(view) and view.is_visible_in_tree() else null
+	if is_instance_valid(view) and view.is_visible_in_tree(): return view
+	if zone_view.is_valid():
+		var zone: Control = zone_view.call(int(prompt.sourceCard.get("id", -1)))
+		if is_instance_valid(zone) and zone.is_visible_in_tree(): return zone
+	return null
 
 func _card_rect(view: Control) -> Rect2:
 	var to_local: Transform2D = get_global_transform().affine_inverse() * view.get_global_transform()
