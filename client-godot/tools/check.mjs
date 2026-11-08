@@ -8,7 +8,7 @@
 //   node client-godot/tools/check.mjs scenario mind-stone [--render] real Forge + real table, prepared board
 //   node client-godot/tools/check.mjs bridge                         build bridge + BridgeChecks (Java)
 //   node client-godot/tools/check.mjs online | solo                  online lobby suite / solo phase stops
-//   node client-godot/tools/check.mjs all                            full sweep, once, before a push
+//   node client-godot/tools/check.mjs all                            full sweep incl. every scenario, once, before a push
 import {spawn, spawnSync} from 'node:child_process';
 import {existsSync, mkdirSync, readdirSync, statSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -87,7 +87,7 @@ async function scenarios(list) {
   let ok = true;
   // Each scenario owns one Forge JVM; run them one after another.
   for (const name of list.split(',')) ok = await step(`scenario ${name}`, process.execPath,
-    [join(root, 'client-godot/tools/live-check.mjs'), `--scenario=${name}`, ...flags.filter(flag => flag === '--render')], {timeout: 240000}) && ok;
+    [join(root, 'client-godot/tools/live-check.mjs'), `--scenario=${name}`, ...flags.filter(flag => flag === '--render')], {timeout: 150000}) && ok;
   return ok;
 }
 
@@ -110,7 +110,8 @@ const commands = {
   // Serial on purpose: online suites share Forge's online port and Godot runs compete for the GPU.
   all: async () => {
     let ok = true;
-    for (const run of [() => headless(''), () => visual(''), bridge, commands.online, commands.solo]) ok = await run() && ok;
+    const everyScenario = readdirSync(join(root, 'client-godot/tests/scenarios')).filter(f => f.endsWith('.state')).map(f => f.slice(0, -6)).join(',');
+    for (const run of [() => headless(''), () => visual(''), bridge, () => scenarios(everyScenario), commands.online, commands.solo]) ok = await run() && ok;
     return ok;
   },
 };

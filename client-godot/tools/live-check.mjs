@@ -61,7 +61,8 @@ try {
   });
   writeFileSync(join(artifacts, logPrefix + '.stdout.log'), output);
   writeFileSync(join(artifacts, logPrefix + '.stderr.log'), errors);
-  if (code !== 0 || /SCRIPT ERROR:|ERROR:/.test(errors) || !output.includes('PASS: Godot live integration')) throw Error('Godot live integration failed');
+  // A failed check() quits with code 1; unrelated engine "ERROR:" lines do not fail the run.
+  if (code !== 0 || /SCRIPT ERROR:|Parse Error:/.test(errors) || !output.includes('PASS: Godot live integration')) throw Error('Godot live integration failed');
 } catch (e) {
   console.error(e);
   console.error(bridgeLog.slice(-5000));

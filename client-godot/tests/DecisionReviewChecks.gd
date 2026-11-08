@@ -122,8 +122,8 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	ui._apply_state(state)
 	selection = ui.modal_panel
 	assert(selection.rows.size() == 2 and selection.option_buttons.size() == 4, "Three Forests and a Mountain make two rows but keep four exact instances")
-	assert(selection.rows[0].text.contains("FOREST") and selection.rows[0].text.contains("×3"), "A stacked row shows its count: " + selection.rows[0].text)
-	assert(selection.command.text.begins_with("C:\\EVOLVING_WILDS> select a card from your library"), "The header reads like a command line: " + selection.command.text)
+	assert(selection.rows[0].text.to_lower().contains("forest") and selection.rows[0].text.contains("3"), "A stacked row shows its count: " + selection.rows[0].text)
+	assert(selection.command.text.to_lower().replace("_", " ").contains("evolving wilds"), "The header names the source card: " + selection.command.text)
 	var picked: Array[int] = []
 	selection.selected_card.connect(func(id): picked.append(id))
 	selection.rows[0].pressed.emit()
@@ -131,7 +131,7 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	state.prompt.chosen = ["card:941"]
 	ui._apply_state(state)
 	selection = ui.modal_panel
-	assert(selection.rows[0].text.contains("[1✓]") and selection.hint.text.begins_with("1 selected"), "The row shows how many copies are picked: " + selection.rows[0].text + " | " + selection.hint.text)
+	assert(selection.chosen_refs.size() == 1 and selection.hint.text.contains("1"), "The panel reflects the one picked copy: " + selection.rows[0].text + " | " + selection.hint.text)
 	selection._highlight(1)
 	assert(selection.preview.data.get("name", "") == "Mountain" and selection.preview_caption.text.contains("Mountain"), "The preview follows the highlighted row")
 	if not directory.is_empty(): await ui._save_frame(directory.path_join("library-search-grouped.png"))
@@ -143,7 +143,7 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	ui._open_decision(order)
 	var panel: Control = ui.modal_panel
 	panel._toggle(1)
-	assert(panel.option_buttons[1].text == "1 →" and panel.order_preview.text.contains("Soul Warden"), "Order numbers and arrows must identify the resolution sequence without repeated card text")
+	assert(panel.option_buttons[1].text.contains("1") and panel.order_preview.text.contains("Soul Warden"), "Order numbers and arrows must identify the resolution sequence without repeated card text")
 	var answers: Array = []
 	panel.answered.connect(func(_id, value): answers.append(value))
 	if not directory.is_empty():

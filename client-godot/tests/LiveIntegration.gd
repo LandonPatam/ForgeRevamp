@@ -31,8 +31,13 @@ func check(value: bool, message: String) -> bool:
 		ui.get_tree().quit(1)
 	return value
 
+## Fails after 30 s without a ready snapshot, so a stuck test stops quickly instead of
+## running to the whole-test deadline.
+const STALL_MS := 30000
+
 func wait_ready() -> bool:
-	while Time.get_ticks_msec() < deadline:
+	var stall := mini(deadline, Time.get_ticks_msec() + STALL_MS)
+	while Time.get_ticks_msec() < stall:
 		await ui.get_tree().create_timer(0.1).timeout
 		if not ui.snapshot.is_empty() and ui.snapshot.get("connectionReady", false):
 			await ui.get_tree().create_timer(0.2).timeout
@@ -50,7 +55,8 @@ func wait_ready() -> bool:
 					captured_draw = true
 				ui._drag_library(Vector2(ui.hand_root.global_position.x + ui.hand_root.size.x * 0.5, ui.size.y - 40))
 				manual_draws += 1
-				while not ui.snapshot.get("connectionReady", false) and Time.get_ticks_msec() < deadline:
+				stall = mini(deadline, Time.get_ticks_msec() + STALL_MS)
+				while not ui.snapshot.get("connectionReady", false) and Time.get_ticks_msec() < stall:
 					await ui.get_tree().create_timer(0.1).timeout
 				if not ui.snapshot.get("pendingDraws", []).is_empty():
 					continue # A newer engine revision can reject the test gesture; review the new snapshot.

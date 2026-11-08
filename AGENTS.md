@@ -116,7 +116,8 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Ask before large refactors or renaming files. Keep diffs focused on the request.
 - Preserve existing modified/untracked work. Do not reset/clean the tree or delete user decks/caches as a routine fix.
 - Fix-and-test pipeline (details in `docs/testing.md`):
-  1. Reproduce a reported gameplay bug first with a real-engine scenario: `tests/scenarios/<name>.state` plus a `<name>()` driver in `tests/ScenarioIntegration.gd`. Confirm it fails.
+  0. Keep testing proportional: UI-only changes get one matching `ui`/`visual` check and the user's own play, no new scenario. If a check fails but the feature looks right, stop and ask the user instead of rewriting working code; never raise timeouts to pass a flaky check. Tests assert observable behavior, not exact wording, node names or pixel sizes.
+  1. Reproduce a reported gameplay (engine/rules) bug first with a real-engine scenario: `tests/scenarios/<name>.state` plus a `<name>()` driver in `tests/ScenarioIntegration.gd`. Confirm it fails.
   2. Fix the bug.
   3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
   4. Inspect captures only for visual changes (`visual <Name>`).
