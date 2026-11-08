@@ -50,6 +50,8 @@ var HAND_CARD_SIZE := BASE_CARD_SIZE
 var TABLE_CARD_SIZE := BASE_CARD_SIZE
 const LOCAL_CONTROL_LANE_WIDTH := 88.0
 const LOCAL_CONTROL_GAP := 12.0
+## Opponent boards auto-pack; leave room for one card's hanging P/T badge and the next card's trait icons.
+const OPPONENT_CARD_GAP := 34.0
 const LOCAL_CONTROL_GROUP_GAP := 52.0
 const LOCAL_MANA_ROW_GAP := 9
 const LOCAL_CONTROL_TOP_GAP := 36.0
@@ -1234,7 +1236,7 @@ func _layout_board() -> void:
 		var creatures: Array = p.zones.Battlefield.filter(func(c): return not c.get("typeLine", "").contains("Land"))
 		var lands: Array = p.zones.Battlefield.filter(func(c): return c.get("typeLine", "").contains("Land"))
 		rows["lands" + str(id)].scroll.hide()
-		_row("enemy" + str(id), Vector2(left + 8, 98), Vector2(width - 16, top_height - 142), creatures + lands, 14, id)
+		_row("enemy" + str(id), Vector2(left + 8, 98), Vector2(width - 16, top_height - 142), creatures + lands, OPPONENT_CARD_GAP, id)
 	var you: Dictionary = snapshot.players[0]
 	var creatures: Array = you.zones.Battlefield.filter(func(c): return not c.get("typeLine", "").contains("Land"))
 	var lands: Array = you.zones.Battlefield.filter(func(c): return c.get("typeLine", "").contains("Land"))

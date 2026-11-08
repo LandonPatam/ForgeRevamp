@@ -31,6 +31,8 @@ const TAP_SECONDS := 0.16
 var settle_target: Array = []
 var face: Control
 var trait_layer: Control
+## Power/toughness draws one z-step above every card on the board, so a neighbor's trait icons never cover it.
+var stats_layer: Control
 ## The magnified preview lists traits underneath instead of hanging icons.
 var show_traits := true
 const TRAITS_PER_ROW := 4
@@ -89,6 +91,11 @@ func _ready() -> void:
 	trait_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	trait_layer.draw.connect(_draw_traits)
 	add_child(trait_layer)
+	stats_layer = Control.new()
+	stats_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stats_layer.z_index = 1
+	stats_layer.draw.connect(_draw_stats)
+	add_child(stats_layer)
 	_refresh_face()
 	mouse_entered.connect(_mouse_enter)
 	mouse_exited.connect(_mouse_exit)
@@ -110,7 +117,7 @@ func _refresh_face() -> void:
 		face.stats_on_face = not show_traits
 		if face.refresh(data, selected):
 			surface.render_target_update_mode = SubViewport.UPDATE_ONCE
-	if trait_layer != null: trait_layer.queue_redraw()
+	_redraw_layers()
 
 ## Mana symbol for each color the permanent chose as it entered, hanging off the top-right corner.
 func _draw_chosen_colors() -> void:
@@ -146,18 +153,22 @@ func stats_rect(text: String, font_size: int) -> Rect2:
 	var height: float = STATS_HEIGHT * unit
 	return Rect2(left, size.y - height * 0.5, width, height)
 
+func _redraw_layers() -> void:
+	if trait_layer != null: trait_layer.queue_redraw()
+	if stats_layer != null: stats_layer.queue_redraw()
+
 func _draw_stats() -> void:
+	if data.get("zone", "") != "Battlefield" or data.get("hidden", false) or not show_traits or not data.has("power"): return
 	var text := str(data.get("stats", ""))
 	var font_size: int = maxi(8, int(STATS_FONT * size.x / 144.0))
 	var rect := stats_rect(text, font_size)
 	var font := get_theme_default_font()
-	trait_layer.draw_style_box(_borderless_box(int(rect.size.y * 0.25)), rect)
+	stats_layer.draw_style_box(_borderless_box(int(rect.size.y * 0.25)), rect)
 	var baseline: float = rect.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
-	trait_layer.draw_string(font, Vector2(rect.position.x, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, Color.WHITE)
+	stats_layer.draw_string(font, Vector2(rect.position.x, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, Color.WHITE)
 
 func _draw_traits() -> void:
 	if data.get("zone", "") != "Battlefield" or data.get("hidden", false): return
-	if show_traits and data.has("power"): _draw_stats()
 	if data.get("faceDown", false): return
 	_draw_chosen_colors()
 	if not show_traits: return
@@ -181,7 +192,7 @@ func _arrange() -> void:
 	# Trait badges are already doubled; small cards get only a slight extra boost so four still fit a row.
 	if face != null and size.x > 0 and face.set_badge_scale(clampf(150.0 / size.x, 1.0, 1.15)):
 		surface.render_target_update_mode = SubViewport.UPDATE_ONCE
-	if trait_layer != null: trait_layer.queue_redraw()
+	_redraw_layers()
 	if visual != null:
 		var ratio := size / Vector2(144, 202)
 		if inspection: ratio = Vector2.ONE * minf(ratio.x, ratio.y)
