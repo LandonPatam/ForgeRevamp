@@ -5,6 +5,7 @@ extends Control
 ## being rearranged. Nothing reaches Forge here: the popup's Confirm sends `order`.
 signal order_changed
 signal focus_changed(option: int)
+signal preview_changed(option: int) ## The row being dragged, else hovered, else focused.
 signal submit_requested
 
 const Card = preload("res://scripts/ui/CardView.gd")
@@ -12,6 +13,7 @@ const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
 const ROW_H := 98.0
 const GAP := 8.0
 const WIDTH := 600.0
+var width := WIDTH
 const THUMB := Vector2(62, 87)
 
 var options: Array = []
@@ -25,8 +27,10 @@ var drag_moved := false
 var press_y := 0.0
 var grab_offset := 0.0
 var locked := false
+var previewed := -1
 
-func setup(value: Array, initial: Array[int]) -> void:
+func setup(value: Array, initial: Array[int], row_width: float = WIDTH) -> void:
+	width = row_width
 	options = value
 	order = initial.duplicate()
 	for child in get_children(): child.queue_free()
@@ -35,11 +39,11 @@ func setup(value: Array, initial: Array[int]) -> void:
 	focus_mode = Control.FOCUS_ALL
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_MOVE
-	custom_minimum_size = Vector2(WIDTH, options.size() * (ROW_H + GAP) - GAP)
+	custom_minimum_size = Vector2(width, options.size() * (ROW_H + GAP) - GAP)
 	for i in range(options.size()):
 		var row := PanelContainer.new()
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.size = Vector2(WIDTH, ROW_H)
+		row.size = Vector2(width, ROW_H)
 		row.custom_minimum_size = row.size
 		add_child(row)
 		var line := HBoxContainer.new()
@@ -145,6 +149,10 @@ func _restyle() -> void:
 		rows[option].z_index = 5 if lifted else 0
 		numbers[option].text = str(slot + 1)
 		numbers[option].add_theme_color_override("font_color", Terminal.ACCENT if first else Terminal.INK)
+	var shown := dragging if dragging >= 0 else (hover if hover >= 0 else focus)
+	if shown != previewed and shown >= 0:
+		previewed = shown
+		preview_changed.emit(shown)
 
 func set_focus(option: int) -> void:
 	if option < 0 or option >= rows.size(): return

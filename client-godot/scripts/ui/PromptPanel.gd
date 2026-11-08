@@ -23,7 +23,6 @@ var auto_button: Button
 ## Simultaneous abilities: a drag-to-reorder pile (OrderStack.gd) instead of click-in-sequence.
 var order_stack: Control
 var order_focus_card: Control
-var order_focus_text: Control
 var gallery: Control
 ## Long plain lists such as creature types: searchable, compact rows, ten to a page.
 const LIST_PAGE := 10
@@ -464,7 +463,7 @@ func _stack_builder() -> bool:
 	var count: int = ask.get("options", []).size()
 	return ask.get("kind", "") == "order" and ask.get("abilityOrder", false) and count >= 2 and int(ask.get("min", -1)) == count and int(ask.get("max", -1)) == count
 
-## Left: the focused ability's card and full text. Right: the pile, top resolves first. It opens in
+## Left: a large preview of the dragged, hovered or focused row's card. Right: the pile, top resolves first. It opens in
 ## Forge's order, so Confirm alone matches Auto; Reverse and Forge order rearrange it in one step.
 func _present_stack_builder(column: VBoxContainer, face_size: Vector2) -> void:
 	var options: Array = ask.options
@@ -477,10 +476,13 @@ func _present_stack_builder(column: VBoxContainer, face_size: Vector2) -> void:
 	order_focus_card = preload("res://scripts/ui/CardView.gd").new()
 	order_focus_card.inspection = true
 	order_focus_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	order_focus_card.custom_minimum_size = face_size
+	# No text under it: the card alone, as tall as the pile, with the pile narrowing so the popup keeps its size.
+	var OrderStack = preload("res://scripts/ui/OrderStack.gd")
+	var pile_height: float = minf(options.size() * (OrderStack.ROW_H + OrderStack.GAP) - OrderStack.GAP, maxf(face_size.y, get_viewport().get_visible_rect().size.y * 0.55))
+	var card_height: float = maxf(face_size.y, pile_height + 73.0)
+	var card_size := Vector2(card_height * face_size.x / face_size.y, card_height).round()
+	order_focus_card.custom_minimum_size = card_size
 	side.add_child(order_focus_card)
-	order_focus_text = preload("res://scripts/ui/ReadableText.gd").new()
-	side.add_child(order_focus_text)
 	body.add_child(VSeparator.new())
 	var pile_column := VBoxContainer.new()
 	pile_column.add_theme_constant_override("separation", 8)
@@ -492,13 +494,13 @@ func _present_stack_builder(column: VBoxContainer, face_size: Vector2) -> void:
 	top.add_theme_font_size_override("font_size", 14)
 	top.add_theme_color_override("font_color", Terminal.ACCENT)
 	pile_column.add_child(top)
-	order_stack = preload("res://scripts/ui/OrderStack.gd").new()
+	order_stack = OrderStack.new()
 	var initial: Array[int] = []
 	for i in range(options.size()): initial.append(i)
-	order_stack.setup(options, initial)
+	order_stack.setup(options, initial, maxf(420.0, OrderStack.WIDTH - (card_size.x - face_size.x)))
 	var scroller := ScrollContainer.new()
 	scroller.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroller.custom_minimum_size = Vector2(order_stack.custom_minimum_size.x + 12, minf(order_stack.custom_minimum_size.y, maxf(face_size.y, get_viewport().get_visible_rect().size.y * 0.55)))
+	scroller.custom_minimum_size = Vector2(order_stack.custom_minimum_size.x + 12, pile_height)
 	scroller.add_child(order_stack)
 	pile_column.add_child(scroller)
 	var bottom := Label.new()
@@ -547,7 +549,7 @@ func _present_stack_builder(column: VBoxContainer, face_size: Vector2) -> void:
 	confirm_button.pressed.connect(_submit)
 	buttons.add_child(confirm_button)
 	order_stack.order_changed.connect(_validate)
-	order_stack.focus_changed.connect(_show_order_focus)
+	order_stack.preview_changed.connect(_show_order_focus)
 	order_stack.submit_requested.connect(_submit)
 	_show_order_focus(order_stack.focus)
 	_validate()
@@ -558,7 +560,6 @@ func _show_order_focus(option: int) -> void:
 	var data: Dictionary = ask.options[option]
 	order_focus_card.visible = data.has("card")
 	if data.has("card"): order_focus_card.update_card(data.card)
-	order_focus_text.present(preload("res://scripts/ui/OrderStack.gd").ability_text(data), order_focus_card.custom_minimum_size.x, 90, 15)
 
 ## Types on the table first, most common first; the rest keep Forge's order. Answers still use the original index.
 func _order_list(grid: Container, options: Array) -> void:

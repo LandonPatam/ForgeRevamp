@@ -145,6 +145,15 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	assert(panel.order_stack != null and panel.order_stack.order == [0, 1, 2] and not panel.confirm_button.disabled, "Simultaneous abilities open as a stack in Forge's order, ready to confirm")
 	panel.order_stack.move(1, 0)
 	assert(panel.order_stack.order == [1, 0, 2] and panel.order_stack.numbers[1].text == "1", "Moving a row renumbers the pile; the top resolves first")
+	panel.order_stack.hover = 2
+	panel.order_stack._restyle()
+	assert(panel.order_focus_card.data.get("name", "") == "Young Pyromancer", "Hovering a row previews its card")
+	panel.order_stack.dragging = 0
+	panel.order_stack._restyle()
+	assert(panel.order_focus_card.data.get("name", "") == "Fathom Mage", "The dragged row is the one previewed")
+	panel.order_stack.dragging = -1
+	panel.order_stack.hover = -1
+	panel.order_stack._restyle()
 	var answers: Array = []
 	panel.answered.connect(func(_id, value): answers.append(value))
 	if not directory.is_empty():
