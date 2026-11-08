@@ -1,38 +1,47 @@
 extends Control
-## Library searches as a carousel: the focused card large in the middle, its neighbors smaller,
-## darker and tucked behind on either side. Items are SelectionPanel's stacked groups (FOREST ×3);
-## the panel still decides which exact instance a pick sends. A small pool of card views is reused
-## as the carousel turns, so a 99-card library never builds 99 faces.
+## Library searches as a carousel that moves like the home floppy carousel (DeckCarousel.gd): one
+## continuous closeness curve sets each card's size, tint, tilt and depth; a fractional cursor eases
+## toward the focused card and can be dragged; wheel and arrows step. The focused card sits large in
+## the middle with a gentle lift and bob, its neighbors smaller, darker and behind.
+## Items are SelectionPanel's stacked groups (FOREST ×3). Clicking only focuses or marks a card;
+## the panel's OK sends the marked cards to Forge, so a stray click never commits a search.
+## A small pool of views is reused as the carousel turns, so a 99-card library never builds 99 faces.
 signal focus_requested(index: int)
 signal pick_requested(index: int)
 
 const Card = preload("res://scripts/ui/CardView.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
 const CARD_SIZE := Vector2(288, 404)
-const POOL := 7 # Focus ±3.
-const STEP := [0.0, 205.0, 335.0, 420.0] # Horizontal offset of each neighbor ring from the center.
-const SCALE := [1.0, 0.76, 0.58, 0.46]
-const SHADE := [1.0, 0.62, 0.42, 0.0]
+const POOL := 7 # Cursor ±3.
+const SPACING := 205.0
+const LIFT := 14.0
 
 var items: Array = []    ## Card data per group.
 var counts: Array = []   ## Copies per group.
-var picked: Array = []   ## Picked copies per group.
+var marked: Array = []   ## Marked copies per group.
 var focus := 0
-var position_now := 0.0  ## Fractional focus the views are drawn at; glides toward focus.
+var cursor := 0.0        ## Fractional position the cards are drawn at.
+var target := 0.0
+var elapsed := 0.0
+var dragging := false
+var moved := false
+var press_position := Vector2.ZERO
+var press_cursor := 0.0
+var wheel_at := 0
+var pan_at := 0
 var views: Array = []
 var badges: Array = []
 
 func _ready() -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(STEP[3] * 2.0 + CARD_SIZE.x * SCALE[3] + 40.0, CARD_SIZE.y + 48.0)
+	custom_minimum_size = Vector2(SPACING * 4.0 + CARD_SIZE.x * 0.62 + 24.0, CARD_SIZE.y + 56.0)
 	for i in range(POOL):
 		var view := Card.new()
 		view.inspection = true
 		view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		view.size = CARD_SIZE
 		view.custom_minimum_size = CARD_SIZE
-		view.pivot_offset = CARD_SIZE * 0.5
 		add_child(view)
 		var badge := Label.new()
 		badge.add_theme_font_override("font", Terminal.font())
@@ -47,38 +56,36 @@ func _ready() -> void:
 		view.add_child(badge)
 		views.append(view)
 		badges.append(badge)
-	set_process(false)
 
-func set_items(value: Array, copies: Array, chosen: Array) -> void:
+func set_items(value: Array, copies: Array, marks: Array) -> void:
 	var rebuilt := value != items
 	items = value
 	counts = copies
-	picked = chosen
+	marked = marks
 	if rebuilt:
 		focus = clampi(focus, 0, maxi(0, items.size() - 1))
-		position_now = focus
-	_layout()
+		cursor = focus
+		target = focus
+	_arrange()
 
+## Queued steps keep moving in their direction even before the animation catches up.
 func set_focus(index: int) -> void:
 	if items.is_empty(): return
-	focus = clampi(index, 0, items.size() - 1)
-	set_process(true)
+	var next := clampi(index, 0, items.size() - 1)
+	if next == focus and not dragging: return
+	focus = next
+	if not dragging: target = focus
 
 func _process(delta: float) -> void:
-	position_now = lerpf(position_now, focus, 1.0 - exp(-14.0 * delta))
-	if absf(position_now - focus) < 0.002:
-		position_now = focus
-		set_process(false)
-	_layout()
+	if not is_visible_in_tree(): return
+	elapsed += delta
+	if not dragging and Time.get_ticks_msec() - pan_at > 160:
+		cursor = lerpf(cursor, target, 1.0 - exp(-delta * 10.0))
+		if absf(cursor - target) < 0.0001: cursor = target
+	_arrange()
 
-func _ring(distance: float, table: Array) -> float:
-	var low := mini(int(floor(distance)), table.size() - 1)
-	var high := mini(low + 1, table.size() - 1)
-	return lerpf(table[low], table[high], distance - floor(distance))
-
-func _layout() -> void:
-	var center := size * 0.5 if size.x > 0 else custom_minimum_size * 0.5
-	var base := int(round(position_now))
+func _arrange() -> void:
+	var base := int(round(cursor))
 	for slot in range(POOL):
 		var index := base - 3 + slot
 		# Each group keeps the same pooled view while it stays in range, so faces aren't repainted as it moves.
@@ -87,53 +94,86 @@ func _layout() -> void:
 		if index < 0 or index >= items.size():
 			view.hide()
 			continue
-		var offset := index - position_now
-		var distance := absf(offset)
-		if distance > 3.0:
+		var distance := float(index) - cursor
+		if absf(distance) > 2.9:
 			view.hide()
 			continue
 		view.show()
 		view.update_card(items[index])
-		view.set_selected(int(picked[index]) > 0)
-		var scale_now := _ring(distance, SCALE)
-		var shade := _ring(distance, SHADE)
-		view.scale = Vector2.ONE * scale_now
-		view.position = (center + Vector2(signf(offset) * _ring(distance, STEP), 0) - CARD_SIZE * 0.5).round()
-		view.modulate = Color(shade, shade, shade, clampf((3.0 - distance) * 1.5, 0.0, 1.0))
-		view.z_index = 10 - int(round(distance * 3.0)) # Nearer the middle draws in front.
+		view.set_selected(int(marked[index]) > 0)
+		_place(view, distance)
 		var count := int(counts[index])
-		badge.visible = int(picked[index]) > 0 or count > 1
-		badge.text = ("✓ " if int(picked[index]) > 0 else "") + ("%d/%d" % [int(picked[index]), count] if count > 1 and int(picked[index]) > 0 else ("×%d" % count if count > 1 else "PICKED"))
+		var picks := int(marked[index])
+		badge.visible = picks > 0 or count > 1
+		badge.text = ("✓ %d/%d" % [picks, count] if count > 1 else "✓ SELECTED") if picks > 0 else "×%d" % count
 		# Hangs off the top-right corner so it never covers the card's name.
 		badge.reset_size()
 		badge.position = Vector2(CARD_SIZE.x - badge.size.x + 10, -18)
 
-## The item drawn frontmost under a point, or -1.
+## The home carousel's curve: everything follows one smooth closeness value, so there are no steps.
+func _place(view: Control, distance: float) -> void:
+	var area := size if size.x > 0 else custom_minimum_size
+	var closeness := exp(-distance * distance * 2.1)
+	var depth := lerpf(0.62, 1.0, closeness)
+	var bob := sin(elapsed * 1.35 + 0.4) * 3.0 * closeness
+	var center := Vector2(area.x * 0.5 + distance * SPACING, area.y * 0.5 + 10.0 - closeness * LIFT + bob)
+	view.pivot_offset = CARD_SIZE * 0.5
+	view.position = center - CARD_SIZE * 0.5
+	view.scale = Vector2.ONE * depth
+	view.rotation = clampf(distance, -2, 2) * -0.045 + sin(elapsed * 0.9) * 0.012 * closeness
+	view.z_index = 10 + int(closeness * 20)
+	var tint := Color.WHITE.lerp(Color(0.5, 0.54, 0.58), 1.0 - closeness)
+	tint.a = clampf((2.9 - absf(distance)) / 0.7, 0.0, 1.0)
+	view.modulate = tint
+
+## The frontmost item under a point, or -1.
 func item_at(point: Vector2) -> int:
-	var best := -1
-	var best_distance := INF
-	for index in range(maxi(0, int(round(position_now)) - 3), mini(items.size(), int(round(position_now)) + 4)):
+	var found := -1
+	var top := -1
+	var base := int(round(cursor))
+	for index in range(maxi(0, base - 3), mini(items.size(), base + 4)):
 		var view: Control = views[posmod(index, POOL)]
-		if not view.visible: continue
-		var rect := Rect2(view.position + CARD_SIZE * 0.5 * (Vector2.ONE - view.scale), CARD_SIZE * view.scale)
-		var distance := absf(index - position_now)
-		if rect.has_point(point) and distance < best_distance:
-			best = index
-			best_distance = distance
-	return best
+		if not view.visible or view.z_index < top: continue
+		if Rect2(Vector2.ZERO, CARD_SIZE).has_point(view.get_transform().affine_inverse() * point):
+			found = index
+			top = view.z_index
+	return found
 
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		match event.button_index:
-			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_LEFT: focus_requested.emit(maxi(focus - 1, 0))
-			MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_RIGHT: focus_requested.emit(mini(focus + 1, items.size() - 1))
-			MOUSE_BUTTON_LEFT:
-				var index := item_at(event.position)
-				if index < 0: return
-				if index == focus: pick_requested.emit(index)
-				else: focus_requested.emit(index)
-			_: return
+	if items.is_empty(): return
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]:
+			if Time.get_ticks_msec() - wheel_at > 140:
+				wheel_at = Time.get_ticks_msec()
+				focus_requested.emit(clampi(focus + (1 if event.button_index in [MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_RIGHT] else -1), 0, items.size() - 1))
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				dragging = true
+				moved = false
+				press_position = event.position
+				press_cursor = cursor
+			elif dragging:
+				dragging = false
+				if moved:
+					focus_requested.emit(clampi(roundi(cursor), 0, items.size() - 1))
+					target = focus
+				else:
+					var index := item_at(event.position)
+					if index == focus: pick_requested.emit(index)
+					elif index >= 0: focus_requested.emit(index)
+					target = focus
+			accept_event()
+	elif event is InputEventMouseMotion and dragging:
+		var shift: float = event.position.x - press_position.x
+		moved = moved or absf(shift) > 8
+		if moved:
+			cursor = clampf(press_cursor - shift / SPACING, 0, items.size() - 1)
+			if roundi(cursor) != focus: focus_requested.emit(roundi(cursor))
 		accept_event()
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_RESIZED: _layout()
+	elif event is InputEventPanGesture:
+		pan_at = Time.get_ticks_msec()
+		cursor = clampf(cursor + (event.delta.x + event.delta.y) * 0.09, 0, items.size() - 1)
+		focus_requested.emit(roundi(cursor))
+		target = focus
+		accept_event()

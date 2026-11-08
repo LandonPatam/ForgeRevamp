@@ -746,8 +746,27 @@ func wilds() -> bool:
 	if not check(not panel.callout.visible or ui.snapshot.prompt.get("inputKind", "") != "InputConfirm", "Y answers the confirmation"): return false
 	for index in range(20): await ui.get_tree().process_frame
 	print("SCENARIO search: input=", ui.snapshot.prompt.get("inputKind", ""), " asks=", ui.snapshot.asks.map(func(ask): return [ask.kind, ask.get("title", "")]), " modal=", (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) else "none"), " banner=", panel.panel.visible, " callout=", panel.callout.visible)
+	if not await resolve_to_choice(): return false
+	var search: Control = ui.modal_panel
+	if not check(search is SelectionDialog and search.carousel_mode and search.carousel.visible, "A library search must open the card carousel"): return false
+	var island := -1
+	for r in range(search.groups.size()):
+		if search.options[search.groups[r][0]].get("name", "") == "Island": island = r
+	if not check(island >= 0, "The search must offer Island"): return false
+	search.carousel.focus_requested.emit(island) # As the wheel or an arrow key would.
+	await ui.get_tree().create_timer(0.8).timeout
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = search.carousel.size * 0.5 + Vector2(0, 10)
+	click.pressed = true
+	search.carousel._gui_input(click)
+	click.pressed = false
+	search.carousel._gui_input(click)
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Clicking the middle card must mark Island: " + str(search.staged)): return false
+	if not check(ui.snapshot.prompt.get("chosen", []).is_empty() and ui.modal.visible and not search.confirm_button.disabled, "Marking a card must send nothing to Forge until OK"): return false
 	await capture("search")
-	if not await choose_named("Island"): return false
+	search.confirm_button.pressed.emit()
 	if not await settle(): return false
 	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")
 
@@ -777,3 +796,19 @@ func discard() -> bool:
 	var graveyard: Array = zone("Graveyard").map(func(card): return card.id)
 	if not check(graveyard.has(picks[0].id) and graveyard.has(picks[1].id), "Forge must discard the two clicked cards: " + str(zone("Graveyard").map(func(card): return card.name))): return false
 	return check(not ui.hand_pick_panel.visible and not ui.hand_pick_shade.visible, "The table must return to normal after discarding")
+
+## A two-card library search: marks stay local, OK sends each exact instance to Forge in turn.
+func cultivate() -> bool:
+	if not await tap("Forest", 3) or not await cast("Cultivate"): return false
+	if not await resolve_to_choice(): return false
+	var search: Control = ui.modal_panel
+	if not check(search is SelectionDialog and search.carousel_mode, "Cultivate's search must open the carousel"): return false
+	for name in ["Island", "Swamp"]:
+		for r in range(search.groups.size()):
+			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
+	if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
+	await capture("marked")
+	search.confirm_button.pressed.emit()
+	if not await settle(): return false
+	var found: Array = zone("Battlefield").map(func(card): return card.name) + zone("Hand").map(func(card): return card.name)
+	return check(found.has("Island") and found.has("Swamp") and ui.snapshot.players[0].libraryCount == 8, "Forge must fetch exactly the marked Island and Swamp: " + str(found))
