@@ -807,6 +807,19 @@ func cultivate() -> bool:
 		for r in range(search.groups.size()):
 			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
 	if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
+	# Right-clicking the middle card (Swamp, focused by the last mark) removes its mark; left-click adds it back.
+	await ui.get_tree().create_timer(0.8).timeout
+	var click := InputEventMouseButton.new()
+	click.position = search.carousel.size * 0.5 + Vector2(0, 10)
+	click.button_index = MOUSE_BUTTON_RIGHT
+	click.pressed = true
+	search.carousel._gui_input(click)
+	if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Right-click must remove the Swamp mark: " + str(search.staged)): return false
+	click.button_index = MOUSE_BUTTON_LEFT
+	search.carousel._gui_input(click)
+	click.pressed = false
+	search.carousel._gui_input(click)
+	if not check(search.staged.size() == 2, "Left-click must mark the Swamp again"): return false
 	await capture("marked")
 	search.confirm_button.pressed.emit()
 	if not await settle(): return false

@@ -73,6 +73,7 @@ func _ready() -> void:
 	carousel = preload("res://scripts/ui/CardCarousel.gd").new()
 	carousel.focus_requested.connect(_highlight)
 	carousel.pick_requested.connect(_stage_group)
+	carousel.unpick_requested.connect(_unstage_group)
 	carousel.hide()
 	column.add_child(carousel)
 	carousel_caption = _label(16, Terminal.INK)
@@ -263,7 +264,7 @@ func present(snapshot: Dictionary) -> void:
 	board_button.text = "Choose on board" if prompt.get("inputKind", "") == "InputSelectTargets" else "View battlefield"
 	board_button.visible = true
 	board_button.disabled = not ready
-	keys.text = ("←→ / drag browse   click the middle card or ENTER to select, then OK" + ("   ×N: click again for another copy" if groups.any(func(group): return group.size() > 1) else "")) if carousel_mode else ("↑↓ move   ENTER pick" + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else ""))
+	keys.text = ("←→ / drag browse   left-click middle card / ENTER select   right-click / BACKSPACE remove   then OK") if carousel_mode else ("↑↓ move   ENTER pick" + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else ""))
 
 func _rebuild(cards: Array) -> void:
 	options = cards.duplicate(true)
@@ -364,6 +365,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_ENTER, KEY_KP_ENTER:
 			if carousel_mode: _stage_group(highlighted)
 			elif not rows[highlighted].disabled: _pick_row(highlighted)
+		KEY_BACKSPACE, KEY_DELETE:
+			if not carousel_mode: return
+			_unstage_group(highlighted)
 		_: return
 	get_viewport().set_input_as_handled()
 
@@ -412,23 +416,29 @@ func _caption_carousel() -> void:
 	if not first.get("eligible", true): parts.append("viewed only")
 	carousel_caption.text = "   ·   ".join(parts) + "      [%d / %d]" % [highlighted + 1, groups.size()]
 
-## Clicking the middle card (or Enter) marks it locally; nothing reaches Forge until OK. A single
-## pick swaps the mark; a stacked group marks its next copy, and once full (or at the maximum) unmarks one.
+## Left-clicking the middle card (or Enter) adds a mark locally; nothing reaches Forge until OK.
+## A one-card search moves its single mark; a stacked group marks its next copy up to the maximum.
 func _stage_group(r: int) -> void:
 	if committing or r < 0 or r >= groups.size() or not last_ready: return
 	_highlight(r)
 	var group: Array = groups[r].filter(func(i): return options[i].get("eligible", true))
 	if group.is_empty(): return
-	var most := int(last_prompt.get("selMax", 1))
-	var in_group: Array = group.filter(func(i): return staged.has(i))
-	if most <= 1:
-		var was_here := not in_group.is_empty()
-		staged.clear()
-		if not was_here: staged.append(group[0])
-	elif in_group.size() < group.size() and staged.size() < most:
-		staged.append(group.filter(func(i): return not staged.has(i))[0])
-	elif not in_group.is_empty():
-		staged.erase(in_group.back())
+	var unmarked: Array = group.filter(func(i): return not staged.has(i))
+	if int(last_prompt.get("selMax", 1)) <= 1:
+		if unmarked.size() == group.size():
+			staged.clear()
+			staged.append(group[0])
+	elif not unmarked.is_empty() and staged.size() < int(last_prompt.get("selMax", 1)):
+		staged.append(unmarked[0])
+	_refresh_staged()
+
+## Right-click (or Backspace/Delete on the middle card) removes one mark from that card.
+func _unstage_group(r: int) -> void:
+	if committing or r < 0 or r >= groups.size(): return
+	_highlight(r)
+	var marked: Array = groups[r].filter(func(i): return staged.has(i))
+	if marked.is_empty(): return
+	staged.erase(marked.back())
 	_refresh_staged()
 
 func _refresh_staged() -> void:

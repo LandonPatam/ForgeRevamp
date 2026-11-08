@@ -8,6 +8,7 @@ extends Control
 ## A small pool of views is reused as the carousel turns, so a 99-card library never builds 99 faces.
 signal focus_requested(index: int)
 signal pick_requested(index: int)
+signal unpick_requested(index: int)
 
 const Card = preload("res://scripts/ui/CardView.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -146,6 +147,15 @@ func _gui_input(event: InputEvent) -> void:
 			if Time.get_ticks_msec() - wheel_at > 140:
 				wheel_at = Time.get_ticks_msec()
 				focus_requested.emit(clampi(focus + (1 if event.button_index in [MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_RIGHT] else -1), 0, items.size() - 1))
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			# Right-click removes a mark from the card under the pointer (and turns to it).
+			if event.pressed and not dragging:
+				var index := item_at(event.position)
+				if index >= 0:
+					focus_requested.emit(index)
+					target = focus
+					unpick_requested.emit(index)
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
