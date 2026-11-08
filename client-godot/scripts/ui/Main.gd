@@ -3231,6 +3231,9 @@ func _smoke() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	size = Vector2(1600, 1000)
 	await get_tree().create_timer(0.2).timeout
+	if not _only_checks().is_empty():
+		await _run_only_checks("")
+		return
 	var layout_checks := preload("res://tests/LayoutLoopChecks.gd").new()
 	await layout_checks.run(self)
 	if layout_checks.failed:
@@ -3406,6 +3409,36 @@ func _smoke() -> void:
 	_reset()
 	await load("res://tests/LiveAdapterChecks.gd").new().run()
 	print("PASS: mock table smoke (state, play, stack, tap, attack, crowd, five prompt kinds, reset)")
+	get_tree().quit()
+
+## --only=Name[,Name] (with --smoke or --visual-checks=DIR) runs just tests/<Name>Checks.gd and quits.
+## Use it while iterating; the full sweep runs once before a push. See docs/testing.md.
+func _only_checks() -> PackedStringArray:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--only="): return arg.trim_prefix("--only=").split(",", false)
+	return PackedStringArray()
+
+func _run_only_checks(directory: String) -> void:
+	for check_name in _only_checks():
+		var path := "res://tests/%sChecks.gd" % check_name.strip_edges()
+		if not ResourceLoader.exists(path):
+			push_error("Unknown check %s (expected %s)" % [check_name, path])
+			get_tree().quit(1)
+			return
+		var check: Object = load(path).new()
+		var parameters: Array = []
+		for method in check.get_method_list():
+			if method.name == "run": parameters = method.args
+		var args: Array = []
+		if not parameters.is_empty(): args.append(self)
+		if parameters.size() > 1 and not directory.is_empty():
+			# The full visual run passes captures as a directory or a bool; match the signature.
+			args.append(true if int(parameters[1].type) == TYPE_BOOL else directory)
+			synthetic_hover = not check_name in ["HandPicking", "ZoneBrowser", "GameplayCleanup"]
+		await check.callv("run", args)
+		_reset()
+		await get_tree().process_frame
+	print("ONLY CHECKS DONE: ", ", ".join(_only_checks()))
 	get_tree().quit()
 
 func _click_phase_button(seat: int, step: String) -> void:
@@ -3679,6 +3712,9 @@ func _save_frame(path: String) -> void:
 	print("Screenshot saved: " + path)
 
 func _visual_checks(directory: String) -> void:
+	if not _only_checks().is_empty():
+		await _run_only_checks(directory)
+		return
 	await preload("res://tests/HandPickingChecks.gd").new().run(self, true)
 	await preload("res://tests/ZoneBrowserChecks.gd").new().run(self, directory)
 	await preload("res://tests/GameplayCleanupChecks.gd").new().run(self)

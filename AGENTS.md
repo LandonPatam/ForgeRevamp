@@ -111,15 +111,20 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
 - Don't scan the whole codebase. Start from this map and open only task-relevant files; ask if unsure where something lives.
 - Ask before large refactors or renaming files. Keep diffs focused on the request.
 - Preserve existing modified/untracked work. Do not reset/clean the tree or delete user decks/caches as a routine fix.
-- Run relevant checks and inspect captures for visual changes. Java checks are unnecessary for frontend-only changes.
+- Fix-and-test pipeline (details in `docs/testing.md`):
+  1. Reproduce a reported gameplay bug first with a real-engine scenario: `tests/scenarios/<name>.state` plus a `<name>()` driver in `tests/ScenarioIntegration.gd`. Confirm it fails.
+  2. Fix the bug.
+  3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
+  4. Inspect captures only for visual changes (`visual <Name>`).
+  5. Run `check.mjs all` once before a push, not after every edit. Java checks are unnecessary for frontend-only changes.
 - Bash launch on Windows: `bash ./client-godot/tools/run.sh`; add `-Decks` or `-Mock` as needed.
-- UI checks: `node client-godot/tools/app-check.mjs --render` (or `--editor-preview`), `node client-godot/tools/library-check.mjs --render`, and `.\client-godot\tools\run.ps1 -Capture`.
+- App/home UI checks (not in the runner yet): `node client-godot/tools/app-check.mjs --render` (or `--editor-preview`), `node client-godot/tools/library-check.mjs --render`, and `.\client-godot\tools\run.ps1 -Capture`.
 - Automated playtest as the human seat across precons: `node bridge/tools/playtest.mjs` (see `docs/playtest.md`).
 - Online checks: `node bridge/tools/online-check.mjs` (real lobby, seats and hidden information; contacts no router).
 - Run suites that host online lobbies serially: they share Forge's configured online port. On Windows, test helpers must resolve `java.home` and launch its actual JVM; killing a PATH launcher shim can orphan its JVM and keep inherited output pipes open.
 - Windows build: `.\client-godot\tools\package.ps1` (add `-SkipBuild` if the bridge is already built) writes `dist/ForgeUI/` and `dist/ForgeUI-windows.zip`; needs the Godot 4.7.2 export templates (`client-godot/export_presets.cfg`) and JDK 17. It bundles a jlink runtime and Forge `res/` without `adventure/`. Installed builds keep logs/startup status in Godot's `user://service`. Keep `tests/` in the export (`Main.gd` preloads it) and list non-resource files such as JSON in the preset's include filter. To check a package, run app-check with `FORGE_EXPORTED_EXE=dist/ForgeUI/ForgeUI.exe`; release builds print almost no script errors, so a broken script just hangs.
-- Java checks: `.\bridge\tools\test.ps1`. If incremental Maven classes are stale, use the direct javac commands in CLAUDE_HANDOFF.txt. Restart services after Java changes.
-- Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`.
+- Java checks: `node client-godot/tools/check.mjs bridge` (or `.\bridge\tools\test.ps1`). If incremental Maven classes are stale, use the direct javac commands in CLAUDE_HANDOFF.txt. Restart services after Java changes.
+- Detailed references are task-specific: `docs/computer-menu.md`, `main-menu.md`, `deck-collection.md`, `night-lighting.md`, `live-session-disk.md`, `protocol.md`, `online-play.md`, `testing.md`.
 - HANDOFF.md is historical and may contain superseded details. Prefer current source, this file and NOTES.md.
 
 ## Session notes
