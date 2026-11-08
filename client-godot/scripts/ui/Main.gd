@@ -612,6 +612,7 @@ func _build_shell() -> void:
 	incoming_effect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	incoming_effect.blocked = func(): return modal.visible or opening_hand.visible or (live and snapshot.get("prompt", {}).get("inputKind", "") not in ["InputPassPriority", "InputLockUI", ""])
 	incoming_effect.inspect_requested.connect(_show_card_detail)
+	incoming_effect.card_view = func(id: int) -> Control: return cards.get(id)
 	incoming_effect.acknowledged.connect(func(stack_id: int):
 		if live: adapter.acknowledge_effect(stack_id))
 	interaction_panel = preload("res://scripts/ui/InteractionPanel.gd").new()
@@ -646,7 +647,7 @@ func _build_shell() -> void:
 
 func _present_interaction() -> void:
 	if not is_instance_valid(interaction_panel): return
-	var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
+	var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
 	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible, cards, avatars)
@@ -1700,7 +1701,7 @@ func _process(_delta: float) -> void:
 	adapter.poll(_delta)
 	if layout_paused: return
 	if live and is_instance_valid(interaction_panel):
-		var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
+		var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing or hand_pick_panel.visible): _present_interaction()
 	_layout_zone_browser()
 	_layout_mana_pool()

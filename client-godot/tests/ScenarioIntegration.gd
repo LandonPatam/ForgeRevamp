@@ -718,8 +718,24 @@ func wrath_hits() -> bool:
 	var events := wipe_events()
 	print("SCENARIO wipe events: ", events.map(func(event): return event.get("source", {}).get("name", "?")))
 	if not check(events.size() == 1 and events[0].get("source", {}).get("name", "") == "Wrath of God", "A wipe that reaches your creature is announced with its real source card"): return false
+	# With no possible response it still waits on you: the spell sits in the middle of the table with a
+	# branch to each creature it will destroy, before anything dies.
+	for index in range(20): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(not ui.snapshot.stack.is_empty() and int(ui.snapshot.get("autoPassStackId", -1)) != int(ui.snapshot.stack[0].id), "The wipe must wait for this seat even without a response"): return false
+	var effect: Control = ui.incoming_effect
+	if not check(effect.wipe_card.visible and not effect.panel.visible, "The wipe shows as its card on the table, not the decision popup"): return false
+	var reached: Array = effect._wipe_views()
+	if not check(reached.size() >= 2, "Branches reach both Grizzly Bears: " + str(events[0].get("affected", []))): return false
+	if not check(zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"), "Nothing is destroyed before you see it"): return false
 	await capture("wipe")
-	return true
+	effect.wipe_resolve.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if not zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(not zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"), "Resolve lets Forge resolve the wipe"): return false
+	return check(not effect.wipe_card.visible, "The wipe overlay closes once it resolves")
 
 func wrath_misses() -> bool:
 	return check(wipe_events().is_empty(), "A wipe that cannot reach any of your permanents is not announced to you: " + str(wipe_events()))

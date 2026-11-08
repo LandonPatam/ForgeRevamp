@@ -44,7 +44,19 @@ var notice_targets: HBoxContainer
 var notice_ok: Button
 var notices: Array = []
 var notice_active: Dictionary = {}
-const NOTICE_CARD := Vector2(100, 140)
+const NOTICE_CARD := Vector2(150, 210)
+## A board wipe waiting on this seat: its card large in the middle of the table, lines branching
+## out to every permanent it will reach (all players'), and a small terminal bar with Resolve.
+var wipe_mode := false
+var wipe_card: Control
+var wipe_bar: PanelContainer
+var wipe_title: Label
+var wipe_detail: Label
+var wipe_resolve: Button
+var wipe_started := 0
+## Main supplies the table's card views: func(id: int) -> Control (or null).
+var card_view: Callable
+const WIPE_LINE := Color("ffb978")
 const NOTICE_MAX_TARGETS := 3
 ## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
 const PLAYER_PORTRAIT_SIDE := 112.0
@@ -124,6 +136,7 @@ func _ready() -> void:
 	add_child(hover_preview)
 	hover_preview.hide()
 	_build_notice()
+	_build_wipe()
 	panel.minimum_size_changed.connect(_layout)
 	get_viewport().size_changed.connect(_layout)
 	resized.connect(_layout)
@@ -223,7 +236,8 @@ func review() -> void:
 	responding.erase(id)
 	dismissed.erase(id)
 	_offer_priority(true)
-	panel.show()
+	if wipe_mode: _set_wipe_visible(true)
+	else: panel.show()
 	_update_actions()
 
 func respond() -> void:
@@ -232,6 +246,7 @@ func respond() -> void:
 	if not responding.has(id): responding.append(id)
 	_clear_hover()
 	panel.hide()
+	_set_wipe_visible(false)
 	response_requested.emit(id)
 
 func _update_actions() -> void:
@@ -244,6 +259,7 @@ func _next() -> void:
 	if waiting.is_empty():
 		active = {}
 		panel.hide()
+		_hide_wipe()
 		return
 	active = waiting.pop_front()
 	var source: Dictionary = active.get("source", {})
@@ -277,8 +293,11 @@ func _next() -> void:
 	rules.max_lines_visible = -1
 	face.update_card(source)
 	_update_actions()
+	wipe_mode = mass_removal and table_rect.has_area()
+	if wipe_mode: _show_wipe()
+	else: _hide_wipe()
 	_layout()
-	panel.visible = not responding.has(int(active.stackId))
+	panel.visible = not wipe_mode and not responding.has(int(active.stackId))
 	panel.modulate.a = 0
 	create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
 
@@ -469,10 +488,148 @@ func reset() -> void:
 	latest = 0
 	initialized = false
 	panel.hide()
+	_hide_wipe()
+
+## Whether a decision-style popup (the large one or the wipe overlay) is up on this seat.
+func showing() -> bool:
+	return panel.visible or (wipe_card != null and wipe_card.visible)
+
+func _build_wipe() -> void:
+	var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+	wipe_card = Card.new()
+	wipe_card.inspection = true
+	wipe_card.table_angle = false
+	add_child(wipe_card)
+	_enable_card_hover(wipe_card)
+	wipe_bar = PanelContainer.new()
+	Terminal.panel(wipe_bar, 12)
+	var frame := wipe_bar.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	frame.border_color = WIPE_LINE
+	frame.shadow_color = Color(0, 0, 0, 0.5)
+	frame.shadow_size = 10
+	wipe_bar.add_theme_stylebox_override("panel", frame)
+	wipe_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(wipe_bar)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	wipe_bar.add_child(column)
+	var heading := _label("BOARD-WIDE EFFECT", 12, WIPE_LINE)
+	heading.add_theme_font_override("font", Terminal.font())
+	column.add_child(heading)
+	wipe_title = _label("", 20, Color.WHITE)
+	wipe_title.add_theme_font_override("font", Terminal.font())
+	column.add_child(wipe_title)
+	wipe_detail = _label("", 14, Terminal.INK)
+	wipe_detail.add_theme_font_override("font", Terminal.font())
+	wipe_detail.custom_minimum_size.x = 260
+	column.add_child(wipe_detail)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	column.add_child(row)
+	var view := Button.new()
+	view.text = "View battlefield"
+	view.tooltip_text = browse_button.tooltip_text
+	Terminal.button(view)
+	view.pressed.connect(respond)
+	row.add_child(view)
+	wipe_resolve = Button.new()
+	wipe_resolve.text = "Resolve"
+	wipe_resolve.tooltip_text = resolve_button.tooltip_text
+	Terminal.button(wipe_resolve, true)
+	wipe_resolve.pressed.connect(dismiss)
+	row.add_child(wipe_resolve)
+	wipe_card.hide()
+	wipe_bar.hide()
+
+func _show_wipe() -> void:
+	var source: Dictionary = active.get("source", {})
+	wipe_card.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
+	wipe_title.text = str(source.get("name", "Hidden source")).to_upper()
+	_count_wipe()
+	wipe_started = Time.get_ticks_msec()
+	_set_wipe_visible(not responding.has(int(active.get("stackId", -1))))
+	wipe_card.modulate.a = 0.0
+	wipe_bar.modulate.a = 0.0
+	var tween := create_tween().set_parallel()
+	tween.tween_property(wipe_card, "modulate:a", 1.0, 0.18)
+	tween.tween_property(wipe_bar, "modulate:a", 1.0, 0.18)
+
+## Counted from the table each frame: the views settle after the snapshot that opened the wipe.
+func _count_wipe() -> void:
+	var reached := _wipe_views()
+	var yours := 0
+	for view in reached:
+		if int(view.data.get("owner", -1)) == 0: yours += 1
+	wipe_detail.text = "> from %s\n> reaches %d permanent%s, %d of yours" % [active.get("controllerName", "Opponent"), reached.size(), "" if reached.size() == 1 else "s", yours]
+
+func _hide_wipe() -> void:
+	wipe_mode = false
+	_set_wipe_visible(false)
+
+func _set_wipe_visible(value: bool) -> void:
+	if wipe_card == null: return
+	wipe_card.visible = value and wipe_mode
+	wipe_bar.visible = wipe_card.visible
+	queue_redraw()
+
+## The table views of the permanents the wipe reaches, one per visible view (a pile counts once).
+func _wipe_views() -> Array:
+	var views: Array = []
+	if not card_view.is_valid(): return views
+	for id in active.get("affected", []):
+		var view: Control = card_view.call(int(id))
+		if is_instance_valid(view) and view.is_visible_in_tree() and not views.has(view): views.append(view)
+	return views
+
+## Branches grow out from the spell to each permanent it reaches; yours are brighter, each gets a
+## pulsing frame and a spark that runs along its branch.
+func _draw() -> void:
+	if wipe_card == null or not wipe_card.visible: return
+	var to_local := get_global_transform().affine_inverse()
+	var origin: Vector2 = to_local * wipe_card.get_global_rect().get_center()
+	var age := (Time.get_ticks_msec() - wipe_started) / 1000.0
+	var grow := clampf(age / 0.45, 0.0, 1.0)
+	grow = 1.0 - pow(1.0 - grow, 3.0)
+	var pulse := 0.55 + 0.45 * sin(age * 4.0)
+	for view in _wipe_views():
+		var rect: Rect2 = to_local * view.get_global_rect()
+		var target := rect.get_center()
+		var mine := int(view.data.get("owner", -1)) == 0
+		var color := Color(WIPE_LINE, 1.0 if mine else 0.7)
+		var bend := origin.lerp(target, 0.5) + Vector2(0, -0.12 * origin.distance_to(target))
+		var points := PackedVector2Array()
+		var steps := 24
+		for i in range(int(steps * grow) + 1):
+			var t := float(i) / steps
+			points.append(origin.lerp(bend, t).lerp(bend.lerp(target, t), t))
+		if points.size() >= 2:
+			draw_polyline(points, Color(color, color.a * 0.28), 16.0 if mine else 11.0, true)
+			draw_polyline(points, color, 4.5 if mine else 3.0, true)
+		if grow >= 1.0:
+			var spark_t := fmod(age * 0.7 + float(view.get_instance_id() % 97) / 97.0, 1.0)
+			var spark := origin.lerp(bend, spark_t).lerp(bend.lerp(target, spark_t), spark_t)
+			draw_circle(spark, 6.0 if mine else 4.5, Color(1, 0.9, 0.75, 0.95))
+			var frame := P.box(Color(WIPE_LINE, 0.12 * pulse), Color(WIPE_LINE, 0.4 + 0.6 * pulse), 8, 0)
+			frame.set_border_width_all(4 if mine else 3)
+			draw_style_box(frame, rect.grow(4))
+
+func _layout_wipe() -> void:
+	if wipe_card == null or not table_rect.has_area(): return
+	var height := clampf(table_rect.size.y * 0.62, 260, 520)
+	var card_size := Vector2(height * 144.0 / 202.0, height).round()
+	wipe_card.size = card_size
+	wipe_card.custom_minimum_size = card_size
+	wipe_bar.reset_size()
+	var gap := 24.0
+	var total := card_size.x + gap + wipe_bar.size.x
+	var left := table_rect.get_center().x - total * 0.5
+	wipe_card.position = Vector2(left, table_rect.get_center().y - card_size.y * 0.5).round()
+	wipe_bar.position = Vector2(left + card_size.x + gap, table_rect.get_center().y - wipe_bar.size.y * 0.5).round()
 
 func _layout() -> void:
 	if panel == null:
 		return
+	_layout_wipe()
 	var available := get_viewport_rect().size
 	if notice_panel != null and notice_panel.visible:
 		# A small card in the middle of the table, never over the rail.
@@ -533,6 +690,13 @@ func _process(_delta: float) -> void:
 	if notice_panel != null: notice_panel.visible = not notice_active.is_empty() and not suspended
 	if active.is_empty():
 		return
-	panel.visible = not suspended and not responding.has(int(active.get("stackId", -1)))
+	panel.visible = not wipe_mode and not suspended and not responding.has(int(active.get("stackId", -1)))
+	if wipe_mode:
+		var shown := not suspended and not responding.has(int(active.get("stackId", -1)))
+		if shown != wipe_card.visible: _set_wipe_visible(shown)
+		if shown:
+			_layout_wipe()
+			_count_wipe()
+			queue_redraw()
 	if suspended:
 		_clear_hover()

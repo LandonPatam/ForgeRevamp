@@ -107,7 +107,11 @@ final class GameStateJson {
         int autoPassStackId = -1;
         if (gui.getGameController() instanceof PlayerControllerHuman human) {
             var top = human.getGame().getStack().peek();
-            if (top != null && stackItems.containsKey(top.getId())
+            // An opposing wipe that reaches this seat waits for it even with no legal response, so
+            // its popup comes before the permanents go, not after.
+            boolean wipeHere = top != null && top.getSpellAbility().getActivatingPlayer() != human.getPlayer()
+                    && TargetedEffectHistory.massRemovalReaches(top.getSpellAbility(), human.getPlayer());
+            if (top != null && stackItems.containsKey(top.getId()) && !wipeHere
                     && input instanceof forge.gamemodes.match.input.InputPassPriority
                     && StackInteractionPolicy.mayAutoPass(top.getSpellAbility(),
                             top.getSpellAbility().getActivatingPlayer() == human.getPlayer(),

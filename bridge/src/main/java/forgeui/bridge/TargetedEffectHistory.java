@@ -65,6 +65,37 @@ final class TargetedEffectHistory {
         }
     }
 
+    /** Every permanent on the table a wipe will reach (all players'), frozen when it is first seen,
+     *  so the client can draw the spell's lines to each one before it resolves. */
+    static JsonArray affectedPermanents(forge.game.spellability.SpellAbility ability) {
+        JsonArray result = new JsonArray();
+        Set<Integer> seen = new HashSet<>();
+        for (var part = ability; part != null; part = part.getSubAbility()) {
+            if (!isMassRemoval(part) || part.getHostCard() == null || part.getHostCard().getGame() == null) continue;
+            var api = part.getApi();
+            if (api != forge.game.ability.ApiType.DestroyAll && api != forge.game.ability.ApiType.SacrificeAll
+                    && api != forge.game.ability.ApiType.DamageAll && api != forge.game.ability.ApiType.ChangeZoneAll
+                    && api != forge.game.ability.ApiType.PumpAll) continue;
+            try {
+                var host = part.getHostCard();
+                Iterable<forge.game.card.Card> reached;
+                if (part.hasParam("Defined")) {
+                    reached = forge.game.ability.AbilityUtils.getDefinedCards(host, part.getParam("Defined"), part);
+                } else {
+                    String valid = part.getParamOrDefault("ValidCards", part.getParamOrDefault("ChangeType", ""));
+                    if (valid.isEmpty()) continue;
+                    reached = forge.game.card.CardLists.getValidCards(host.getGame().getCardsIn(ZoneType.Battlefield), valid, part.getActivatingPlayer(), host, part);
+                }
+                for (var card : reached) {
+                    if (card.isInZone(ZoneType.Battlefield) && seen.add(card.getId())) result.add(card.getId());
+                }
+            } catch (RuntimeException unreadable) {
+                // The popup still announces the wipe; it just draws no lines.
+            }
+        }
+        return result;
+    }
+
     synchronized void record(StackItemView item, PlayerView localPlayer, forge.game.spellability.SpellAbility ability) {
         forge.game.player.Player local = null;
         if (ability != null && localPlayer != null && ability.getHostCard() != null && ability.getHostCard().getGame() != null) {
@@ -99,6 +130,7 @@ final class TargetedEffectHistory {
         event.addProperty("kind", massRemoval ? "massRemoval" : (targets.isEmpty() ? "notice" : "targeted"));
         event.add("source", GameStateJson.describeCard(source, publicSource));
         event.add("targets", targets);
+        if (massRemoval && ability != null) event.add("affected", affectedPermanents(ability));
         events.put(item.getId(), event);
         while (events.size() > 32) events.remove(events.keySet().iterator().next());
     }
