@@ -1067,7 +1067,7 @@ func _apply_state(value: Dictionary) -> void:
 		_present_card_selection()
 	if live:
 		_update_live_actions()
-		opening_hand.present(snapshot)
+		_present_opening_hand()
 	if is_instance_valid(toast):
 		toast.position = Vector2(30, size.y * 0.44)
 		toast.size.x = board.size.x
@@ -2898,6 +2898,16 @@ func _pulse_decision_board(hovered: bool) -> void:
 func _board_ask(ask: Dictionary) -> bool:
 	return ask.get("kind", "") == "choose" and ask.get("bulkSelection", false) and ask.get("options", []).all(func(option): return option.has("playerId") or (cards.has(int(option.get("cardId", -1))) and cards[int(option.cardId)].data.get("zone", "") == "Battlefield"))
 
+## The opening hand waits until the starting toss (and the starting-player
+## choice) has left the table, so its fan can't be hovered over the dice.
+func _present_opening_hand() -> void:
+	if snapshot.is_empty(): return
+	var toss_up: bool = is_instance_valid(modal_panel) and (modal_panel is CoinTossDialog or modal_panel is StartingPlayerDialog)
+	if (toss_up and modal.visible) or StartingPlayerDialog.needs_selection(snapshot):
+		if opening_hand.visible: opening_hand.reset()
+		return
+	opening_hand.present(snapshot)
+
 func _present_coin_toss() -> bool:
 	var toss: Dictionary = snapshot.get("startingToss", {})
 	var current: bool = is_instance_valid(modal_panel) and modal_panel is CoinTossDialog
@@ -2917,7 +2927,8 @@ func _present_coin_toss() -> bool:
 				modal_panel = panel
 				panel.settled.connect(func():
 					coin_toss_seen[id] = true
-					_present_card_selection.call_deferred())
+					_present_card_selection.call_deferred()
+					_present_opening_hand.call_deferred())
 			modal.show()
 			modal_panel.present(snapshot)
 			return true
