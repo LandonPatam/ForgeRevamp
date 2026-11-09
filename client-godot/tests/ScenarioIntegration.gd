@@ -33,7 +33,7 @@ func step() -> bool:
 	if state.prompt.okEnabled:
 		ui._primary_action()
 		return true
-	return check(false, "No usable interaction control: " + JSON.stringify(state.prompt))
+	return check(false, "No usable interaction control (modal=%s %s carousel=%s staged=%s committing=%s tether=%s): " % [ui.modal.visible, (ui.modal_panel.get_script().resource_path.get_file() if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), ui.modal_panel.get("carousel_mode") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("staged") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("committing") if is_instance_valid(ui.modal_panel) else "-", ui.interaction_panel.callout.visible] + JSON.stringify(state.prompt).left(300))
 
 func prepared() -> bool:
 	while Time.get_ticks_msec() < deadline:
@@ -42,11 +42,12 @@ func prepared() -> bool:
 		if scenario in ["blocking", "combat-reasons"] and state.prompt.get("inputKind", "") == "InputBlock": return true
 		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
 		# the scenario driver answers it.
-		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty(): return true
+		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty() and not (ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd")): return true
 		# The fixture jumps to turn 5 straight after the starting roll; finish that animation as a player would.
 		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
+			ui._present_card_selection() # A choice already waiting behind the coin (Manifold Insights) opens now.
 		if scenario not in ["blocking", "combat-reasons"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
@@ -404,6 +405,10 @@ func insights() -> bool:
 				await capture("choice")
 		if chosen and ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty():
 			return check(revealed and int(ui.snapshot.players[1].handCount) == 2, "Each opponent's chosen card goes into the caster's hand: " + str(ui.snapshot.players[1].handCount))
+		# Forge is already waiting on the choice but the window opens a frame later (slow under a long suite).
+		if str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect") and not ui.modal.visible:
+			await ui.get_tree().create_timer(0.2).timeout
+			continue
 		if not await step(): return false
 	return check(false, "Manifold Insights did not complete; reveal=%s choice=%s" % [revealed, chosen])
 
