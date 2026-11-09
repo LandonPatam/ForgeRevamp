@@ -9,6 +9,10 @@ signal modes_answered(id: int, picks: Array)
 ## Card lists: a look/reveal acknowledges its ask; a one-card pick names the card for Forge.
 signal ask_answered(id: int, value: Variant)
 signal card_chosen(card_id: int)
+## Targets of a permanent's effect: player rows, then Confirm / Cancel. Table clicks are Main's.
+signal target_player_clicked(seat: int)
+signal targets_confirmed
+signal targets_cancelled
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
 const ManaOption = preload("res://scripts/ui/ManaOption.gd")
 const AbilityOption = preload("res://scripts/ui/AbilityOption.gd")
@@ -45,6 +49,9 @@ var scry_toggles: Array = []
 var scry_order_label: Label
 var scry_order: Control       ## OrderStack of the cards kept on top, first = top of library.
 var scry_sent := false
+var target_mode := false
+var target_rows: Array = [] ## [{seat, name}]
+var target_hint: Label
 
 func _ready() -> void:
 	Terminal.panel(self, 12)
@@ -81,6 +88,9 @@ func _ready() -> void:
 	scry_order_label = _label(12, Terminal.MUTED)
 	scry_order_label.text = "TOP OF LIBRARY · first = top · drag to reorder"
 	scry_box.add_child(scry_order_label)
+	target_hint = _label(13, Terminal.MUTED)
+	target_hint.hide()
+	column.add_child(target_hint)
 	mode_list = VBoxContainer.new()
 	mode_list.add_theme_constant_override("separation", 6)
 	mode_list.hide()
@@ -89,14 +99,16 @@ func _ready() -> void:
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
 	yes_button = _button(func():
-		if not scry_ask.is_empty(): _confirm_scry()
+		if target_mode: targets_confirmed.emit()
+		elif not scry_ask.is_empty(): _confirm_scry()
 		elif card_mode: _confirm_cards()
 		elif mode_ask.is_empty(): answered.emit("ok")
 		else: _send_modes())
 	Terminal.button(yes_button, true)
 	row.add_child(yes_button)
 	no_button = _button(func():
-		if mode_ask.is_empty(): answered.emit("cancel")
+		if target_mode: targets_cancelled.emit()
+		elif mode_ask.is_empty(): answered.emit("cancel")
 		elif not mode_sent:
 			mode_sent = true
 			_refresh_modes()
@@ -123,6 +135,7 @@ func _button(callback: Callable) -> Button:
 
 ## `card_name` labels the box; labels come from Forge's own Yes/No (or custom) button text.
 func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool, card: Dictionary = {}) -> void:
+	leave_targets()
 	_leave_scry()
 	_leave_card_mode()
 	face.visible = not card.is_empty()
@@ -158,6 +171,7 @@ func _process(delta: float) -> void:
 ## Cards in the tether, largest first: one card alone, or a list whose highlighted row is shown large.
 ## `pick` is a one-card choice (confirm names it); otherwise it is a look/reveal to acknowledge.
 func present_cards(message: String, cards: Array, pick: bool, ready: bool, ask_id: int = -1, verb: String = "") -> void:
+	leave_targets()
 	_leave_scry()
 	var ids: Array = cards.map(func(card): return int(card.get("id", -1)))
 	if not card_mode or ids != card_list.map(func(card): return int(card.get("id", -1))) or ask_id != card_ask_id:
@@ -219,6 +233,7 @@ func focused_pick() -> Dictionary:
 
 ## Scry / "top or bottom" moves: every looked-at card face up with its own Top/Bottom toggle.
 func present_scry(ask: Dictionary, ready: bool) -> void:
+	leave_targets()
 	_leave_card_mode()
 	face.hide()
 	mode_list.hide()
@@ -312,6 +327,56 @@ func _confirm_scry() -> void:
 	_refresh_scry()
 	ask_answered.emit(int(scry_ask.id), {"top": top, "bottom": bottom})
 
+## The effect's text, a row per targetable player, and what is picked so far (lines are drawn by
+## InteractionPanel from this box to each pick). `staged` holds {kind, id, name}.
+func present_targets(source_name: String, effect_text: String, players: Array, staged: Array, low: int, high: int, ready: bool, can_cancel: bool) -> void:
+	_leave_scry()
+	_leave_card_mode()
+	face.hide()
+	title.show()
+	title.text = "[ %s ]" % source_name.to_upper()
+	question = "> " + effect_text.strip_edges().to_lower()
+	_show_line()
+	line.custom_minimum_size.x = 340
+	var seats: Array = players.map(func(player): return int(player.seat))
+	if not target_mode or seats != target_rows.map(func(player): return int(player.seat)):
+		for child in mode_list.get_children(): child.queue_free()
+		mode_buttons.clear()
+		for player in players:
+			var row := _button(func(): target_player_clicked.emit(int(player.seat)))
+			row.icon = null
+			row.custom_minimum_size.x = 300
+			mode_list.add_child(row)
+			mode_buttons.append(row)
+	target_mode = true
+	target_rows = players
+	mode_ask = {}
+	mode_list.visible = not players.is_empty()
+	for i in range(mode_buttons.size()):
+		var chosen: bool = staged.any(func(ref): return ref.kind == "player" and int(ref.id) == int(players[i].seat))
+		mode_buttons[i].text = ("◆ " if chosen else "◇ ") + str(players[i].name).to_upper()
+		Terminal.button(mode_buttons[i], chosen)
+		mode_buttons[i].icon = null
+		mode_buttons[i].disabled = not ready
+	var names: Array = staged.map(func(ref): return str(ref.get("name", "target")))
+	target_hint.visible = true
+	target_hint.text = ("→ " + ", ".join(names)) if not names.is_empty() else ("click a target on the table" if players.is_empty() else "pick a player above or on the table")
+	var count := staged.size()
+	yes_button.visible = true
+	yes_button.text = "[Y] No target" if count == 0 and low == 0 else ("[Y] Confirm target" if high == 1 else "[Y] Confirm %d target%s" % [count, "" if count == 1 else "s"])
+	yes_button.disabled = not ready or count < low or count > high or (count == 0 and low > 0)
+	no_button.text = "[N] Cancel"
+	no_button.visible = can_cancel
+	no_button.disabled = not ready
+
+func leave_targets() -> void:
+	if not target_mode: return
+	target_mode = false
+	target_rows = []
+	target_hint.hide()
+	for child in mode_list.get_children(): child.queue_free()
+	mode_buttons.clear()
+
 func _leave_scry() -> void:
 	if scry_ask.is_empty(): return
 	scry_ask = {}
@@ -327,6 +392,7 @@ func _leave_card_mode() -> void:
 	title.show()
 
 func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
+	leave_targets()
 	_leave_scry()
 	_leave_card_mode()
 	face.hide()

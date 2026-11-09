@@ -7,6 +7,9 @@ signal review_requested
 signal browse_requested
 signal modes_answered(id: int, picks: Array)
 signal card_chosen(card_id: int)
+signal target_player_clicked(seat: int)
+signal targets_confirmed
+signal targets_cancelled
 const P = preload("res://scripts/ui/Palette.gd")
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -35,6 +38,10 @@ var callout_card: Control
 var mode_ask: Dictionary = {}
 ## A tether with nothing on the table to hang from (a scry from a resolving spell): centered, no line.
 var floating := false
+## Targets of an effect from a permanent (or a card in your zones) tether to it; Main stages the
+## picks in `target_staged` ({kind, id, name}) and sends them on Confirm.
+var target_tether := false
+var target_staged: Array = []
 ## Main supplies your zone icon holding a card id (graveyard, exile...), so a decision about a card
 ## that already left the table tethers to where it is: func(id: int) -> Control (or null).
 var zone_view: Callable
@@ -90,6 +97,9 @@ func _ready() -> void:
 	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
 	callout.ask_answered.connect(func(id, value): modes_answered.emit(id, value))
 	callout.card_chosen.connect(func(card_id): card_chosen.emit(card_id))
+	callout.target_player_clicked.connect(func(seat): target_player_clicked.emit(seat))
+	callout.targets_confirmed.connect(func(): targets_confirmed.emit())
+	callout.targets_cancelled.connect(func(): targets_cancelled.emit())
 	add_child(callout)
 
 func _label(font_size: int, color: Color) -> Label:
@@ -135,6 +145,21 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		if mode_ask.get("kind", "") == "message":
 			callout.present_cards(str(mode_ask.get("message", "Looking at cards")), mode_ask.options.map(func(option): return option.card), false, state.get("connectionReady", false), int(mode_ask.id))
 		else: callout.present_modes(str(mode_ask.get("sourceCard", mode_ask.options[0].get("card", {})).get("name", "Card")), mode_ask, state.get("connectionReady", false))
+		_place_callout()
+		queue_redraw()
+		return
+	var target_anchor := _target_anchor()
+	target_tether = target_anchor != null
+	if target_tether:
+		panel.hide()
+		callout_card = target_anchor
+		callout.visible = true
+		var target_prompt: Dictionary = state.prompt
+		var target_ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
+		var players: Array = []
+		for entity in target_prompt.get("entities", []):
+			if entity.get("kind", "") == "player": players.append({"seat": int(entity.get("id", -1)), "name": str(entity.get("name", "Player"))})
+		callout.present_targets(str(target_prompt.sourceCard.get("name", "Card")), _target_question(target_prompt), players, target_staged, int(target_prompt.get("selMin", 1)), int(target_prompt.get("selMax", 1)), target_ready, target_prompt.get("cancelEnabled", false))
 		_place_callout()
 		queue_redraw()
 		return
@@ -300,6 +325,38 @@ func show_modes(ask: Dictionary) -> void:
 	mode_ask = ask
 	present(state, suspended, cards, player_views)
 
+## Choosing targets for an effect whose source is a permanent on the table or a card in one of
+## your zones (a trigger or ability). Targets for a spell being cast from hand keep the rail.
+func _target_anchor() -> Control:
+	var prompt: Dictionary = state.get("prompt", {})
+	if prompt.get("inputKind", "") != "InputSelectTargets" or not state.get("asks", []).is_empty(): return null
+	var source: Dictionary = prompt.get("sourceCard", {})
+	if source.is_empty() or source.get("hidden", false): return null
+	var view: Control = cards.get(int(source.get("id", -1)))
+	if is_instance_valid(view) and view.is_visible_in_tree() and str(view.data.get("zone", "")) == "Battlefield": return view
+	if zone_view.is_valid():
+		var zone: Control = zone_view.call(int(source.get("id", -1)))
+		if is_instance_valid(zone) and zone.is_visible_in_tree(): return zone
+	return null
+
+## The effect in the card's words, then Forge's instruction: "...deals damage to that player.
+## select target opponent". Engine ids, the "Name - " prefix and [bookkeeping] are dropped.
+static func _target_question(prompt: Dictionary) -> String:
+	var lines: Array = Array(str(prompt.get("message", "")).split("\n")).map(func(line): return str(line).strip_edges()).filter(func(line): return not line.is_empty())
+	if lines.is_empty(): return "choose a target"
+	var ids := RegEx.create_from_string(" \\(\\d+\\)")
+	var bookkeeping := RegEx.create_from_string("\\s*\\[[^\\]]*\\]\\s*$")
+	var effect: String = bookkeeping.sub(ids.sub(str(lines[0]), "", true), "").strip_edges()
+	var card_name := str(prompt.get("sourceCard", {}).get("name", ""))
+	if not card_name.is_empty() and effect.begins_with(card_name + " - "): effect = effect.substr(card_name.length() + 3)
+	var instruction: String = ids.sub(str(lines.back()), "", true)
+	return effect if lines.size() == 1 else effect + "\n" + instruction
+
+## Main's staged picks changed: redraw the box and its lines.
+func set_target_staged(value: Array) -> void:
+	target_staged = value.duplicate(true)
+	present(state, suspended, cards, player_views)
+
 ## The table card with this id, else your zone icon holding it, else null.
 func _anchor_for(id: int) -> Control:
 	var view: Control = cards.get(id)
@@ -422,6 +479,7 @@ func _exit_tree() -> void:
 func _draw() -> void:
 	if callout.visible and is_instance_valid(callout_card): _draw_callout_link()
 	if callout.visible: _draw_pick_branch()
+	if callout.visible and target_tether: _draw_target_lines()
 	if suspended or description.is_empty() or not str(description.get("kind", "")).begins_with("InputSelect"): return
 	var offered: Array = state.get("prompt", {}).get("cards", [])
 	var chosen: Array = state.get("prompt", {}).get("chosen", [])
@@ -442,6 +500,27 @@ func _draw() -> void:
 		draw_set_transform_matrix(get_global_transform().affine_inverse() * avatar.get_global_transform())
 		draw_style_box(frame, Rect2(Vector2(-3, -3), avatar.size + Vector2(6, 6)))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## A purple line from the tether to each staged target (card or portrait), with a frame on it.
+func _draw_target_lines() -> void:
+	var to_local := get_global_transform().affine_inverse()
+	var box := Rect2(callout.position, callout.size)
+	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+	for ref in target_staged:
+		var view: Control = cards.get(int(ref.id)) if ref.kind == "card" else player_views.get(int(ref.id))
+		if not is_instance_valid(view) or not view.is_visible_in_tree(): continue
+		var view_transform: Transform2D = to_local * view.get_global_transform()
+		var target: Vector2 = view_transform * (view.size * 0.5)
+		var start := Vector2(clampf(target.x, box.position.x, box.end.x), clampf(target.y, box.position.y, box.end.y))
+		if box.has_point(target): continue
+		draw_line(start, target, Color(Terminal.ACCENT, 0.3), 12.0, true)
+		draw_line(start, target, Terminal.ACCENT, 3.5, true)
+		draw_circle(target, 6.0, Terminal.ACCENT)
+		var frame := P.box(Color(Terminal.ACCENT, 0.1 * pulse), Color(Terminal.ACCENT, 0.4 + 0.6 * pulse), 8, 0)
+		frame.set_border_width_all(3)
+		draw_set_transform_matrix(view_transform)
+		draw_style_box(frame, Rect2(Vector2.ZERO, view.size).grow(4))
+		draw_set_transform_matrix(Transform2D.IDENTITY)
 
 ## A one-card pick: an orange branch from the tether to the highlighted choice on the table.
 func _draw_pick_branch() -> void:

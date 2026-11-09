@@ -1271,11 +1271,24 @@ func damage() -> bool:
 	await capture("damage")
 	return check(int(ui.cards[int(wurm.id)].data.get("damage", 0)) == 3, "The Wurm's view shows its new damage")
 
+## Combustible Gearhulk's "target opponent" is a tether off the Gearhulk: opponents as rows, the pick
+## staged locally with a line to their portrait, sent only on Confirm.
 func gearhulk() -> bool:
 	if not await tap("Mountain", 6) or not await cast("Combustible Gearhulk"): return false
-	var seen := await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" or not ui.snapshot.asks.is_empty())
-	await dump("gearhulk")
-	return seen
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets"): return check(false, "The Gearhulk trigger must ask for a target")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	var tether: Control = panel.callout
+	if not check(panel.target_tether and tether.visible and not panel.panel.visible and tether.mode_buttons.size() == 2, "The target choice is a tether with both opponents"): return false
+	if not check(tether.line.text.contains("draw three cards"), "It shows the effect's text: " + tether.line.text): return false
+	tether.mode_buttons[0].pressed.emit()
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(panel.target_staged.size() == 1 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Picking stages the opponent locally"): return false
+	await ui.get_tree().create_timer(0.3).timeout
+	await capture("gearhulk")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") != "InputSelectTargets"): return check(false, "Confirm sends the target")
+	return check(ui.snapshot.stack.is_empty() or ui.snapshot.stack.any(func(item): return item.get("targets", []).any(func(target): return str(target.get("name", "")).begins_with("AI 1"))), "The trigger targets the picked opponent: " + JSON.stringify(ui.snapshot.stack).left(300))
 
 ## Shivan Gorge's two abilities tether as rows that keep their text and draw costs as mana symbols.
 func shivan_gorge() -> bool:
@@ -1289,10 +1302,24 @@ func shivan_gorge() -> bool:
 	await capture("gorge")
 	return true
 
+## Persistent Constrictor's "up to one target creature they control": a tether off the Constrictor;
+## clicking their creature stages it with a line, Confirm puts the -1/-1 counter on it.
 func constrictor() -> bool:
-	var seen := await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" or not ui.snapshot.asks.is_empty(), 200)
-	await dump("constrictor")
-	return seen
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 200): return check(false, "The Constrictor trigger must ask for a target")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(panel.target_tether and panel.callout.visible and not panel.panel.visible, "The target choice is a tether off the Constrictor"): return false
+	var bears: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Grizzly Bears": bears = card
+	ui._click_card(int(bears.id))
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(panel.target_staged.size() == 1 and int(panel.target_staged[0].id) == int(bears.id) and ui.snapshot.prompt.get("chosen", []).is_empty(), "Clicking their creature stages it locally"): return false
+	await ui.get_tree().create_timer(0.3).timeout
+	await capture("constrictor")
+	panel.callout.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears" and int(card.get("counters", {}).get("M1M1", 0)) == 1) or ui.snapshot.players[1].zones.Graveyard.any(func(card): return card.name == "Grizzly Bears")): return check(false, "Confirm puts the -1/-1 counter on the Bears")
+	return true
 
 ## Scry shows only the cards you look at, face up, on a tether: Temple of Malice's scry 1 sends
 ## Lightning Bolt to the bottom; Preordain's scry 2 then offers the next two (proving it), keeps the

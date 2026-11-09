@@ -86,6 +86,13 @@ var hand_pick_staged: Array = []
 var hand_pick_queue: Array = []
 var hand_pick_awaiting := -1
 var hand_pick_committing := false
+## Targets of a tethered effect: picked locally, sent on the tether's Confirm (Forge would finish a
+## one-target choice on the first click). {kind: "card"|"player", id, name}; player ids are seats.
+var target_staged: Array = []
+var target_queue: Array = []
+var target_awaiting: Dictionary = {}
+var target_committing := false
+var target_prompt_key := ""
 var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
@@ -653,6 +660,9 @@ func _build_shell() -> void:
 		return null
 	interaction_panel.modes_answered.connect(func(id, picks): _intent("answer", {"id": id, "value": picks}))
 	interaction_panel.card_chosen.connect(func(card_id): _intent("card", {"id": card_id}))
+	interaction_panel.target_player_clicked.connect(func(seat): _stage_target("player", seat))
+	interaction_panel.targets_confirmed.connect(_commit_targets)
+	interaction_panel.targets_cancelled.connect(func(): _intent("cancel"))
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -676,6 +686,7 @@ func _build_shell() -> void:
 
 func _present_interaction() -> void:
 	if not is_instance_valid(interaction_panel): return
+	_sync_targets()
 	var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
@@ -1954,6 +1965,7 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 		if targeting:
 			return
 		if _stage_hand_pick(data): return
+		if interaction_panel.target_tether and _stage_target("card", int(data.id)): return
 		_select_card(data)
 		if data.get("zone", "") == "Stack":
 			return # Pending casts can be inspected/moved, but cannot activate abilities.
@@ -2382,6 +2394,7 @@ func _choose_player(id: int) -> void:
 				_cancel_attack_target()
 				_intent("attack", {"id": attacker_id, "target": id})
 			return
+		if interaction_panel.target_tether and _stage_target("player", id): return
 		_intent("player", {"id": id})
 		return
 	if targeting and _attackable_seat(id) and _can_attack():
@@ -2923,6 +2936,67 @@ func _present_hand_pick() -> bool:
 	hand_pick_cancel.disabled = not ready
 	_place_hand_pick.call_deferred()
 	return true
+
+## Marks or unmarks a legal target for the tethered effect; true when it was a legal target.
+func _stage_target(kind: String, id: int) -> bool:
+	if target_committing: return true
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var name := ""
+	if kind == "card":
+		if not prompt.get("selectable", []).any(func(value): return int(value) == id): return false
+		var card: Dictionary = cards[id].data if cards.has(id) else {}
+		name = str(card.get("name", "card"))
+	else:
+		var entity: Array = prompt.get("entities", []).filter(func(value): return value.get("kind", "") == "player" and int(value.get("id", -1)) == id)
+		if entity.is_empty(): return false
+		name = str(entity[0].get("name", "player"))
+	var existing := target_staged.filter(func(ref): return ref.kind == kind and int(ref.id) == id)
+	if not existing.is_empty(): target_staged.erase(existing[0])
+	elif int(prompt.get("selMax", 1)) == 1: target_staged = [{"kind": kind, "id": id, "name": name}]
+	elif target_staged.size() < int(prompt.get("selMax", 1)): target_staged.append({"kind": kind, "id": id, "name": name})
+	interaction_panel.set_target_staged(target_staged)
+	return true
+
+## Confirm: each pick in turn, each confirmed by Forge's chosen list, then OK if Forge still waits.
+func _commit_targets() -> void:
+	if target_committing: return
+	target_committing = true
+	target_queue = target_staged.duplicate(true)
+	target_awaiting = {}
+	_advance_targets()
+
+func _target_ref(ref: Dictionary) -> String:
+	if ref.kind == "card": return "card:" + str(int(ref.id))
+	return "player:" + str(int(snapshot.players[int(ref.id)].get("engineId", ref.id)))
+
+func _advance_targets() -> void:
+	if not target_committing or not snapshot.get("connectionReady", false): return
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	if prompt.get("inputKind", "") != "InputSelectTargets": return
+	var chosen: Array = prompt.get("chosen", [])
+	if not target_awaiting.is_empty():
+		if not chosen.has(_target_ref(target_awaiting)): return
+		target_awaiting = {}
+	while not target_queue.is_empty() and chosen.has(_target_ref(target_queue[0])): target_queue.pop_front()
+	if not target_queue.is_empty():
+		target_awaiting = target_queue.pop_front()
+		if target_awaiting.kind == "card": _intent("card", {"id": int(target_awaiting.id)})
+		else: _intent("player", {"id": int(target_awaiting.id)})
+	elif prompt.get("okEnabled", false):
+		_intent("ok")
+
+## A new targeting prompt starts with nothing staged; a finished one clears the commit.
+func _sync_targets() -> void:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var key := str(prompt.get("inputKind", "")) + "|" + str(prompt.get("message", "")) + "|" + str(prompt.get("sourceCard", {}).get("id", -1))
+	if key != target_prompt_key:
+		target_prompt_key = key
+		target_staged.clear()
+		target_queue.clear()
+		target_awaiting = {}
+		target_committing = false
+		interaction_panel.target_staged = []
+	_advance_targets()
 
 ## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
 func _stage_hand_pick(data: Dictionary) -> bool:
