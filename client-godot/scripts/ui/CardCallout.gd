@@ -11,6 +11,7 @@ signal ask_answered(id: int, value: Variant)
 signal card_chosen(card_id: int)
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
 const ManaOption = preload("res://scripts/ui/ManaOption.gd")
+const AbilityOption = preload("res://scripts/ui/AbilityOption.gd")
 const BLINK_SECONDS := 0.55
 var title: Label
 var line: Label
@@ -353,6 +354,18 @@ func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
 				tile.custom_minimum_size = Vector2(76, 76)
 				mode_buttons.append(tile)
 		for i in range(options.size() if mode_buttons.is_empty() else 0):
+			if ask.get("abilityChoice", false):
+				# Abilities read like the card: the effect, then its cost, mana symbols drawn as icons
+				# (Shivan Gorge: "deals 1 damage to each opponent", Cost {2}{R}{T}).
+				var ability := AbilityOption.new()
+				ability.description = str(options[i].get("label", ""))
+				ability.focus_mode = Control.FOCUS_NONE
+				ability.custom_minimum_size.x = 400
+				ability.tooltip_text = "%d  ·  %s" % [i + 1, ability.description]
+				ability.pressed.connect(_toggle_mode.bind(i))
+				mode_list.add_child(ability)
+				mode_buttons.append(ability)
+				continue
 			var button := _button(_toggle_mode.bind(i))
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			button.custom_minimum_size.x = 400
@@ -407,7 +420,7 @@ func _refresh_modes() -> void:
 	var ready := mode_ready
 	for i in range(mode_buttons.size()):
 		var picked := mode_picks.has(i)
-		if mode_buttons[i] is ManaOption:
+		if mode_buttons[i] is ManaOption or mode_buttons[i] is AbilityOption:
 			mode_buttons[i].disabled = mode_sent or not ready
 			continue
 		mode_buttons[i].text = ("%d  %s" % [i + 1, mode_buttons[i].get_meta("text")]) if _instant() else "%d [%s] %s" % [i + 1, "x" if picked else " ", mode_buttons[i].get_meta("text")]

@@ -1277,10 +1277,16 @@ func gearhulk() -> bool:
 	await dump("gearhulk")
 	return seen
 
+## Shivan Gorge's two abilities tether as rows that keep their text and draw costs as mana symbols.
 func shivan_gorge() -> bool:
 	ui._click_card(find_card("Shivan Gorge", "Battlefield").id)
 	if not await wait_ready(): return false
-	await dump("gorge")
+	for index in range(10): await ui.get_tree().process_frame
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 2, "Shivan Gorge's abilities are a tether"): return false
+	var damage_row: Control = tether.mode_buttons[1]
+	if not check(damage_row.get_script() == preload("res://scripts/ui/AbilityOption.gd") and damage_row.effect_view.text.contains("1 damage") and damage_row.cost_view.text.contains("{2}{R}"), "The damage ability keeps its text with a symbol cost line: " + str([damage_row.get("description")])): return false
+	await capture("gorge")
 	return true
 
 func constrictor() -> bool:
