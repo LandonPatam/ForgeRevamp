@@ -562,7 +562,9 @@ func greater_good() -> bool:
 					ui._click_card(id)
 					if not await wait_ready(): return false
 				discarded = 3
-				if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
+				# Hand picks stay local until the red Discard button sends them.
+				if ui.hand_pick_panel.visible and not ui.hand_pick_confirm.disabled: ui.hand_pick_confirm.pressed.emit()
+				elif ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
 				continue
 		if sacrificed and state.stack.is_empty() and state.asks.is_empty() and kind == "InputPassPriority" and not find_card("Grizzly Bears", "Graveyard").is_empty():
 			await capture("result")
@@ -815,12 +817,15 @@ func discard() -> bool:
 	ui._click_card(picks[0].id)
 	if not await wait_ready(): return false
 	if not check(int(ui.cards[picks[0].id].data.get("pickMark", 0)) == 2, "A clicked hand card must be marked for discard: " + str(ui.snapshot.prompt.get("chosen", []))): return false
-	await capture("picked")
 	ui._click_card(picks[1].id)
 	if not await wait_ready(): return false
-	if ui.hand_pick_panel.visible:
-		if not check(not ui.hand_pick_confirm.disabled, "Confirm must enable once two cards are picked"): return false
-		ui.hand_pick_confirm.pressed.emit()
+	# Both picks stay pending until the red Discard button: a branch runs to each picked card.
+	if not check(ui.hand_pick_panel.visible and zone("Hand").any(func(card): return card.id == picks[1].id), "Picking never discards by itself; the red button does"): return false
+	if not check(ui.hand_pick_lines.visible and ui.hand_pick_since.has(int(picks[0].id)) and ui.hand_pick_since.has(int(picks[1].id)), "A branch runs to each picked card: " + str(ui.hand_pick_since.keys())): return false
+	if not check(ui.hand_pick_red and not ui.hand_pick_confirm.disabled, "Discard is the red confirm button, enabled once two cards are picked"): return false
+	await ui.get_tree().create_timer(0.6).timeout
+	await capture("picked")
+	ui.hand_pick_confirm.pressed.emit()
 	if not await settle(): return false
 	var graveyard: Array = zone("Graveyard").map(func(card): return card.id)
 	if not check(graveyard.has(picks[0].id) and graveyard.has(picks[1].id), "Forge must discard the two clicked cards: " + str(zone("Graveyard").map(func(card): return card.name))): return false

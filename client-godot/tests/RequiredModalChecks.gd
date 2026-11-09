@@ -27,10 +27,11 @@ func run(ui: Control) -> void:
 	ui.hand_pick_shade.gui_input.emit(outside)
 	ui._unhandled_key_input(escape)
 	assert(ui.hand_pick_panel.visible, "Outside clicks and Escape must not dismiss a required discard")
-	state.prompt.chosen = ["card:" + str(state.prompt.cards[0].id)]
-	state.prompt.okEnabled = true
-	ui._apply_state(state)
+	# A click marks the card locally (Forge would finish at its maximum); the red button sends it.
+	var requests: int = ui.adapter.request_counter if ui.adapter != null and "request_counter" in ui.adapter else -1
+	assert(ui._stage_hand_pick(ui.cards[int(state.prompt.cards[0].id)].data))
 	assert(not ui.hand_pick_confirm.disabled and int(ui.cards[int(state.prompt.cards[0].id)].data.get("pickMark", 0)) == 2, "A picked hand card must be marked for discard and the prompt completable")
+	assert(requests < 0 or ui.adapter.request_counter == requests, "Picking alone sends nothing to Forge")
 	state.prompt.inputKind = "InputPassPriority"
 	state.prompt.cards = []
 	state.prompt.chosen = []

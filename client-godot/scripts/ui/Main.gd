@@ -76,6 +76,16 @@ var hand_pick_message: Label
 var hand_pick_count: Label
 var hand_pick_confirm: Button
 var hand_pick_cancel: Button
+## Branches from the pick box to each picked hand card (red for a discard), like a wipe's lines.
+var hand_pick_lines: Control
+var hand_pick_since: Dictionary = {} ## Card id -> when it was picked, so its branch grows in.
+var hand_pick_red := false
+## Picks stay local until the red Discard / Confirm: Forge finishes a selection the moment it has
+## its maximum, so each click would otherwise discard at once. The button then sends them in turn.
+var hand_pick_staged: Array = []
+var hand_pick_queue: Array = []
+var hand_pick_awaiting := -1
+var hand_pick_committing := false
 var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
@@ -1077,7 +1087,7 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
 		if hand_pick and zone == "Hand" and owner == 0:
 			# Forge's own chosen list marks the pick; cards it cannot take are shaded.
-			if snapshot.prompt.get("chosen", []).has("card:" + str(c.id)): c.pickMark = 2 if hand_pick_discard else 1
+			if hand_pick_staged.has(int(c.id)) or snapshot.prompt.get("chosen", []).has("card:" + str(c.id)): c.pickMark = 2 if hand_pick_discard else 1
 			elif not hand_pick_offered.has(int(c.id)): c.pickBlocked = true
 		c.stackCount = int(anchored_counts.get(c.id, packed.counts.get(c.id, 1)))
 		c.pileSize = int(pile_sizes.get(c.id, 1))
@@ -1728,6 +1738,7 @@ func _card_unhovered(source: Control) -> void:
 		raised_card.hide()
 
 func _process(_delta: float) -> void:
+	if is_instance_valid(hand_pick_lines) and hand_pick_lines.visible: hand_pick_lines.queue_redraw()
 	adapter.poll(_delta)
 	if layout_paused: return
 	if live and is_instance_valid(interaction_panel):
@@ -1934,6 +1945,7 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 			return
 		if targeting:
 			return
+		if _stage_hand_pick(data): return
 		_select_card(data)
 		if data.get("zone", "") == "Stack":
 			return # Pending casts can be inspected/moved, but cannot activate abilities.
@@ -2298,6 +2310,9 @@ func _primary_action() -> void:
 		opening_hand.submit("ok")
 		return
 	if targeting:
+		return
+	if live and is_instance_valid(hand_pick_panel) and hand_pick_panel.visible:
+		_commit_hand_pick() # Q presses the pick's own button.
 		return
 	if live:
 		_intent("ok")
@@ -2845,7 +2860,7 @@ func _build_hand_pick_panel() -> void:
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 10)
 	column.add_child(buttons)
-	hand_pick_confirm = _button("Confirm", func(): _intent("ok"), "Confirm the selected cards (Q)")
+	hand_pick_confirm = _button("Confirm", _commit_hand_pick, "Confirm the selected cards (Q)")
 	P.style_popup_button(hand_pick_confirm, true)
 	hand_pick_confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	buttons.add_child(hand_pick_confirm)
@@ -2853,6 +2868,13 @@ func _build_hand_pick_panel() -> void:
 	P.style_popup_button(hand_pick_cancel)
 	buttons.add_child(hand_pick_cancel)
 	resized.connect(_place_hand_pick)
+	hand_pick_lines = Control.new()
+	hand_pick_lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hand_pick_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hand_pick_lines.z_index = 29 # Over the hand (20), under the pick box (30).
+	hand_pick_lines.hide()
+	add_child(hand_pick_lines)
+	hand_pick_lines.draw.connect(_draw_hand_pick_lines)
 
 ## Shows or hides the hand-pick prompt; true while it owns the decision.
 func _present_hand_pick() -> bool:
@@ -2860,10 +2882,18 @@ func _present_hand_pick() -> bool:
 	var active := _hand_pick_active()
 	hand_pick_panel.visible = active
 	hand_pick_shade.visible = active
-	if not active: return false
+	hand_pick_lines.visible = active
+	if not active:
+		hand_pick_since.clear()
+		hand_pick_staged.clear()
+		hand_pick_queue.clear()
+		hand_pick_awaiting = -1
+		hand_pick_committing = false
+		return false
 	var prompt: Dictionary = snapshot.prompt
 	var discard := _hand_pick_is_discard()
-	var chosen: int = prompt.get("chosen", []).size()
+	_advance_hand_pick()
+	var chosen: int = hand_pick_staged.size()
 	var low := int(prompt.get("selMin", 0))
 	var high := int(prompt.get("selMax", 0))
 	var ready: bool = snapshot.get("connectionReady", false) and snapshot.get("pendingDraws", []).is_empty()
@@ -2874,11 +2904,97 @@ func _present_hand_pick() -> bool:
 	hand_pick_message.text = id_suffix.sub(str(prompt.get("message", "")), "", true).strip_edges()
 	hand_pick_count.text = ("%d of %d selected" % [chosen, high] if low == high else "%d selected (%d–%d)" % [chosen, low, high]) + "   ·   click cards in your hand"
 	hand_pick_confirm.text = "Discard" if discard else "Confirm"
-	hand_pick_confirm.disabled = not ready or not prompt.get("okEnabled", false) or (chosen == 0 and low > 0)
+	if discard != hand_pick_red:
+		hand_pick_red = discard
+		_style_hand_pick_confirm(discard)
+	var picked_now := {}
+	for id in hand_pick_staged: picked_now[id] = hand_pick_since.get(id, Time.get_ticks_msec())
+	hand_pick_since = picked_now
+	hand_pick_confirm.disabled = not ready or hand_pick_committing or chosen < maxi(1, low) or chosen > high
 	hand_pick_cancel.visible = prompt.get("cancelEnabled", false)
 	hand_pick_cancel.disabled = not ready
 	_place_hand_pick.call_deferred()
 	return true
+
+## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
+func _stage_hand_pick(data: Dictionary) -> bool:
+	if not _hand_pick_active() or data.get("zone", "") != "Hand" or int(data.get("owner", -1)) != 0: return false
+	if hand_pick_committing: return true
+	var id := int(data.id)
+	if not snapshot.prompt.get("cards", []).any(func(card): return int(card.id) == id): return true
+	var high := int(snapshot.prompt.get("selMax", 1))
+	if hand_pick_staged.has(id): hand_pick_staged.erase(id)
+	elif high == 1: hand_pick_staged = [id]
+	elif hand_pick_staged.size() < high: hand_pick_staged.append(id)
+	_apply_state(snapshot)
+	return true
+
+func _commit_hand_pick() -> void:
+	if hand_pick_committing or hand_pick_staged.is_empty(): return
+	hand_pick_committing = true
+	hand_pick_queue = hand_pick_staged.duplicate()
+	hand_pick_awaiting = -1
+	_advance_hand_pick()
+
+## One card per snapshot, each confirmed by Forge's chosen list; Forge ends the selection itself at
+## its maximum, otherwise OK finishes it once every pick has landed.
+func _advance_hand_pick() -> void:
+	if not hand_pick_committing or not snapshot.get("connectionReady", false): return
+	var chosen: Array = snapshot.prompt.get("chosen", [])
+	if hand_pick_awaiting >= 0:
+		if not chosen.has("card:" + str(hand_pick_awaiting)): return
+		hand_pick_awaiting = -1
+	while not hand_pick_queue.is_empty() and chosen.has("card:" + str(hand_pick_queue[0])): hand_pick_queue.pop_front()
+	if not hand_pick_queue.is_empty():
+		hand_pick_awaiting = int(hand_pick_queue.pop_front())
+		_intent("card", {"id": hand_pick_awaiting})
+	elif snapshot.prompt.get("okEnabled", false):
+		_intent("ok")
+
+## A discard confirms with a red button; other hand picks keep the purple primary style.
+func _style_hand_pick_confirm(red: bool) -> void:
+	P.style_popup_button(hand_pick_confirm, true)
+	if not red: return
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color("8a1c1c") if state == "normal" else (Color("b02626") if state in ["hover", "focus"] else (Color("6e1414") if state == "pressed" else Color("3a1515")))
+		box.border_color = Color("ff6b6b") if state != "disabled" else Color("5a2a2a")
+		box.set_border_width_all(2)
+		box.set_corner_radius_all(4)
+		box.set_content_margin_all(10)
+		hand_pick_confirm.add_theme_stylebox_override(state, box)
+	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		hand_pick_confirm.add_theme_color_override(key, Color.WHITE)
+	hand_pick_confirm.add_theme_color_override("font_disabled_color", Color("8a6a6a"))
+
+## Grow out from the bottom of the pick box to each picked card, bending like the wipe's branches,
+## with a spark running down each one; the card's own transform keeps the end on a tilted hand card.
+func _draw_hand_pick_lines() -> void:
+	if not hand_pick_panel.visible or hand_pick_since.is_empty(): return
+	var to_local := hand_pick_lines.get_global_transform().affine_inverse()
+	var box := Rect2(to_local * hand_pick_panel.global_position, hand_pick_panel.size)
+	var origin := Vector2(box.get_center().x, box.end.y)
+	var tint: Color = Card.PICK_DISCARD if hand_pick_red else Card.PLAYABLE_GLOW
+	var now := Time.get_ticks_msec()
+	for id in hand_pick_since:
+		var view: Control = cards.get(int(id))
+		if not is_instance_valid(view) or not view.is_visible_in_tree(): continue
+		var target: Vector2 = (to_local * view.get_global_transform()) * Vector2(view.size.x * 0.5, view.size.y * 0.2)
+		var bend := origin.lerp(target, 0.5) + Vector2((target.x - origin.x) * 0.15, -0.1 * origin.distance_to(target))
+		var grow := clampf((now - int(hand_pick_since[id])) / 350.0, 0.0, 1.0)
+		grow = 1.0 - pow(1.0 - grow, 3.0)
+		var points := PackedVector2Array()
+		for i in range(int(24 * grow) + 1):
+			var t := i / 24.0
+			points.append(origin.lerp(bend, t).lerp(bend.lerp(target, t), t))
+		if points.size() < 2: continue
+		hand_pick_lines.draw_polyline(points, Color(tint, 0.28), 14.0, true)
+		hand_pick_lines.draw_polyline(points, tint, 4.0, true)
+		if grow >= 1.0:
+			var spark_t := fmod(now / 1000.0 * 0.8 + float(int(id) % 37) / 37.0, 1.0)
+			hand_pick_lines.draw_circle(origin.lerp(bend, spark_t).lerp(bend.lerp(target, spark_t), spark_t), 5.0, Color(1, 0.85, 0.8, 0.95))
+			hand_pick_lines.draw_circle(target, 7.0, tint)
+	hand_pick_lines.draw_circle(origin, 6.0, tint)
 
 ## Centered over the table, above the hand fan, so it never covers the cards being picked.
 func _place_hand_pick() -> void:
