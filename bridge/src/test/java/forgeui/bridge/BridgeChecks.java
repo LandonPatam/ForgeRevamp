@@ -172,6 +172,8 @@ public final class BridgeChecks {
             check(gui.openAsks().isEmpty(), "Resolved ask retained");
             rejects(() -> gui.answer(id, json("[0]")));
 
+            var commanderRules = BridgeMain.commanderRules();
+            check(!commanderRules.warnAboutAICards() && commanderRules.getGameType() == forge.game.GameType.Commander && commanderRules.getGamesPerMatch() > 0, "Matches use Forge's Commander defaults without the AI card warning");
             var warningCard = new forge.item.PaperCard(forge.card.CardRules.fromScript(List.of("Name:Warning card", "ManaCost:1 G", "Types:Creature Beast", "PT:2/2", "Oracle:Example rules.")), "TST", forge.card.CardRarity.Common);
             Future<?> warning = engine.submit(() -> gui.getChoices("AI cannot play these cards well", -1, -1, List.of("=== Main ===", warningCard), null, null));
             ask = next(events, "ask");
