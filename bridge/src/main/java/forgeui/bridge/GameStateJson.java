@@ -341,7 +341,19 @@ final class GameStateJson {
         JsonArray targets = new JsonArray();
         stackTargets(item, targets, new java.util.HashSet<>());
         result.add("targets", targets);
+        Integer x = xPaid(item.getId());
+        if (x != null) result.addProperty("xValue", x);
         return result;
+    }
+
+    /** The X a stack item was cast or activated with, when it has one (Earthquake for 4 -> 4). */
+    private Integer xPaid(int stackId) {
+        if (!(gui.getGameController() instanceof PlayerControllerHuman human)) return null;
+        for (var instance : human.getGame().getStack()) {
+            if (instance.getId() != stackId) continue;
+            return TargetedEffectHistory.xPaid(instance.getSpellAbility());
+        }
+        return null;
     }
 
     private void stackTargets(StackItemView item, JsonArray targets, java.util.Set<String> seen) {

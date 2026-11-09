@@ -19,6 +19,21 @@ final class TargetedEffectHistory {
         record(item, localPlayer, null);
     }
 
+    /** X as paid for this spell/ability or any of its parts, when its cost has an X. */
+    static Integer xPaid(forge.game.spellability.SpellAbility ability) {
+        for (var part = ability; part != null; part = part.getSubAbility()) {
+            Integer x = part.getXManaCostPaid();
+            if (x != null) return x;
+        }
+        if (ability != null && ability.getPayCosts() != null && ability.getPayCosts().getTotalMana() != null
+                && ability.getPayCosts().getTotalMana().countX() > 0) {
+            Object root = ability.getRootAbility().getXManaCostPaid();
+            if (root instanceof Integer x) return x;
+            return 0;
+        }
+        return null;
+    }
+
     static boolean isMassRemoval(forge.game.spellability.SpellAbility ability) {
         if (ability == null) return false;
         var api = ability.getApi();
@@ -130,6 +145,8 @@ final class TargetedEffectHistory {
         event.addProperty("kind", massRemoval ? "massRemoval" : (targets.isEmpty() ? "notice" : "targeted"));
         event.add("source", GameStateJson.describeCard(source, publicSource));
         event.add("targets", targets);
+        Integer x = xPaid(ability);
+        if (x != null) event.addProperty("xValue", x);
         if (massRemoval && ability != null) event.add("affected", affectedPermanents(ability));
         events.put(item.getId(), event);
         while (events.size() > 32) events.remove(events.keySet().iterator().next());

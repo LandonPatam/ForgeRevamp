@@ -1,0 +1,14 @@
+# The opponent casts an X spell (Earthquake hits every non-flyer, or Blaze at a target): its popup shows the X value
+activeplayer=p1
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears;Craw Wurm;Llanowar Elves;Plains
+p0library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p1life=40
+p1hand=Earthquake;Blaze
+p1battlefield=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Serra Angel;Serra Angel
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

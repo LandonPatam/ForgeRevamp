@@ -1247,12 +1247,16 @@ func pass_until(test: Callable, limit: int = 120) -> bool:
 		if ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") in ["InputPassPriority", "InputAttack", "InputBlock"]: ui._intent("ok")
 	return false
 
+## An opponent's X spell aimed at your things waits for you and its view names X ("X = 4").
 func x_wipe() -> bool:
-	var seen := await pass_until(func(): return not ui.snapshot.stack.is_empty())
+	var effect: Control = ui.incoming_effect
+	if not await pass_until(func(): return effect.showing() and not ui.snapshot.stack.is_empty() and ui.snapshot.stack[0].has("xValue"), 300): return check(false, "The AI never cast an X spell at you: " + JSON.stringify(ui.snapshot.stack).left(300))
 	for index in range(20): await ui.get_tree().process_frame
-	print("SCENARIO events: ", JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(800))
-	await dump("x")
-	return seen
+	var x := int(ui.snapshot.stack[0].xValue)
+	var shown: String = effect.wipe_title.text if effect.wipe_card.visible else effect.title.text
+	print("SCENARIO x: ", ui.snapshot.stack[0].get("sourceName", ""), " X=", x, " shown=", shown)
+	await capture("x")
+	return check(shown.contains("X = %d" % x), "The popup shows the X value: " + shown)
 
 ## Damage marked this turn shows under the stats in red as what the creature is right now: a 4/4
 ## Angel with 2 damage reads 4/2. Bolting the Craw Wurm adds the badge live.

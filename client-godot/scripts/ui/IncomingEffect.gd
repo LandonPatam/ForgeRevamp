@@ -274,7 +274,7 @@ func _next() -> void:
 	eyebrow.add_theme_color_override("font_color", Color("ffb978") if mass_removal else Color("6d9fa3"))
 	effect_arrow.visible = not mass_removal and not active.get("targets", []).is_empty()
 	targets_scroll.visible = effect_arrow.visible
-	title.text = source.get("name", "Hidden source")
+	title.text = str(source.get("name", "Hidden source")) + _x_suffix(active)
 	caster.text = "From " + active.get("controllerName", "Opponent")
 	var names: Array = active.get("targets", []).map(func(target): return str(target.get("name", "Your card")))
 	targets.text = "Targets: " + ", ".join(names) if names.size() <= 3 else "%d targets - use the card pages above to inspect each one." % names.size()
@@ -443,7 +443,7 @@ func _next_notice() -> void:
 	var kind: String = notice_active.get("kind", "")
 	var targets: Array = notice_active.get("targets", [])
 	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU")
-	notice_title.text = "%s  ·  %s  ·  %s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source")]
+	notice_title.text = "%s  ·  %s  ·  %s%s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source"), _x_suffix(notice_active)]
 	notice_title.add_theme_color_override("font_color", Color("ffb978") if kind == "massRemoval" else Color("6d9fa3"))
 	notice_source.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
 	for child in notice_targets.get_children():
@@ -496,6 +496,14 @@ func reset() -> void:
 	initialized = false
 	panel.hide()
 	_hide_wipe()
+
+## "  ·  X = 4" for a spell or ability cast with X (Earthquake, Blaze), else "".
+func _x_suffix(event: Dictionary) -> String:
+	var x: Variant = event.get("xValue", null)
+	if x == null:
+		for item in current_state.get("stack", []):
+			if int(item.get("id", -1)) == int(event.get("stackId", -2)): x = item.get("xValue", null)
+	return "" if x == null else "  ·  X = %d" % int(x)
 
 ## Whether a decision-style popup (the large one or the wipe overlay) is up on this seat.
 func showing() -> bool:
@@ -551,7 +559,7 @@ func _build_wipe() -> void:
 func _show_wipe() -> void:
 	var source: Dictionary = active.get("source", {})
 	wipe_card.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
-	wipe_title.text = str(source.get("name", "Hidden source")).to_upper()
+	wipe_title.text = str(source.get("name", "Hidden source")).to_upper() + _x_suffix(active)
 	wipe_heading.text = "TARGETED EFFECT" if aimed else "BOARD-WIDE EFFECT"
 	_count_wipe()
 	wipe_started = Time.get_ticks_msec()
