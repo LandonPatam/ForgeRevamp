@@ -1385,6 +1385,7 @@ func plainscycling() -> bool:
 	if not check(ui.modal.visible and ui.modal_panel is SelectionDialog and ui.modal_panel.carousel_mode, "Plainscycling opens the library search"): return false
 	for index in range(20): await ui.get_tree().process_frame
 	if not check(ui.search_link.visible and ui._search_anchor() == ui.hud_values[0].zones.Graveyard, "The search is linked to your graveyard, where the Angel went"): return false
+	if not check(ui.modal_panel.carousel_source_box.visible and ui.modal_panel.carousel_source.data.get("name", "") == "Angel of the Ruins" and ui.modal_panel.carousel_source.size.y >= 400, "The Angel sits full size beside the carousel"): return false
 	await capture("search")
 	var search: Control = ui.modal_panel
 	for r in range(search.groups.size()):
@@ -1457,3 +1458,23 @@ func attack_reasons() -> bool:
 	if not check(str(ui.cards[int(ogre.id)].data.get("unableTag", "")) == "CAN'T ATTACK", "The table tags them CAN'T ATTACK"): return false
 	await capture("marked")
 	return true
+
+## Another player's choice (the AI's Secluded Courtyard naming a creature type) is an information
+## tether off the Courtyard once it is on their board; never a popup, OK only clears it.
+func courtyard() -> bool:
+	var panel: Control = ui.interaction_panel
+	var asked := false
+	if not await pass_until(func():
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": asked = true
+		return panel.info_tether.visible, 150): return check(false, "The choice must show as a tether (asked=%s, events=%s)" % [asked, JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(300)])
+	for index in range(10): await ui.get_tree().process_frame
+	var courtyard: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Secluded Courtyard": courtyard = card
+	if not check(not asked and not ui.modal.visible, "No popup for another player's choice"): return false
+	if not check(not courtyard.is_empty() and panel.info_card == ui.cards.get(int(courtyard.id)), "It hangs off the Courtyard on their board"): return false
+	if not check(panel.info_tether.line.text.contains("chose"), "It says what they chose: " + panel.info_tether.line.text): return false
+	await capture("choice")
+	panel.info_tether.yes_button.pressed.emit()
+	for index in range(5): await ui.get_tree().process_frame
+	return check(not panel.info_tether.visible, "OK clears it")

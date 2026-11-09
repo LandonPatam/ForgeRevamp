@@ -46,6 +46,10 @@ var preview_column: VBoxContainer
 var carousel: Control
 var carousel_caption: Label
 var carousel_mode := false
+## Library searches: the card that started the search, as large as the carousel's cards, on its left.
+var carousel_row: HBoxContainer
+var carousel_source_box: VBoxContainer
+var carousel_source: Control
 ## Carousel picks are marked here first (exact option indexes); OK sends them to Forge one at a time.
 var staged: Array = []
 ## Marks adopted from Forge's own chosen list; when Forge drops one, the mark goes too.
@@ -77,7 +81,21 @@ func _ready() -> void:
 	carousel.pick_requested.connect(_stage_group)
 	carousel.unpick_requested.connect(_unstage_group)
 	carousel.hide()
-	column.add_child(carousel)
+	carousel_row = HBoxContainer.new()
+	carousel_row.add_theme_constant_override("separation", 28)
+	carousel_row.hide()
+	column.add_child(carousel_row)
+	carousel_source_box = VBoxContainer.new()
+	carousel_source_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	carousel_source_box.add_theme_constant_override("separation", 8)
+	carousel_row.add_child(carousel_source_box)
+	carousel_source_box.add_child(_label(12, Terminal.MUTED, "SOURCE"))
+	carousel_source = Card.new()
+	carousel_source.inspection = true
+	carousel_source.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	carousel_source.custom_minimum_size = preload("res://scripts/ui/CardCarousel.gd").CARD_SIZE
+	carousel_source_box.add_child(carousel_source)
+	carousel_row.add_child(carousel)
 	carousel_caption = _label(16, Terminal.INK)
 	carousel_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	carousel_caption.hide()
@@ -225,6 +243,15 @@ func present(snapshot: Dictionary) -> void:
 		if entry.kind == "stack": entry.name = entry.get("sourceName", entry.get("card", {}).get("name", "Spell or ability"))
 		cards.append(entry)
 	_set_carousel_mode(_from_library(snapshot, cards))
+	if carousel_mode:
+		# The source sits large beside the carousel; the small corner copy would only repeat it.
+		carousel_source_box.visible = not source.is_empty()
+		if not source.is_empty(): carousel_source.update_card(source)
+		source_context.visible = false
+		# With the source beside it the carousel shows one fewer neighbor per side, so the window
+		# keeps its width and can still slide clear of the card that started the search.
+		var Carousel = preload("res://scripts/ui/CardCarousel.gd")
+		carousel.custom_minimum_size.x = Carousel.SPACING * (2.6 if not source.is_empty() else 4.0) + Carousel.CARD_SIZE.x * 0.62 + 24.0
 	if cards != options: _rebuild(cards)
 	var refs: Array = options.map(func(option): return str(option.ref))
 	chosen_refs = prompt.get("chosen", []).filter(func(ref): return refs.has(str(ref)))
@@ -392,6 +419,7 @@ func _from_library(snapshot: Dictionary, cards: Array) -> bool:
 func _set_carousel_mode(value: bool) -> void:
 	carousel_mode = value
 	carousel.visible = value
+	carousel_row.visible = value
 	carousel_caption.visible = value
 	list_scroll.visible = not value
 	preview_column.visible = not value
