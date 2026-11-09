@@ -144,6 +144,7 @@ public final class BridgeMain {
         });
     }
     private long lastSnapshotWarning;
+    private boolean snapshotTracePrinted;
     private final SnapshotStats stats = new SnapshotStats();
     private boolean firstGameLogged, firstPromptLogged;
     /** Log prefix MatchService reads to report why a match could not start. */
@@ -684,6 +685,11 @@ public final class BridgeMain {
             if (now - lastSnapshotWarning > TimeUnit.SECONDS.toNanos(5)) {
                 lastSnapshotWarning = now;
                 System.err.println("[bridge] Retrying snapshot after " + e.getClass().getSimpleName());
+                // The first failure prints where it happened; a repeating one is a bug, not a torn read.
+                if (!snapshotTracePrinted) {
+                    snapshotTracePrinted = true;
+                    e.printStackTrace();
+                }
             }
         }
     }

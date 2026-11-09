@@ -1,0 +1,14 @@
+# The opponent's Lay of the Land finds and reveals a Plains (same reveal as their plainscycling): you get a small notice, never a question
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Plains
+p0library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p1life=40
+p1battlefield=Forest
+p1putonstack=Lay of the Land
+p1library=Island;Island;Plains;Island;Island;Island;Island;Island;Island;Island;Island;Island
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

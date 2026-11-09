@@ -783,6 +783,14 @@ final class BridgeGuiGame extends AbstractGuiGame {
                     && next != null && next.getApi() == forge.game.ability.ApiType.ChangeZone
                     && next.getParamOrDefault("Origin", "").equals("Library")
                     && next.getParamOrDefault("ChangeType", "").contains("IsRemembered");
+            // Another player's reveal (their plainscycled Plains, their Lay of the Land) is news, not
+            // a decision: a small notice on this seat, and the game never waits for it.
+            var revealer = effect == null ? null : effect.getActivatingPlayer();
+            if (revealer != null && getGameController() instanceof PlayerControllerHuman me && !revealer.equals(me.getPlayer())) {
+                targetedEffects.recordReveal(effect, shown);
+                listener.stateChanged();
+                return new ArrayList<>();
+            }
             if (!combinedChoice) ask(a);
             return new ArrayList<>();
         }
@@ -1168,7 +1176,10 @@ final class BridgeGuiGame extends AbstractGuiGame {
     // ---------------------------------------------------------------- input prompt state
 
     private forge.game.spellability.SpellAbility resolvingEffect() {
-        if (getGameController() instanceof PlayerControllerHuman human && human.getGame().getStack().isResolving()) {
+        // Forge can report "resolving" with an empty stack (seen applying a combat board); peeking then
+        // threw on every snapshot and the table never loaded.
+        if (getGameController() instanceof PlayerControllerHuman human && human.getGame().getStack().isResolving()
+                && !human.getGame().getStack().isEmpty()) {
             return human.getGame().getStack().peekAbility();
         }
         return null;

@@ -76,6 +76,40 @@ Adding one (no other registration needed):
 
 `mind_stone()` is the template: it clicks Mind Stone, clicks the "Add {C}" ability in the real Forge popup, and asserts that the stone tapped and `{C}` is floating. With the old Confirm-required popup it fails with "Choosing the ability must tap Mind Stone".
 
+### Probe, then design
+
+Before designing a UI change for an engine decision, see exactly what Forge sends. Add the board and a throwaway driver that reaches the moment and prints it, run it, read it, then design:
+
+```gdscript
+func my_case() -> bool:
+	ui._click_card(find_card("Temple of Malice").id)
+	await pass_until(func(): return not ui.snapshot.asks.is_empty())
+	await dump("temple")  # prints prompt, asks, stack and which UI is showing; captures with --render
+	return true
+```
+
+Turn the probe into the real check once the design works (assert what the player sees and the engine result). Delete probes the user does not need.
+
+### Board and driver tricks
+
+- Card modifiers: `|Tapped`, `|Damage:2`, `|Counters:P1P1=2`, `|Id:1`, `|AttachedTo:1`, `|IsCommander`, `|FaceDown`. Lines starting `#` are comments; the first one is the sandbox description.
+- `p1putonstack=Card` or `Card->1` (target id 1) puts an opponent's **spell** on the stack (X is 0; activated abilities cannot be placed). For an AI X spell or ability, give the AI the card and mana on its turn (`activeplayer=p1`) and let it cast (Earthquake, Blaze work); for upkeep triggers start in your `MAIN2` and pass.
+- Helpers in `ScenarioIntegration.gd` / `LiveIntegration.gd`:
+  - `pass_until(cond, limit)` passes priority/declarations frame-fast until `cond` holds (no settle waits);
+  - `dump(tag)` prints a probe;
+  - `press_card_tether(name)` answers a card-list tether;
+  - `answer_off_popup(value)` answers an ask shown on a tether instead of a popup;
+  - `submit_choice()` and `step()` already handle tethers.
+- `wait_ready()` waits at least 300 ms per call. Do not use it in timing measurements; `phase-timing` shows how to measure frame-fast.
+
+### Working habits that keep this fast
+
+- **One Godot run at a time.** Never start a check, a sandbox or a probe while a background suite runs, and do not edit scripts it will load (a half-edited file breaks every later scenario). Prepare edits in the scratchpad and apply them when the run finishes. The full scenario list: `node tools/check.mjs scenario "$(ls tests/scenarios/*.state | xargs -n1 basename | sed 's/\.state$//' | paste -sd, -)"` (`scenario all` is not a name).
+- **Backslashes in GDScript regexes:** shell heredocs and Python string layers eat them (`" \\(\\d+\\)"` becomes an invalid `" \(\d+\)"`, `"\n"` becomes a real newline inside a string). Write those lines with the Edit tool, or check the file afterwards (`grep -n create_from_string`).
+- **Bridge Java changes:** `node client-godot/tools/check.mjs bridge` rebuilds and tests. **Forge source changes** (rare; record them in `FORGE_PATCHES.md` with a patch file) also need `forge-gui` installed first (commands in `FORGE_PATCHES.md`, "Building").
+- **Failures that look random:** rerun the scenario alone 2–3 times before changing code; several drivers time out only under the load of a long suite (`blink`, `tokens`). `blocking` and `insights` fail independently of recent work.
+- **Look at every capture you mention to the user.** Several bugs (a frame under a window, a hidden Yes button, a counter off by meaning) were only visible in the PNG.
+
 ## Stale bridge classes
 
 If incremental Maven output looks stale (source changes seem absent), compile the bridge directly before retesting (PowerShell), then restart any running service:

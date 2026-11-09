@@ -203,11 +203,7 @@ func _draw_status() -> void:
 		if amount <= 0: continue
 		_counter_badge(counter_label(str(counter)), str(amount), Vector2(3, y), 15.0)
 		y += 18
-	var damage := int(data.get("damage", 0))
-	if damage > 0:
-		_badge("%d damage" % damage, Rect2(3, 147, 75, 16), Color("ff9696"))
-		if data.has("power"):
-			_badge("%d left" % (int(data.get("toughness", 0)) - damage), Rect2(3, 165, 75, 14), Color("ff9696"))
+	# Marked damage shows as the red "power/toughness left" badge under the stats (CardView), not here.
 
 static func trait_keys(keywords: Array) -> Array:
 	return TRAITS.keys().filter(func(key): return keywords.has(key))

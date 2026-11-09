@@ -40,6 +40,9 @@ func prepared() -> bool:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
 		if scenario == "blocking" and state.prompt.get("inputKind", "") == "InputBlock": return true
+		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
+		# the scenario driver answers it.
+		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty(): return true
 		# The fixture jumps to turn 5 straight after the starting roll; finish that animation as a player would.
 		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
@@ -78,6 +81,16 @@ func cast(name: String) -> bool:
 
 func select_named(name: String) -> bool:
 	if not ui.snapshot.asks.is_empty(): return await choose_named(name)
+	# A permanent's targets are a tether: click the card (staged), then the tether's Confirm.
+	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.target_tether:
+		var legal: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
+		var named: Array = ui.snapshot.prompt.get("cards", []).filter(func(card): return card.name == name and legal.has(int(card.id)))
+		if not check(named.size() == 1, "Expected one legal target named " + name + " on the tether"): return false
+		ui._click_card(named[0].id)
+		for index in range(5): await ui.get_tree().process_frame
+		if not check(not ui.interaction_panel.callout.yes_button.disabled, "The tether's Confirm enables once the target is staged"): return false
+		ui.interaction_panel.callout.yes_button.pressed.emit()
+		return await wait_ready()
 	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.panel.visible:
 		var legal_ids: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
 		var targets: Array = ui.snapshot.prompt.get("cards", []).filter(func(card): return card.name == name and legal_ids.has(int(card.id)))
@@ -374,6 +387,8 @@ func insights() -> bool:
 		if ui.modal.visible and ui.modal_panel is SelectionDialog:
 			if not check(ui.modal_panel.source_context.visible and ui.modal_panel.source_view.data.get("name", "") == "Manifold Insights" and not ui.modal_panel.source_rules.visible, "Native card choices show the resolving source without duplicating its printed rules"): return false
 			chosen = true
+			# The reveal is part of this choice: the revealed cards are shown face up here.
+			revealed = revealed or ui.modal_panel.options.any(func(option): return not option.get("hidden", false) and not str(option.get("name", "")).is_empty())
 			await capture("choice")
 			ui.modal_panel.option_buttons[0].pressed.emit()
 			continue
@@ -838,6 +853,8 @@ func cultivate() -> bool:
 	if not await resolve_to_choice(): return false
 	var search: Control = ui.modal_panel
 	if not check(search is SelectionDialog and search.carousel_mode, "Cultivate's search must open the carousel"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	if not check(ui.search_link.visible and ui._search_anchor() != null, "The search is linked to Cultivate on the stack"): return false
 	for name in ["Island", "Swamp"]:
 		for r in range(search.groups.size()):
 			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
@@ -1349,4 +1366,43 @@ func scry() -> bool:
 	await capture("preordain")
 	tether.yes_button.pressed.emit()
 	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and zone("Hand").any(func(card): return card.name == "Grizzly Bears")): return check(false, "Preordain should draw the kept Grizzly Bears: " + str(zone("Hand").map(func(card): return card.name)))
+	return true
+## Plainscycling Angel of the Ruins: the library search is linked to your graveyard (the Angel went
+## there to pay for the cycle), and picking a Plains puts it in your hand.
+func plainscycling() -> bool:
+	if not await tap("Plains", 2): return false
+	ui._click_card(find_card("Angel of the Ruins").id)
+	var tether: Control = ui.interaction_panel.callout
+	for index in range(60):
+		if not await wait_ready(): return false
+		if ui.modal.visible and ui.modal_panel is SelectionDialog and ui.modal_panel.carousel_mode: break
+		if tether.visible and not tether.mode_ask.is_empty():
+			for i in range(tether.mode_ask.options.size()):
+				if str(tether.mode_ask.options[i].get("label", "")).to_lower().contains("cycling"): tether.mode_buttons[i].pressed.emit()
+			continue
+		if not ui.snapshot.asks.is_empty(): submit_choice()
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(ui.modal.visible and ui.modal_panel is SelectionDialog and ui.modal_panel.carousel_mode, "Plainscycling opens the library search"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	if not check(ui.search_link.visible and ui._search_anchor() == ui.hud_values[0].zones.Graveyard, "The search is linked to your graveyard, where the Angel went"): return false
+	await capture("search")
+	var search: Control = ui.modal_panel
+	for r in range(search.groups.size()):
+		if search.options[search.groups[r][0]].get("name", "") == "Plains": search._stage_group(r)
+	search.confirm_button.pressed.emit()
+	if not await pass_until(func(): return zone("Hand").any(func(card): return card.name == "Plains")): return check(false, "The Plains goes to your hand")
+	return true
+
+## Another player's reveal (their Lay of the Land finding a basic land) is a small notice on your
+## screen: the source card, an arrow to the revealed card; no question, nothing waits on you.
+func opponent_reveal() -> bool:
+	var effect: Control = ui.incoming_effect
+	var asked := false
+	if not await pass_until(func():
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": asked = true
+		return effect.notice_panel.visible and str(effect.notice_active.get("kind", "")) == "reveal", 150): return check(false, "The reveal must arrive as a small notice (asked=%s) events=%s p1hand=%s stack=%s notices=%s" % [asked, JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(400), ui.snapshot.players[1].get("handCount", -1), ui.snapshot.stack.size(), [effect.notice_active.get("kind", ""), effect.notices.size(), effect.notice_panel.visible]])
+	if not check(not asked and not ui.modal.visible, "No question or popup for another player's reveal"): return false
+	var revealed: Array = effect.notice_active.get("targets", []).map(func(target): return str(target.get("name", "")))
+	if not check(revealed.size() == 1 and str(effect.notice_active.get("source", {}).get("name", "")) == "Lay of the Land", "The notice names the source and the revealed card: " + str(revealed)): return false
+	await capture("notice")
 	return true

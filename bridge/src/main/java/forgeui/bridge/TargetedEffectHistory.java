@@ -152,6 +152,40 @@ final class TargetedEffectHistory {
         while (events.size() > 32) events.remove(events.keySet().iterator().next());
     }
 
+    /** Another player revealed cards (search results, top of library): a "reveal" notice with the
+     *  source card and the revealed faces as its targets. */
+    synchronized void recordReveal(forge.game.spellability.SpellAbility effect, JsonArray shown) {
+        if (effect == null || effect.getHostCard() == null || effect.getActivatingPlayer() == null) return;
+        JsonArray revealed = new JsonArray();
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (var entry : shown) {
+            var option = entry.getAsJsonObject();
+            if (!option.has("card")) continue;
+            var card = option.getAsJsonObject("card");
+            JsonObject target = new JsonObject();
+            target.addProperty("id", card.has("id") ? card.get("id").getAsInt() : -1);
+            target.addProperty("kind", "card");
+            target.addProperty("name", card.has("name") ? card.get("name").getAsString() : "Card");
+            target.add("card", card.deepCopy());
+            revealed.add(target);
+            names.add(target.get("name").getAsString());
+        }
+        if (revealed.isEmpty()) return;
+        CardView source = effect.getHostCard().getView();
+        JsonObject event = new JsonObject();
+        event.addProperty("id", ++sequence);
+        event.addProperty("stackId", -1);
+        event.addProperty("controller", effect.getActivatingPlayer().getId());
+        event.addProperty("controllerName", effect.getActivatingPlayer().getName());
+        event.addProperty("ability", true);
+        event.addProperty("effectText", effect.getActivatingPlayer().getName() + " revealed " + String.join(", ", names) + ".");
+        event.addProperty("kind", "reveal");
+        event.add("source", GameStateJson.describeCard(source, isPublic(source)));
+        event.add("targets", revealed);
+        events.put(-sequence, event);
+        while (events.size() > 32) events.remove(events.keySet().iterator().next());
+    }
+
     private static boolean isPublic(CardView card) {
         return card != null && !card.isFaceDown() && card.getZone() != null
                 && Set.of(ZoneType.Stack, ZoneType.Battlefield, ZoneType.Graveyard, ZoneType.Exile, ZoneType.Command).contains(card.getZone());

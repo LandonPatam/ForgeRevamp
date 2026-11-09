@@ -171,7 +171,7 @@ func present(state: Dictionary) -> void:
 	var events: Array = state.get("targetedEffects", [])
 	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
-		if event.get("kind", "") == "notice":
+		if event.get("kind", "") in ["notice", "reveal"]:
 			if int(event.id) > latest and initialized: _queue_notice(event)
 			latest = maxi(latest, int(event.id))
 			continue
@@ -421,6 +421,12 @@ func _queue_notice(event: Dictionary) -> void:
 	if notice_active.is_empty(): _next_notice()
 	else: _update_notice_count()
 
+## Another player revealed cards: a small "REVEALED" card from its source to what was revealed.
+func show_reveal(source: Dictionary, controller_name: String, cards: Array) -> void:
+	var targets: Array = cards.map(func(card): return {"id": int(card.get("id", -1)), "kind": "card", "name": str(card.get("name", "Card")), "card": card})
+	var names: Array = targets.map(func(target): return target.name)
+	_queue_notice({"id": -1, "stackId": -1, "kind": "reveal", "source": source, "controllerName": controller_name, "targets": targets, "effectText": "%s revealed %s." % [controller_name, ", ".join(names)]})
+
 ## OK on the small card: clears it from this screen only, never an engine answer.
 func close_notice() -> void:
 	var stack_id := int(notice_active.get("stackId", -1))
@@ -442,7 +448,7 @@ func _next_notice() -> void:
 	var source: Dictionary = notice_active.get("source", {})
 	var kind: String = notice_active.get("kind", "")
 	var targets: Array = notice_active.get("targets", [])
-	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU")
+	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("REVEALED" if kind == "reveal" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU"))
 	notice_title.text = "%s  ·  %s  ·  %s%s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source"), _x_suffix(notice_active)]
 	notice_title.add_theme_color_override("font_color", Color("ffb978") if kind == "massRemoval" else Color("6d9fa3"))
 	notice_source.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
@@ -470,7 +476,7 @@ func _next_notice() -> void:
 	notice_targets.visible = not targets.is_empty()
 	var names: Array = targets.map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
 	var lead := ""
-	if not names.is_empty(): lead = "Targeted " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + ".  "
+	if not names.is_empty() and kind != "reveal": lead = "Targeted " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + ".  "
 	notice_text.text = lead + str(notice_active.get("effectText", source.get("text", "")))
 	_update_notice_count()
 	notice_panel.show()

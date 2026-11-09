@@ -93,6 +93,8 @@ var target_queue: Array = []
 var target_awaiting: Dictionary = {}
 var target_committing := false
 var target_prompt_key := ""
+## A library search branches off the card that caused it: line + pulsing frame over the dimmed table.
+var search_link: Control
 var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
@@ -226,6 +228,9 @@ var modal_center: CenterContainer
 var modal_panel: Control
 var decision_board_button: Button
 var native_reveal := false
+## Another player's reveal confirmation already turned into a notice and acknowledged (by prompt).
+var reveal_notice_key := ""
+var reveal_ack_key := ""
 var open_ask := -1
 var hud_values: Dictionary = {}
 var toast: Label
@@ -608,6 +613,13 @@ func _build_shell() -> void:
 	modal_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	modal_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(modal_center)
+	search_link = Control.new()
+	search_link.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	search_link.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	search_link.z_index = 101
+	search_link.hide()
+	add_child(search_link)
+	search_link.draw.connect(_draw_search_link)
 	decision_board_button = _terminal_button("Return to decision", _toggle_decision_board, "Go back to the decision you were making (Escape).", true)
 	decision_board_button.add_theme_font_size_override("font_size", 24)
 	decision_board_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1757,6 +1769,18 @@ func _card_unhovered(source: Control) -> void:
 		raised_card.hide()
 
 func _process(_delta: float) -> void:
+	if is_instance_valid(search_link):
+		var searching: bool = live and modal.visible and is_instance_valid(modal_panel) and modal_panel is SelectionDialog and modal_panel.carousel_mode and _search_anchor() != null
+		if searching != search_link.visible:
+			search_link.visible = searching
+			# A lighter shade keeps the source card readable behind the search.
+			(modal.get_child(0) as ColorRect).color.a = 0.66 if searching else 0.84
+			if not searching:
+				modal_center.offset_left = 0
+				modal_center.offset_right = 0
+		if searching:
+			_slide_search_clear()
+			search_link.queue_redraw()
 	if is_instance_valid(hand_pick_lines) and hand_pick_lines.visible: hand_pick_lines.queue_redraw()
 	adapter.poll(_delta)
 	if layout_paused: return
@@ -2937,6 +2961,59 @@ func _present_hand_pick() -> bool:
 	_place_hand_pick.call_deferred()
 	return true
 
+## Where a library search came from: its card on the battlefield, else your zone icon holding it
+## (a cycled or sacrificed card in the graveyard), else the spell's entry on the stack.
+func _search_anchor() -> Control:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var id := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
+	if id < 0: return null
+	var view: Control = cards.get(id)
+	if is_instance_valid(view) and view.is_visible_in_tree() and str(view.data.get("zone", "")) == "Battlefield": return view
+	var zone: Control = interaction_panel.zone_view.call(id) if interaction_panel.zone_view.is_valid() else null
+	if is_instance_valid(zone) and zone.is_visible_in_tree(): return zone
+	for item in snapshot.get("stack", []):
+		if int(item.get("sourceId", -1)) == id:
+			var entry: Control = stack_box.entries.get(int(item.id))
+			if is_instance_valid(entry) and entry.is_visible_in_tree(): return entry
+	return null
+
+## Slides the search window sideways so the card it came from stays in view beside it.
+func _slide_search_clear() -> void:
+	var anchor := _search_anchor()
+	if anchor == null or not is_instance_valid(modal_panel): return
+	var to_local := get_global_transform().affine_inverse()
+	var spot: Rect2 = to_local * anchor.get_global_rect()
+	var width: float = modal_panel.size.x
+	var centered := (size.x - width) * 0.5
+	var shift := 0.0
+	if spot.get_center().x >= size.x * 0.5: shift = minf(0.0, spot.position.x - 48.0 - width - centered)
+	else: shift = maxf(0.0, spot.end.x + 48.0 - centered)
+	shift = clampf(shift, 8.0 - centered, size.x - 8.0 - width - centered)
+	if absf(modal_center.offset_left - shift) > 0.5:
+		modal_center.offset_left = shift
+		modal_center.offset_right = shift
+
+func _draw_search_link() -> void:
+	var anchor := _search_anchor()
+	if anchor == null or not is_instance_valid(modal_panel): return
+	var to_local := search_link.get_global_transform().affine_inverse()
+	var anchor_transform: Transform2D = to_local * anchor.get_global_transform()
+	var target: Vector2 = anchor_transform * (anchor.size * 0.5)
+	var box := Rect2(to_local * modal_panel.global_position, modal_panel.size)
+	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+	var accent := Color("bd9bf2")
+	if box.has_point(target): return # Still under the window (no room to slide): no stray frame.
+	if not box.has_point(target):
+		var start := Vector2(clampf(target.x, box.position.x, box.end.x), clampf(target.y, box.position.y, box.end.y))
+		search_link.draw_line(start, target, Color(accent, 0.3), 12.0, true)
+		search_link.draw_line(start, target, accent, 3.5, true)
+		search_link.draw_circle(start, 6.0, accent)
+	var frame := P.box(Color(accent, 0.12 * pulse), Color(accent, 0.45 + 0.55 * pulse), 9, 0)
+	frame.set_border_width_all(3)
+	search_link.draw_set_transform_matrix(anchor_transform)
+	search_link.draw_style_box(frame, Rect2(Vector2.ZERO, anchor.size).grow(5))
+	search_link.draw_set_transform_matrix(Transform2D.IDENTITY)
+
 ## Marks or unmarks a legal target for the tethered effect; true when it was a legal target.
 func _stage_target(kind: String, id: int) -> bool:
 	if target_committing: return true
@@ -3086,6 +3163,11 @@ func _place_hand_pick() -> void:
 	var center: Vector2 = get_global_transform().affine_inverse() * Vector2(table.get_center().x, table.position.y + table.size.y * 0.4)
 	hand_pick_panel.position = (center - hand_pick_panel.size * 0.5).round()
 
+## The cards were revealed by someone else's effect: the resolving stack item isn't yours.
+func _others_reveal() -> bool:
+	if snapshot.get("stack", []).is_empty() or snapshot.get("players", []).is_empty(): return false
+	return int(snapshot.stack[0].get("controller", -1)) != int(snapshot.players[0].get("engineId", 0))
+
 func _present_card_selection() -> void:
 	if _present_coin_toss(): return
 	if _present_hand_pick():
@@ -3097,6 +3179,20 @@ func _present_card_selection() -> void:
 		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
 		return
 	var reveal_pending: bool = snapshot.asks.is_empty() and snapshot.prompt.get("inputKind", "") == "InputConfirm" and not snapshot.get("revealed", []).is_empty()
+	if reveal_pending and _others_reveal():
+		# Another player's effect revealed cards (their plainscycled Plains going to their hand): news,
+		# not a decision. A small notice, and Forge's OK is sent for you (its other button is End Turn).
+		var key := JSON.stringify([snapshot.prompt.get("message", ""), snapshot.revealed.map(func(card): return card.get("id", -1))])
+		if key != reveal_notice_key:
+			reveal_notice_key = key
+			if native_reveal: _close_modal()
+			var item: Dictionary = snapshot.stack[0] if not snapshot.stack.is_empty() else {}
+			incoming_effect.show_reveal(item.get("card", {}), str(item.get("controllerName", "Opponent")), snapshot.revealed)
+		# The notice shows at once; Forge's OK is sent once the connection can take it.
+		if key != reveal_ack_key and snapshot.get("connectionReady", false) and snapshot.prompt.get("okEnabled", false):
+			reveal_ack_key = key
+			_intent("ok")
+		return
 	if reveal_pending:
 		if not native_reveal or not is_instance_valid(modal_panel):
 			_prepare_modal()
