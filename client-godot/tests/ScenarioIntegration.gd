@@ -842,6 +842,7 @@ func cultivate() -> bool:
 		for r in range(search.groups.size()):
 			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
 	if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
+	if not check(search.carousel.mark_labels.has("✓ 1 OF 2") and search.carousel.mark_labels.has("✓ 2 OF 2"), "Marks count your picks against the two allowed, not the copies: " + str(search.carousel.mark_labels)): return false
 	# Right-clicking the middle card (Swamp, focused by the last mark) removes its mark; left-click adds it back.
 	await ui.get_tree().create_timer(0.8).timeout
 	var click := InputEventMouseButton.new()

@@ -20,6 +20,7 @@ const LIFT := 14.0
 var items: Array = []    ## Card data per group.
 var counts: Array = []   ## Copies per group.
 var marked: Array = []   ## Marked copies per group.
+var mark_labels: Array = [] ## Badge text per group: which of your picks it is ("✓ 1 OF 2").
 var focus := 0
 var cursor := 0.0        ## Fractional position the cards are drawn at.
 var target := 0.0
@@ -70,11 +71,12 @@ func _badge(fill: Color, ink: Color, edge: Color, font_size: int) -> Label:
 	badge.hide()
 	return badge
 
-func set_items(value: Array, copies: Array, marks: Array) -> void:
+func set_items(value: Array, copies: Array, marks: Array, labels: Array = []) -> void:
 	var rebuilt := value != items
 	items = value
 	counts = copies
 	marked = marks
+	mark_labels = labels
 	if rebuilt:
 		focus = clampi(focus, 0, maxi(0, items.size() - 1))
 		cursor = focus
@@ -123,7 +125,7 @@ func _arrange() -> void:
 		badge.reset_size()
 		badge.position = Vector2(CARD_SIZE.x - badge.size.x + 10, -18)
 		mark.visible = picks > 0
-		mark.text = "✓ %d OF %d SELECTED" % [picks, count] if count > 1 else "✓ SELECTED"
+		mark.text = str(mark_labels[index]) if index < mark_labels.size() and not str(mark_labels[index]).is_empty() else "✓ SELECTED"
 		mark.reset_size()
 		mark.position = Vector2((CARD_SIZE.x - mark.size.x) * 0.5, CARD_SIZE.y - mark.size.y * 0.5).round()
 

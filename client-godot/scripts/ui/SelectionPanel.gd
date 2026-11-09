@@ -401,12 +401,19 @@ func _sync_carousel() -> void:
 	var items: Array = []
 	var copies: Array = []
 	var picked: Array = []
+	var labels: Array = []
+	# Each mark reads as which of your picks it is ("1 OF 2"), never against the copies in the library.
+	var limit := maxi(1, int(last_prompt.get("selMax", 1)))
 	for group in groups:
 		var data: Dictionary = options[group[0]]
 		items.append(data if not data.get("hidden", false) else {"id": -1, "hidden": true})
 		copies.append(group.size())
-		picked.append(group.filter(func(i): return staged.has(i)).size())
-	carousel.set_items(items, copies, picked)
+		var mine: Array = group.filter(func(i): return staged.has(i))
+		picked.append(mine.size())
+		var numbers: Array = mine.map(func(i): return staged.find(i) + 1)
+		numbers.sort()
+		labels.append("✓ %s OF %d" % [", ".join(numbers.map(func(n): return str(n))), limit] if not mine.is_empty() else "")
+	carousel.set_items(items, copies, picked, labels)
 	carousel.set_focus(highlighted)
 	_caption_carousel()
 
