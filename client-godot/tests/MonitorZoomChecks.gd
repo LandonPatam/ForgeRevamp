@@ -98,6 +98,11 @@ void fragment() {
 			push_error("Monitor zoom must fill all edges before the fullscreen handoff")
 			quit(1)
 			return
+		# Reverse the handoff: fullscreen content becomes the exact same texture
+		# on the monitor before the camera starts pulling out to reveal the PC.
+		game.reparent(fixture, false)
+		game.size = dimensions
+		computer.show()
 		# Returning from a game (park or End Game's FORMAT A:) must leave the
 		# resting monitor sampling its own UVs, not the window's screen space.
 		await computer.world.zoom_out(fixture.get_texture(), Vector2(dimensions))
@@ -106,11 +111,6 @@ void fragment() {
 			push_error("Zooming out of a game must restore the monitor's own glass UVs")
 			quit(1)
 			return
-		# Reverse the handoff: fullscreen content becomes the exact same texture
-		# on the monitor before the camera starts pulling out to reveal the PC.
-		game.reparent(fixture, false)
-		game.size = dimensions
-		computer.show()
 		computer.prepare_startup_pullback(fixture.get_texture())
 		if computer.world.screen.scale != Vector3.ONE or computer.world.screen_material != computer.world.crt_material:
 			push_error("Startup must stay on the physical depth-tested CRT")

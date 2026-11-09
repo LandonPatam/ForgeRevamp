@@ -565,7 +565,7 @@ public final class BridgeMain {
         boolean skipReplay = !prefs.getPref(forge.localinstance.properties.ForgePreferences.FPref.PLAYER_NAME).isBlank();
         if (skipReplay) prefs.setPref(replays, false);
         try {
-            match.startMatch(GameType.Commander, EnumSet.of(GameType.Commander), regs, guis);
+            match.startMatch(commanderRules(), EnumSet.of(GameType.Commander), regs, guis, null);
         } finally {
             if (skipReplay) prefs.setPref(replays, recordReplays);
         }
@@ -580,6 +580,24 @@ public final class BridgeMain {
     }
 
     /** Publish only printing identities before shuffling; no player/zone assignment. */
+    /**
+     * Forge's own Commander defaults (ante, mana burn, sideboarding, ...) without the
+     * opening "AI can't play these cards well" reveal, which only interrupts the table.
+     */
+    static forge.game.GameRules commanderRules() {
+        forge.game.GameRules rules;
+        try {
+            var defaults = HostedMatch.class.getDeclaredMethod("getDefaultRules", GameType.class);
+            defaults.setAccessible(true);
+            rules = (forge.game.GameRules) defaults.invoke(null, GameType.Commander);
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            System.err.println("Forge default rules unavailable, using plain Commander rules: " + error);
+            rules = new forge.game.GameRules(GameType.Commander);
+        }
+        rules.setWarnAboutAICards(false);
+        return rules;
+    }
+
     private void prepareArtwork(List<Deck> decks) throws Exception {
         if (artworkFile == null) return; // Standalone bridge tools retain their direct startup.
         var faces = new com.google.gson.JsonArray();

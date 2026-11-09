@@ -266,6 +266,11 @@ void fragment() {
 	zoom_material = ShaderMaterial.new()
 	zoom_material.shader = expanding_shader
 	zoom_material.render_priority = 1
+	# ShaderMaterial returns null for a parameter that was never set; screen_point
+	# reads these every frame, so give both materials explicit values up front.
+	for material in [crt_material, zoom_material]:
+		for parameter in ["clean_view", "physical_glass", "projection_blend"]:
+			material.set_shader_parameter(parameter, 0.0)
 	screen.material_override = screen_material
 	add_child(screen)
 	monitor_light = OmniLight3D.new()
@@ -825,8 +830,8 @@ func _crt_mesh() -> ArrayMesh:
 	return tool.commit()
 
 func screen_point(uv: Vector2) -> Vector3:
-	var clean: float = screen_material.get_shader_parameter("clean_view")
-	var physical: float = screen_material.get_shader_parameter("physical_glass")
+	var clean := float(screen_material.get_shader_parameter("clean_view") if screen_material.get_shader_parameter("clean_view") != null else 0.0)
+	var physical := float(screen_material.get_shader_parameter("physical_glass") if screen_material.get_shader_parameter("physical_glass") != null else 0.0)
 	var q := uv * 2.0 - Vector2.ONE
 	var bulge := CRT_BULGE * maxf(1.0 - clean, physical) * (1.0 - q.x * q.x) * (1.0 - q.y * q.y)
 	return SCREEN_CENTER + Vector3((uv.x - 0.5) * SCREEN_SIZE.x * screen.scale.x, (0.5 - uv.y) * SCREEN_SIZE.y, bulge)
@@ -1140,34 +1145,20 @@ func pullback_startup() -> void:
 	screen_material.set_shader_parameter("physical_glass", 0.0)
 	screen_material.set_shader_parameter("projection_blend", 0.0)
 
-func prepare_zoom_out(texture: Texture2D, viewport_size: Vector2) -> void:
-	screen_material = zoom_material
-	screen.material_override = screen_material
-	set_display(texture)
-	screen_material.set_shader_parameter("clean_view", 1.0)
-	screen_material.set_shader_parameter("channel_progress", -1.0)
-	screen_material.set_shader_parameter("reveal_progress", -1.0)
-	screen_material.set_shader_parameter("physical_glass", 0.0)
-	screen_material.set_shader_parameter("projection_blend", 0.0)
-	screen.scale.x =SCREEN_SIZE.y * viewport_size.x / viewport_size.y / SCREEN_SIZE.x
-	camera.position = SCREEN_CENTER + Vector3(0, 0, SCREEN_SIZE.y / (2.0 * tan(deg_to_rad(camera.fov * 0.5))))
-	camera.quaternion = Quaternion.IDENTITY
-
 func zoom_out(texture: Texture2D, viewport_size: Vector2, duration: float = 0.95, tune_to: Texture2D = null) -> void:
-	prepare_zoom_out(texture, viewport_size)
+	# The same pullback as startup: fixed, depth-tested rounded glass and an
+	# overscanning camera, so the square game frame never paints over the bezel.
+	prepare_startup_pullback(texture, viewport_size)
 	animation = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT if tune_to != null else Tween.EASE_IN_OUT)
 	animation.tween_property(camera, "position", home_transform.origin, duration)
 	animation.tween_property(camera, "quaternion", home_transform.basis.get_rotation_quaternion(), duration)
-	animation.tween_property(screen, "scale:x", 1.0, duration)
-	animation.tween_method(func(value): screen_material.set_shader_parameter("clean_view", value), 1.0, 0.0, duration)
+	animation.tween_method(func(value): screen_material.set_shader_parameter("projection_blend", value), 1.0, 0.0, duration * 0.30)
+	animation.tween_method(func(value): screen_material.set_shader_parameter("clean_view", value), 1.0, 0.0, duration * 0.45)
 	if tune_to != null: change_channel(tune_to, 0.12)
 	await animation.finished
-	screen_material = crt_material
-	screen.material_override = screen_material
 	screen_material.set_shader_parameter("clean_view", 0.0)
 	screen_material.set_shader_parameter("channel_progress", -1.0)
-	# zoom_into leaves the CRT material in screen-space sampling; the resting
-	# monitor must read its own UVs again or the console renders zoomed in.
+	# The resting monitor reads its own UVs again, or the console renders zoomed in.
 	screen_material.set_shader_parameter("physical_glass", 0.0)
 	screen_material.set_shader_parameter("projection_blend", 0.0)
 	set_display(tune_to if tune_to != null else texture)
