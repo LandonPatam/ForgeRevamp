@@ -1147,7 +1147,9 @@ func prepare_zoom_out(texture: Texture2D, viewport_size: Vector2) -> void:
 	screen_material.set_shader_parameter("clean_view", 1.0)
 	screen_material.set_shader_parameter("channel_progress", -1.0)
 	screen_material.set_shader_parameter("reveal_progress", -1.0)
-	screen.scale.x = SCREEN_SIZE.y * viewport_size.x / viewport_size.y / SCREEN_SIZE.x
+	screen_material.set_shader_parameter("physical_glass", 0.0)
+	screen_material.set_shader_parameter("projection_blend", 0.0)
+	screen.scale.x =SCREEN_SIZE.y * viewport_size.x / viewport_size.y / SCREEN_SIZE.x
 	camera.position = SCREEN_CENTER + Vector3(0, 0, SCREEN_SIZE.y / (2.0 * tan(deg_to_rad(camera.fov * 0.5))))
 	camera.quaternion = Quaternion.IDENTITY
 
@@ -1164,6 +1166,10 @@ func zoom_out(texture: Texture2D, viewport_size: Vector2, duration: float = 0.95
 	screen.material_override = screen_material
 	screen_material.set_shader_parameter("clean_view", 0.0)
 	screen_material.set_shader_parameter("channel_progress", -1.0)
+	# zoom_into leaves the CRT material in screen-space sampling; the resting
+	# monitor must read its own UVs again or the console renders zoomed in.
+	screen_material.set_shader_parameter("physical_glass", 0.0)
+	screen_material.set_shader_parameter("projection_blend", 0.0)
 	set_display(tune_to if tune_to != null else texture)
 
 func eject_deck(cover: Rect2, tilt: float, disconnect_texture: Texture2D = null) -> void:

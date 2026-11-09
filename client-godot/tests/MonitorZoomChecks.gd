@@ -98,6 +98,14 @@ void fragment() {
 			push_error("Monitor zoom must fill all edges before the fullscreen handoff")
 			quit(1)
 			return
+		# Returning from a game (park or End Game's FORMAT A:) must leave the
+		# resting monitor sampling its own UVs, not the window's screen space.
+		await computer.world.zoom_out(fixture.get_texture(), Vector2(dimensions))
+		var resting: ShaderMaterial = computer.world.screen_material
+		if resting != computer.world.crt_material or not is_zero_approx(resting.get_shader_parameter("projection_blend")) or not is_zero_approx(resting.get_shader_parameter("physical_glass")):
+			push_error("Zooming out of a game must restore the monitor's own glass UVs")
+			quit(1)
+			return
 		# Reverse the handoff: fullscreen content becomes the exact same texture
 		# on the monitor before the camera starts pulling out to reveal the PC.
 		game.reparent(fixture, false)
