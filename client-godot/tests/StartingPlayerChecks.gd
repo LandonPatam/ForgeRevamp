@@ -140,6 +140,20 @@ func _shared_toss(ui: Control, state: Dictionary, directory: String) -> void:
 	state.startingToss.firstName = state.players[0].name
 	ui._apply_state(state)
 	assert(not ui.modal.visible, "The waiting screen closes when Forge accepts the starting player")
+	# Forge can already offer Keep/Mulligan while the toss is still animating:
+	# the opening hand stays down until the coin/dice popup has gone.
+	var opening_prompt: Dictionary = state.prompt
+	state.startingToss.merge({"id": 9004, "choosing": false}, true)
+	state.prompt = {"inputKind": "InputConfirmMulligan", "okEnabled": true, "cancelEnabled": true, "cards": [], "chosen": []}
+	ui.coin_toss_seen.erase(9004)
+	ui._apply_state(state)
+	assert(ui.modal_panel is CoinTossDialog and ui.modal.visible and not ui.opening_hand.visible, "The opening hand must wait behind the starting toss")
+	ui.modal_panel._process(3.0)
+	await ui.get_tree().process_frame
+	await ui.get_tree().process_frame
+	assert(not ui.modal.visible and ui.opening_hand.visible, "The opening hand appears once the toss popup is gone")
+	ui.opening_hand.reset()
+	state.prompt = opening_prompt
 	state.startingToss.merge({"id": 9002, "winnerSeat": 0, "winnerName": state.players[0].name, "choosing": true}, true)
 	state.prompt = {"inputKind": "InputSelectEntitiesFromList", "cards": [], "chosen": [], "selMin": 1, "selMax": 1, "okEnabled": false}
 	ui.coin_toss_seen.erase(9002)
