@@ -968,23 +968,29 @@ func set_disk_face(texture: Texture2D, color: Color) -> void:
 	disk_body.material_override = _surface_material(color, 0.82, 0.20)
 
 func zoom_into(texture: Texture2D, viewport_size: Vector2, tune_to: Texture2D = null) -> void:
-	screen_material = zoom_material
+	# The reverse of the startup pullback: the rounded glass keeps its physical
+	# size behind the depth-tested bezel while the camera moves close enough to
+	# overscan it. Screen-space sampling then lands on the exact fullscreen
+	# image, so the square game frame never paints over the casing.
+	screen.scale = Vector3.ONE
+	screen_material = crt_material
 	screen.material_override = screen_material
 	screen_material.set_shader_parameter("clean_view", 0.0)
 	screen_material.set_shader_parameter("channel_progress", -1.0)
 	screen_material.set_shader_parameter("reveal_progress", -1.0)
-	screen_material.set_shader_parameter("physical_glass", 0.0)
+	screen_material.set_shader_parameter("physical_glass", 1.0)
 	screen_material.set_shader_parameter("projection_blend", 0.0)
 	set_display(texture)
 	screen_material.set_shader_parameter("grid_preview", tune_to == null)
-	var height := SCREEN_SIZE.y
-	var target_distance := height / (2.0 * tan(deg_to_rad(camera.fov * 0.5)))
-	var target_position := SCREEN_CENTER + Vector3(0, 0, target_distance)
+	var aspect := viewport_size.x / viewport_size.y
+	var distance_x := SCREEN_SIZE.x / (2.0 * tan(deg_to_rad(camera.fov * 0.5)) * aspect)
+	var distance_y := SCREEN_SIZE.y / (2.0 * tan(deg_to_rad(camera.fov * 0.5)))
+	var target_position := SCREEN_CENTER + Vector3(0, 0, minf(distance_x, distance_y) / 1.08)
 	animation = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT if tune_to != null else Tween.EASE_IN_OUT)
 	animation.tween_property(camera, "position", target_position, 1.1)
 	animation.tween_property(camera, "quaternion", Quaternion.IDENTITY, 1.1)
-	animation.tween_property(screen, "scale:x", height * viewport_size.x / viewport_size.y / SCREEN_SIZE.x, 1.1)
-	animation.tween_method(func(value): screen_material.set_shader_parameter("clean_view", value), 0.0, 1.0, 1.1)
+	animation.tween_method(func(value): screen_material.set_shader_parameter("clean_view", value), 0.0, 1.0, 0.55).set_delay(0.55)
+	animation.tween_method(func(value): screen_material.set_shader_parameter("projection_blend", value), 0.0, 1.0, 0.25).set_delay(0.85)
 	# The channel coroutine runs alongside the camera tween, on this same
 	# expanding-screen material, and finishes before the fullscreen handoff.
 	if tune_to != null: change_channel(tune_to, 0.16)
