@@ -80,6 +80,9 @@ func choose_named(fragment: String) -> bool:
 				ui.modal_panel._toggle(i)
 				ui.modal_panel._submit()
 				return await wait_ready()
+	elif ui.interaction_panel.callout.visible and ui.interaction_panel.callout.card_mode:
+		for card in ui.interaction_panel.callout.card_list:
+			if str(card.get("name", "")).contains(fragment) and press_card_tether(str(card.name)): return await wait_ready()
 	else:
 		for i in range(ui.modal_panel.options.size()):
 			if str(ui.modal_panel.options[i].get("name", "")).contains(fragment):

@@ -6,6 +6,9 @@ extends PanelContainer
 ## Confirm sends every picked mode as one answer.
 signal answered(action: String)
 signal modes_answered(id: int, picks: Array)
+## Card lists: a look/reveal acknowledges its ask; a one-card pick names the card for Forge.
+signal ask_answered(id: int, value: Variant)
+signal card_chosen(card_id: int)
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
 const ManaOption = preload("res://scripts/ui/ManaOption.gd")
 const BLINK_SECONDS := 0.55
@@ -24,6 +27,14 @@ var mode_ask: Dictionary = {}
 var mode_picks: Array = []
 var mode_sent := false
 var mode_ready := false
+## Cards shown in the tether (a look or reveal, or the choices of a one-card pick).
+var card_mode := false
+var card_list: Array = []
+var card_focus := 0
+var card_pick := false
+var card_ask_id := -1
+var card_sent := false
+var card_verb := ""
 
 func _ready() -> void:
 	Terminal.panel(self, 12)
@@ -58,7 +69,8 @@ func _ready() -> void:
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
 	yes_button = _button(func():
-		if mode_ask.is_empty(): answered.emit("ok")
+		if card_mode: _confirm_cards()
+		elif mode_ask.is_empty(): answered.emit("ok")
 		else: _send_modes())
 	Terminal.button(yes_button, true)
 	row.add_child(yes_button)
@@ -90,6 +102,7 @@ func _button(callback: Callable) -> Button:
 
 ## `card_name` labels the box; labels come from Forge's own Yes/No (or custom) button text.
 func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool, card: Dictionary = {}) -> void:
+	_leave_card_mode()
 	face.visible = not card.is_empty()
 	if face.visible: face.update_card(card)
 	# With the card shown large, its name above it would only repeat it.
@@ -118,7 +131,78 @@ func _process(delta: float) -> void:
 		_show_line()
 
 ## A card's modes as toggles. Picks stay local until Confirm; a new ask id starts fresh.
+## Cards in the tether, largest first: one card alone, or a list whose highlighted row is shown large.
+## `pick` is a one-card choice (confirm names it); otherwise it is a look/reveal to acknowledge.
+func present_cards(message: String, cards: Array, pick: bool, ready: bool, ask_id: int = -1, verb: String = "") -> void:
+	var ids: Array = cards.map(func(card): return int(card.get("id", -1)))
+	if not card_mode or ids != card_list.map(func(card): return int(card.get("id", -1))) or ask_id != card_ask_id:
+		card_focus = 0
+		card_sent = false
+		for child in mode_list.get_children(): child.queue_free()
+		mode_buttons.clear()
+		if cards.size() > 1:
+			for i in range(cards.size()):
+				var row := _button(_focus_card.bind(i))
+				row.icon = null
+				row.custom_minimum_size.x = 300
+				mode_list.add_child(row)
+				mode_buttons.append(row)
+	mode_ask = {}
+	card_mode = true
+	card_list = cards
+	card_pick = pick
+	card_ask_id = ask_id
+	card_verb = verb
+	mode_ready = ready
+	title.hide()
+	face.show()
+	mode_list.visible = cards.size() > 1
+	line.custom_minimum_size.x = 300
+	question = "> " + message.strip_edges().to_lower()
+	_show_line()
+	no_button.visible = false
+	yes_button.visible = true
+	_refresh_cards()
+
+func _focus_card(index: int) -> void:
+	if not card_mode or index < 0 or index >= card_list.size(): return
+	card_focus = index
+	_refresh_cards()
+
+func _refresh_cards() -> void:
+	if card_list.is_empty(): return
+	var card: Dictionary = card_list[card_focus]
+	face.update_card(card)
+	for i in range(mode_buttons.size()):
+		mode_buttons[i].text = "%d  %s" % [i + 1, str(card_list[i].get("name", "Card")).to_upper()]
+		Terminal.button(mode_buttons[i], i == card_focus)
+		mode_buttons[i].icon = null
+		mode_buttons[i].disabled = card_sent or not mode_ready
+	yes_button.text = ("[Y] %s %s" % [card_verb if not card_verb.is_empty() else "Choose", str(card.get("name", "card"))]) if card_pick else "[Y] OK"
+	yes_button.disabled = card_sent or not mode_ready
+
+func _confirm_cards() -> void:
+	if card_sent or not mode_ready or card_list.is_empty(): return
+	card_sent = true
+	_refresh_cards()
+	if card_pick: card_chosen.emit(int(card_list[card_focus].get("id", -1)))
+	else: ask_answered.emit(card_ask_id, true)
+
+## The highlighted choice of a one-card pick (its table card gets a branch), or {}.
+func focused_pick() -> Dictionary:
+	return card_list[card_focus] if card_mode and card_pick and card_focus < card_list.size() else {}
+
+func _leave_card_mode() -> void:
+	if not card_mode: return
+	card_mode = false
+	card_list = []
+	for child in mode_list.get_children(): child.queue_free()
+	mode_buttons.clear()
+	mode_list.hide()
+	title.show()
+
 func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
+	_leave_card_mode()
 	face.hide()
 	title.show()
 	if int(ask.get("id", -1)) != int(mode_ask.get("id", -2)):

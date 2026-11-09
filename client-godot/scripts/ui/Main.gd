@@ -652,6 +652,7 @@ func _build_shell() -> void:
 			if snapshot.players[0].get("zones", {}).get(zone_name, []).any(func(card): return int(card.get("id", -1)) == id): return hud_values[0].zones[zone_name]
 		return null
 	interaction_panel.modes_answered.connect(func(id, picks): _intent("answer", {"id": id, "value": picks}))
+	interaction_panel.card_chosen.connect(func(card_id): _intent("card", {"id": card_id}))
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -1002,7 +1003,9 @@ func _apply_state(value: Dictionary) -> void:
 		_inspect(snapshot.players[0].zones.Battlefield[1])
 	if not snapshot.asks.is_empty():
 		var ask: Dictionary = snapshot.asks[0]
-		var mode_card: Control = cards.get(interaction_panel.mode_source(ask)) if live else null
+		var mode_id: int = interaction_panel.mode_source(ask)
+		if mode_id < 0: mode_id = interaction_panel.look_source(ask)
+		var mode_card: Control = cards.get(mode_id) if live else null
 		var answering: bool = live and response_target.accepts(ask)
 		response_target.present(ask if answering else {}, snapshot.get("connectionReady", false))
 		if answering:
@@ -3007,6 +3010,11 @@ func _place_hand_pick() -> void:
 func _present_card_selection() -> void:
 	if _present_coin_toss(): return
 	if _present_hand_pick():
+		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
+		return
+	# A one-card pick by a card on the table tethers to that card (InteractionPanel), no search window.
+	var tether_source: Control = cards.get(interaction_panel.pick_source(snapshot, cards))
+	if is_instance_valid(tether_source) and tether_source.is_visible_in_tree():
 		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
 		return
 	var reveal_pending: bool = snapshot.asks.is_empty() and snapshot.prompt.get("inputKind", "") == "InputConfirm" and not snapshot.get("revealed", []).is_empty()

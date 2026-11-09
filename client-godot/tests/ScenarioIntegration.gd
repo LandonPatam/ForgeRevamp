@@ -26,6 +26,7 @@ func step() -> bool:
 	if ui.incoming_effect.panel.visible and not state.stack.is_empty() and int(ui.incoming_effect.active.get("stackId", -1)) == int(state.stack[0].id):
 		ui.incoming_effect.resolve_button.pressed.emit()
 		return true
+	if press_card_tether(): return true
 	if ui.interaction_panel.panel.visible and not ui.interaction_panel.confirm_button.disabled:
 		ui.interaction_panel.confirm_button.pressed.emit()
 		return true
@@ -1054,3 +1055,53 @@ func statuary() -> bool:
 		elif not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
 		await ui.get_tree().create_timer(0.2).timeout
 	return check(zone("Battlefield").any(func(card): return card.name == "Craw Wurm"), "Five floating green plus one improvised artifact cast Craw Wurm")
+
+## Card-list tethers: Izzet Boilerworks' "return a land" pick and Explorer's Scope's look both hang
+## off their source card instead of the search window / popup.
+func scope() -> bool:
+	var tether: Control = ui.interaction_panel.callout
+	var works := find_card("Izzet Boilerworks")
+	ui._click_card(works.id)
+	for index in range(30):
+		if not await wait_ready(): return false
+		if tether.visible and tether.card_mode: break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(tether.visible and tether.card_mode and tether.card_pick and not ui.modal.visible, "Boilerworks' land choice is a tether, not the search window"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(find_card("Izzet Boilerworks", "Battlefield").get("id", -1))), "It hangs off Izzet Boilerworks"): return false
+	var names: Array = tether.card_list.map(func(card): return card.name)
+	if not check(names.size() == 3 and names.has("Island"), "All three lands are offered: " + str(names)): return false
+	tether._focus_card(names.find("Island"))
+	if not check(tether.yes_button.text.contains("Return") and tether.yes_button.text.contains("Island"), "Confirm names the choice: " + tether.yes_button.text): return false
+	await ui.get_tree().create_timer(0.4).timeout
+	await capture("boilerworks")
+	tether.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if zone("Hand").any(func(card): return card.name == "Island"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(zone("Hand").any(func(card): return card.name == "Island"), "The chosen Island returns to your hand"): return false
+	# Explorer's Scope: attack, then the look at your top card hangs off the Scope.
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	ui._click_card(bears.id)
+	ui._choose_player(1)
+	if not await wait_ready(): return false
+	ui._intent("ok")
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	var scope_card := find_card("Explorer's Scope", "Battlefield")
+	if not check(tether.visible and tether.card_mode and not tether.card_pick and not ui.modal.visible, "The look is a tether, not a popup"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(scope_card.id)) and tether.face.data.get("name", "") == "Forest", "It hangs off Explorer's Scope and shows the Forest"): return false
+	await capture("scope")
+	tether.yes_button.pressed.emit()
+	if not await wait_ready(): return false
+	for index in range(10): await ui.get_tree().process_frame
+	return check(ui.snapshot.asks.is_empty() or ui.snapshot.asks[0].kind != "message", "OK acknowledges the look")

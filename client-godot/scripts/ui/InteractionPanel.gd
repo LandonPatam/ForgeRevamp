@@ -6,6 +6,7 @@ signal resolve_requested(stack_id: int)
 signal review_requested
 signal browse_requested
 signal modes_answered(id: int, picks: Array)
+signal card_chosen(card_id: int)
 const P = preload("res://scripts/ui/Palette.gd")
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -85,6 +86,8 @@ func _ready() -> void:
 	callout = preload("res://scripts/ui/CardCallout.gd").new()
 	callout.answered.connect(func(action): action_requested.emit(action))
 	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
+	callout.ask_answered.connect(func(id, value): modes_answered.emit(id, value))
+	callout.card_chosen.connect(func(card_id): card_chosen.emit(card_id))
 	add_child(callout)
 
 func _label(font_size: int, color: Color) -> Label:
@@ -116,7 +119,20 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		panel.hide()
 		callout_card = mode_view
 		callout.visible = true
-		callout.present_modes(str(mode_ask.get("sourceCard", mode_ask.options[0].get("card", {})).get("name", "Card")), mode_ask, state.get("connectionReady", false))
+		if mode_ask.get("kind", "") == "message":
+			callout.present_cards(str(mode_ask.get("message", "Looking at cards")), mode_ask.options.map(func(option): return option.card), false, state.get("connectionReady", false), int(mode_ask.id))
+		else: callout.present_modes(str(mode_ask.get("sourceCard", mode_ask.options[0].get("card", {})).get("name", "Card")), mode_ask, state.get("connectionReady", false))
+		_place_callout()
+		queue_redraw()
+		return
+	var pick_view := _pick_view()
+	if pick_view != null:
+		panel.hide()
+		callout_card = pick_view
+		callout.visible = true
+		var pick_prompt: Dictionary = state.prompt
+		var pick_ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
+		callout.present_cards(_pick_question(pick_prompt), pick_prompt.get("cards", []), true, pick_ready, -1, _pick_verb(pick_prompt))
 		_place_callout()
 		queue_redraw()
 		return
@@ -223,6 +239,48 @@ static func mode_source(ask: Dictionary) -> int:
 		if int(option.card.id) != int(options[0].card.id) or str(option.get("label", "")) == str(option.card.get("name", "")): return -1
 	return -1 if options[0].card.get("hidden", false) else int(options[0].card.id)
 
+## A look or reveal ("Looking at cards in your library") whose source card is on the table.
+static func look_source(ask: Dictionary) -> int:
+	var options: Array = ask.get("options", [])
+	if ask.get("kind", "") != "message" or options.is_empty() or not options.all(func(option): return option.has("card")): return -1
+	var source: Dictionary = ask.get("sourceCard", {})
+	return -1 if source.is_empty() or source.get("hidden", false) else int(source.get("id", -1))
+
+## A required one-card pick made by a card's own effect among cards on the table (Izzet Boilerworks:
+## return a land): the source card's id, so the choice tethers to it instead of opening the
+## card-search window. Picks among revealed or library cards keep that window (it also shows the
+## cards you may not take).
+static func pick_source(value: Dictionary, board_cards: Dictionary = {}) -> int:
+	var prompt: Dictionary = value.get("prompt", {})
+	if prompt.get("inputKind", "") not in ["InputSelectCardsFromList", "InputSelectEntitiesFromList"]: return -1
+	if int(prompt.get("selMin", 0)) != 1 or int(prompt.get("selMax", 0)) != 1 or not value.get("asks", []).is_empty(): return -1
+	var cards: Array = prompt.get("cards", [])
+	if cards.is_empty() or cards.size() > 8 or not prompt.get("entities", []).is_empty() or prompt.has("selectionShortcut"): return -1
+	if cards.any(func(card): return card.get("hidden", false)): return -1
+	var source: Dictionary = prompt.get("sourceCard", {})
+	if source.is_empty() or cards.any(func(card): return int(card.get("id", -1)) == -1): return -1
+	for card in cards:
+		var view: Control = board_cards.get(int(card.id))
+		if not is_instance_valid(view) or not view.is_visible_in_tree() or str(view.data.get("zone", "")) != "Battlefield": return -1
+	return int(source.get("id", -1))
+
+func _pick_view() -> Control:
+	var view: Control = cards.get(pick_source(state, cards))
+	return view if is_instance_valid(view) and view.is_visible_in_tree() else null
+
+## The effect line of Forge's prompt ("Return a land you control to its owner's hand."), else its last line.
+static func _pick_question(prompt: Dictionary) -> String:
+	var lines: Array = Array(str(prompt.get("message", "")).split("\n")).map(func(line): return RegEx.create_from_string(" \\(\\d+\\)").sub(str(line), "", true).strip_edges()).filter(func(line): return not line.is_empty())
+	for line in lines:
+		if line.begins_with("- "): return line.trim_prefix("- ")
+	return lines.back() if not lines.is_empty() else "choose a card"
+
+static func _pick_verb(prompt: Dictionary) -> String:
+	var question := _pick_question(prompt).to_lower()
+	for verb in ["return", "sacrifice", "exile", "destroy", "discard", "tap", "untap"]:
+		if question.begins_with(verb): return verb.capitalize()
+	return "Choose"
+
 ## Main hands over a mode ask (or {} to drop it) when its card is on the table.
 func show_modes(ask: Dictionary) -> void:
 	if ask == mode_ask: return
@@ -231,7 +289,9 @@ func show_modes(ask: Dictionary) -> void:
 
 func _mode_view() -> Control:
 	if mode_ask.is_empty(): return null
-	var view: Control = cards.get(mode_source(mode_ask))
+	var source := mode_source(mode_ask)
+	if source < 0: source = look_source(mode_ask)
+	var view: Control = cards.get(source)
 	return view if is_instance_valid(view) and view.is_visible_in_tree() else null
 
 ## The table card a plain yes/no confirmation is about, when it is on screen.
@@ -312,6 +372,10 @@ func _process(_delta: float) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not callout.visible or not event is InputEventKey or not event.pressed or event.echo: return
+	if callout.card_mode and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		callout._focus_card(event.keycode - KEY_1)
+		get_viewport().set_input_as_handled()
+		return
 	if not callout.mode_ask.is_empty() and event.keycode >= KEY_1 and event.keycode <= KEY_9:
 		callout._toggle_mode(event.keycode - KEY_1)
 		get_viewport().set_input_as_handled()
@@ -328,6 +392,7 @@ func _exit_tree() -> void:
 
 func _draw() -> void:
 	if callout.visible and is_instance_valid(callout_card): _draw_callout_link()
+	if callout.visible: _draw_pick_branch()
 	if suspended or description.is_empty() or not str(description.get("kind", "")).begins_with("InputSelect"): return
 	var offered: Array = state.get("prompt", {}).get("cards", [])
 	var chosen: Array = state.get("prompt", {}).get("chosen", [])
@@ -347,6 +412,32 @@ func _draw() -> void:
 		frame.set_border_width_all(3)
 		draw_set_transform_matrix(get_global_transform().affine_inverse() * avatar.get_global_transform())
 		draw_style_box(frame, Rect2(Vector2(-3, -3), avatar.size + Vector2(6, 6)))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## A one-card pick: an orange branch from the tether to the highlighted choice on the table.
+func _draw_pick_branch() -> void:
+	var pick: Dictionary = callout.focused_pick()
+	if pick.is_empty(): return
+	var view: Control = cards.get(int(pick.get("id", -1)))
+	if not is_instance_valid(view) or not view.is_visible_in_tree() or view == callout_card: return
+	var to_local := get_global_transform().affine_inverse()
+	var card_transform: Transform2D = to_local * view.get_global_transform()
+	var target: Vector2 = card_transform * (view.size * 0.5)
+	var box := Rect2(callout.position, callout.size)
+	var start := Vector2(clampf(target.x, box.position.x, box.end.x), box.end.y if target.y > box.end.y else (box.position.y if target.y < box.position.y else box.get_center().y))
+	var bend := start.lerp(target, 0.5) + Vector2(0, -0.12 * start.distance_to(target))
+	var points := PackedVector2Array()
+	for i in range(25):
+		var t := i / 24.0
+		points.append(start.lerp(bend, t).lerp(bend.lerp(target, t), t))
+	var orange := Color("ffb978")
+	draw_polyline(points, Color(orange, 0.28), 12.0, true)
+	draw_polyline(points, orange, 3.5, true)
+	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+	var frame := P.box(Color(orange, 0.1 * pulse), Color(orange, 0.4 + 0.6 * pulse), 8, 0)
+	frame.set_border_width_all(3)
+	draw_set_transform_matrix(card_transform)
+	draw_style_box(frame, Rect2(Vector2.ZERO, view.size).grow(4))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 ## A pulsing outline on the card and a leader line from its edge to the callout box.
