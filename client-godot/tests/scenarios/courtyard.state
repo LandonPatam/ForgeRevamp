@@ -1,0 +1,14 @@
+# The opponent plays Secluded Courtyard: once it is on their board, "Bot 1 chose <type>" hangs off it as a tether with OK (no popup)
+activeplayer=p1
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1hand=Secluded Courtyard
+p1battlefield=Grizzly Bears;Elvish Mystic
+p1library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

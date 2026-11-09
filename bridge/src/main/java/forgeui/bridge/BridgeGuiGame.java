@@ -1064,6 +1064,18 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     @Override
     public void message(String message, String title) {
+        // Forge's notifyOfValue ("Bot 1 picked Human", titled with the card: "Secluded Courtyard (352)")
+        // is news about another player's choice: a non-blocking "choice" event the table shows off
+        // that card once it is on the board. Other messages still wait for an acknowledgment.
+        var titled = title == null ? null : java.util.regex.Pattern.compile("\\((\\d+)\\)\\s*$").matcher(title);
+        if (titled != null && titled.find() && getGameController() instanceof PlayerControllerHuman human) {
+            var card = human.getGame().findById(Integer.parseInt(titled.group(1)));
+            if (card != null) {
+                targetedEffects.recordChoice(card.getView(), message);
+                listener.stateChanged();
+                return;
+            }
+        }
         ask(newAsk("message", title, message));
     }
 

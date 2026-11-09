@@ -171,6 +171,9 @@ func present(state: Dictionary) -> void:
 	var events: Array = state.get("targetedEffects", [])
 	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
+		if event.get("kind", "") == "choice":
+			latest = maxi(latest, int(event.id)) # Shown as a tether off the card (InteractionPanel).
+			continue
 		if event.get("kind", "") in ["notice", "reveal"]:
 			if int(event.id) > latest and initialized: _queue_notice(event)
 			latest = maxi(latest, int(event.id))
@@ -451,6 +454,10 @@ func _next_notice() -> void:
 	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("REVEALED" if kind == "reveal" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU"))
 	notice_title.text = "%s  ·  %s  ·  %s%s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source"), _x_suffix(notice_active)]
 	notice_title.add_theme_color_override("font_color", Color("ffb978") if kind == "massRemoval" else Color("6d9fa3"))
+	# Revealed cards are the point of a reveal: show them (and the source) twice as large.
+	var card_size: Vector2 = NOTICE_CARD * (2.0 if kind == "reveal" else 1.0)
+	notice_source.custom_minimum_size = card_size
+	notice_arrow.custom_minimum_size.y = card_size.y
 	notice_source.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
 	for child in notice_targets.get_children():
 		notice_targets.remove_child(child)
@@ -459,14 +466,14 @@ func _next_notice() -> void:
 		var target: Dictionary = targets[index]
 		if target.get("kind", "") == "player":
 			var tile := _player_target(target)
-			_size_player_target(tile, NOTICE_CARD)
+			_size_player_target(tile, card_size)
 			tile.get_node("PlayerName").add_theme_font_size_override("font_size", 14)
 			notice_targets.add_child(tile)
 			continue
 		var view := Card.new()
 		view.inspection = true
 		view.table_angle = false
-		view.custom_minimum_size = NOTICE_CARD
+		view.custom_minimum_size = card_size
 		notice_targets.add_child(view)
 		_enable_card_hover(view)
 		view.update_card(target.get("card", {"id": target.get("id", -1), "name": target.get("name", "Target")}))
@@ -671,7 +678,9 @@ func _layout() -> void:
 	if notice_panel != null and notice_panel.visible:
 		# A small card in the middle of the table, never over the rail.
 		var area: Rect2 = table_rect if table_rect.has_area() else Rect2(Vector2.ZERO, available)
-		var notice_width := minf(460, area.size.x - 32)
+		var cards_shown: int = 1 + mini(notice_active.get("targets", []).size(), NOTICE_MAX_TARGETS)
+		var wide: float = notice_source.custom_minimum_size.x * cards_shown + 60.0 * (cards_shown - 1) + 48.0
+		var notice_width := minf(maxf(460, wide), area.size.x - 32)
 		notice_text.custom_minimum_size.x = notice_width - 32
 		notice_panel.size = Vector2(notice_width, 0)
 		notice_panel.size = Vector2(notice_width, notice_panel.get_combined_minimum_size().y)

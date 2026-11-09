@@ -108,7 +108,8 @@ func run(ui: Control, directory: String = "") -> void:
 	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Choose an artifact from the cards viewed", "sourceCard": source, "cards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}], "revealedCards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}, {"id": 912, "name": "Island"}], "selMin": 0, "selMax": 1, "chosen": [], "okEnabled": true}
 	ui._apply_state(state)
 	var selection: Control = ui.modal_panel
-	assert(selection.source_context.visible and selection.source_context.get_parent() == selection.source_column, "The source card stays visible under the results list")
+	# A list search shows the source under its results; a library carousel shows it full size beside the carousel.
+	assert((selection.source_context.visible and selection.source_context.get_parent() == selection.source_column) or (selection.carousel_mode and selection.carousel_source_box.visible and selection.carousel_source.data.get("name", "") == "Ingenious Smith"), "The source card stays visible beside the search")
 	assert(selection.options.size() == 2 and not selection.option_buttons[0].disabled and selection.option_buttons[1].disabled, "Viewed cards outside Forge's eligible set must remain visible and unselectable")
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("library-review-enlarged.png"))

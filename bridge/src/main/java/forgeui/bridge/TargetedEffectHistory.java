@@ -152,6 +152,21 @@ final class TargetedEffectHistory {
         while (events.size() > 32) events.remove(events.keySet().iterator().next());
     }
 
+    /** Another player's announced choice ("Bot 1 picked Human" for Secluded Courtyard): a "choice"
+     *  event naming the card, shown off it on the table. */
+    synchronized void recordChoice(CardView card, String message) {
+        if (card == null || message == null) return;
+        JsonObject event = new JsonObject();
+        event.addProperty("id", ++sequence);
+        event.addProperty("stackId", -1);
+        event.addProperty("cardId", card.getId());
+        event.addProperty("kind", "choice");
+        event.addProperty("effectText", message);
+        event.add("source", GameStateJson.describeCard(card, isPublic(card) || card.getZone() == null));
+        events.put(-sequence, event);
+        while (events.size() > 32) events.remove(events.keySet().iterator().next());
+    }
+
     /** Another player revealed cards (search results, top of library): a "reveal" notice with the
      *  source card and the revealed faces as its targets. */
     synchronized void recordReveal(forge.game.spellability.SpellAbility effect, JsonArray shown) {

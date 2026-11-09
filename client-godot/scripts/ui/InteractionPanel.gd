@@ -42,6 +42,12 @@ var floating := false
 ## picks in `target_staged` ({kind, id, name}) and sends them on Confirm.
 var target_tether := false
 var target_staged: Array = []
+## Another player's choice ("Bot 1 chose Human" for Secluded Courtyard): an information-only tether off
+## that card, shown once the card is on the table; OK only clears it locally.
+var info_tether: PanelContainer
+var info_card: Control
+var info_queue: Array = []
+var info_seen := 0
 ## Main supplies your zone icon holding a card id (graveyard, exile...), so a decision about a card
 ## that already left the table tethers to where it is: func(id: int) -> Control (or null).
 var zone_view: Callable
@@ -92,6 +98,9 @@ func _ready() -> void:
 	resized.connect(_layout)
 	panel.minimum_size_changed.connect(_layout)
 	panel.hide()
+	info_tether = preload("res://scripts/ui/CardCallout.gd").new()
+	info_tether.answered.connect(func(_action): _next_info(true))
+	add_child(info_tether)
 	callout = preload("res://scripts/ui/CardCallout.gd").new()
 	callout.answered.connect(func(action): action_requested.emit(action))
 	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
@@ -391,6 +400,28 @@ func _card_rect(view: Control) -> Rect2:
 	return bounds
 
 ## Beside the card (right, else left, else below), clear of the rail and kept on screen.
+## New "choice" events from the snapshot queue up; each shows when its card is on the table.
+func note_choices(events: Array) -> void:
+	for event in events:
+		if str(event.get("kind", "")) != "choice" or int(event.get("id", 0)) <= info_seen: continue
+		info_seen = int(event.id)
+		info_queue.append(event)
+	if not info_tether.visible: _next_info(false)
+
+func _next_info(advance: bool) -> void:
+	if advance and not info_queue.is_empty(): info_queue.pop_front()
+	info_tether.hide()
+	info_card = null
+	if info_queue.is_empty(): return
+	var event: Dictionary = info_queue.front()
+	var view: Control = cards.get(int(event.get("cardId", -1)))
+	if not is_instance_valid(view) or not view.is_visible_in_tree(): return # Waits until the card lands.
+	info_card = view
+	info_tether.present(str(view.data.get("name", event.get("source", {}).get("name", "Card"))), str(event.get("effectText", "")).replace(" picked ", " chose "), "OK", "", true, false)
+	info_tether.no_button.hide()
+	info_tether.show()
+	_place_box(info_tether, info_card)
+
 func _place_callout() -> void:
 	if floating:
 		callout.reset_size()
@@ -398,9 +429,13 @@ func _place_callout() -> void:
 		callout.position = ((room - callout.size) * 0.5).max(Vector2(8, 8)).round()
 		return
 	if not is_instance_valid(callout_card): return
-	callout.reset_size()
-	var box: Vector2 = callout.size
-	var card := _card_rect(callout_card)
+	_place_box(callout, callout_card)
+
+## Beside the card (right, else left, else below), clear of the rail and kept on screen.
+func _place_box(box_control: Control, anchor: Control) -> void:
+	box_control.reset_size()
+	var box: Vector2 = box_control.size
+	var card := _card_rect(anchor)
 	var right_limit := size.x - RAIL_WIDTH
 	var at := Vector2(card.end.x + CALLOUT_GAP, card.get_center().y - box.y * 0.5)
 	if at.x + box.x > right_limit:
@@ -410,7 +445,7 @@ func _place_callout() -> void:
 			if at.y + box.y > size.y - 8: at.y = card.position.y - CALLOUT_GAP - box.y
 	at.x = clampf(at.x, 8, maxf(8, right_limit - box.x))
 	at.y = clampf(at.y, 8, maxf(8, size.y - box.y - 8))
-	callout.position = at.round()
+	box_control.position = at.round()
 
 func uses_stack_rail() -> bool:
 	return panel != null and panel.visible and (state.get("prompt", {}).has("selectionShortcut") or state.get("prompt", {}).get("inputKind", "") in ["InputAttack", "InputBlock"] or _picks_from_board())
@@ -446,6 +481,11 @@ func _layout() -> void:
 	panel.position = Vector2(maxf(110, (size.x - 300 - width) * 0.5), 20)
 
 func _process(_delta: float) -> void:
+	if info_tether.visible:
+		if not is_instance_valid(info_card) or not info_card.is_visible_in_tree(): _next_info(false)
+		else: _place_box(info_tether, info_card)
+		queue_redraw()
+	elif not info_queue.is_empty(): _next_info(false)
 	if callout.visible and floating:
 		_place_callout()
 	elif callout.visible:
@@ -478,6 +518,7 @@ func _exit_tree() -> void:
 
 func _draw() -> void:
 	if callout.visible and is_instance_valid(callout_card): _draw_callout_link()
+	if info_tether.visible and is_instance_valid(info_card): _draw_callout_link(info_tether, info_card)
 	if callout.visible: _draw_pick_branch()
 	if callout.visible and target_tether: _draw_target_lines()
 	if suspended or description.is_empty() or not str(description.get("kind", "")).begins_with("InputSelect"): return
@@ -549,16 +590,18 @@ func _draw_pick_branch() -> void:
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 ## A pulsing outline on the card and a leader line from its edge to the callout box.
-func _draw_callout_link() -> void:
+func _draw_callout_link(box_control: Control = null, anchor: Control = null) -> void:
+	if box_control == null: box_control = callout
+	if anchor == null: anchor = callout_card
 	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
 	var glow := Color(Terminal.ACCENT, pulse)
-	draw_set_transform_matrix(get_global_transform().affine_inverse() * callout_card.get_global_transform())
+	draw_set_transform_matrix(get_global_transform().affine_inverse() * anchor.get_global_transform())
 	var frame := P.box(Color.TRANSPARENT, glow, 9, 0)
 	frame.set_border_width_all(3)
-	draw_style_box(frame, Rect2(Vector2(-5, -5), callout_card.size + Vector2(10, 10)))
+	draw_style_box(frame, Rect2(Vector2(-5, -5), anchor.size + Vector2(10, 10)))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
-	var card := _card_rect(callout_card).grow(5)
-	var box := Rect2(callout.position, callout.size)
+	var card := _card_rect(anchor).grow(5)
+	var box := Rect2(box_control.position, box_control.size)
 	var start: Vector2
 	var finish: Vector2
 	if box.position.x >= card.end.x:

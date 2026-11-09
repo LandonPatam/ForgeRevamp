@@ -968,6 +968,7 @@ func _apply_state(value: Dictionary) -> void:
 	_close_accepted_commander_browser()
 	_announce_returned_lands()
 	incoming_effect.present(snapshot)
+	if live: interaction_panel.note_choices(snapshot.get("targetedEffects", []))
 	stack_attention.present(snapshot)
 	# Sound once when the stack starts waiting on this player, not on every snapshot.
 	if stack_attention.attention and not stack_waiting and notify_sound != null: notify_sound.play_cue()
