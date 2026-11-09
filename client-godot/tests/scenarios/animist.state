@@ -1,0 +1,12 @@
+# Tap Sandsteppe Citadel for a color, then attack with the Grizzly Bears: Sword of the Animist's Yes must still be usable on its tether
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears|Id:1;Sword of the Animist|AttachedTo:1;Forest;Sandsteppe Citadel
+p0library=Forest;Island;Plains;Swamp;Mountain;Forest;Island;Plains;Swamp;Mountain;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

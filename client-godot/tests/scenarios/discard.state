@@ -1,0 +1,13 @@
+# Discard from your own hand: cast Faithless Looting (tap Mountain), then end the turn for a cleanup discard
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Mountain;Mountain;Forest
+p0hand=Faithless Looting;Grizzly Bears;Opt;Counterspell;Forest;Lightning Bolt;Craw Wurm;Island;Cultivate
+p0library=Forest;Island;Swamp;Mountain;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

@@ -1,0 +1,14 @@
+# The opponent's Unsummon bounces your commander (I accept): "move it to the command zone instead?" is a tether from the commander
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Gravecrawler|IsCommander|Id:1;Swamp;Swamp
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Island
+p1putonstack=Unsummon->1
+p1library=Island;Island;Island;Island;Island;Island;Island;Island;Island;Island;Island;Island
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

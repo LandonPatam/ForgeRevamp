@@ -9,6 +9,8 @@ signal state_changed(snapshot: Dictionary)
 signal status_changed(message: String)
 signal feedback(message: String)
 signal action_rejected(id: int)
+## Forge refused a click on this card, with the bridge's plain reason ("Valeria can't block: ...").
+signal action_explained(id: int, reason: String)
 signal session_reset
 signal session_ended(message: String)
 

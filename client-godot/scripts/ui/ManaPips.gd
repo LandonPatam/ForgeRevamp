@@ -16,6 +16,60 @@ static func parse(cost: String) -> PackedStringArray:
 		symbols.append(code)
 	return symbols
 
+## Whether the floating pool alone pays this printed cost plus `extra_generic` (commander tax).
+## X counts as 0 and Phyrexian symbols as payable with life. Cost changes from other cards
+## (reductions, taxes) aren't in the text, so this is a close reading, not Forge's payment check.
+static func pool_covers(cost: String, pool: Dictionary, extra_generic: int = 0) -> bool:
+	var left := {}
+	for key in ManaCounter.KEYS: left[key] = int(pool.get(key, 0))
+	var generic := extra_generic
+	var hybrids: Array = []
+	for code in parse(cost):
+		if code.is_valid_int(): generic += int(code)
+		elif code in ["X", "Y", "Z"]: continue
+		elif code.ends_with("/P"): continue
+		elif code.contains("/"): hybrids.append(code.split("/"))
+		elif left.has(code):
+			if left[code] <= 0: return false
+			left[code] -= 1
+		else: return false # Snow and other symbols the pool doesn't track.
+	for parts in hybrids:
+		var best := ""
+		for part in parts:
+			if left.has(part) and left[part] > 0 and (best.is_empty() or left[part] > left[best]): best = part
+		if not best.is_empty(): left[best] -= 1
+		elif str(parts[0]).is_valid_int(): generic += int(parts[0])
+		else: return false
+	var total := 0
+	for key in left: total += left[key]
+	return total >= generic
+
+## What is still owed of `cost` once the floating pool has paid what it can, as cost text
+## ("{4}{G}{G}" with five floating green -> "{1}"); "{0}" when the pool covers it all.
+static func remaining_after_pool(cost: String, pool: Dictionary) -> String:
+	var left := {}
+	for key in ManaCounter.KEYS: left[key] = int(pool.get(key, 0))
+	var generic := 0
+	var owed: Array = []
+	for code in parse(cost):
+		if code.is_valid_int(): generic += int(code)
+		elif left.has(code) and left[code] > 0: left[code] -= 1
+		elif code.contains("/"):
+			var paid := false
+			for part in code.split("/"):
+				if left.has(part) and left[part] > 0:
+					left[part] -= 1
+					paid = true
+					break
+			if not paid: owed.append(code)
+		else: owed.append(code)
+	var spare := 0
+	for key in left: spare += left[key]
+	generic = maxi(0, generic - spare)
+	var text := ("{%d}" % generic) if generic > 0 else ""
+	for code in owed: text += "{%s}" % code
+	return text if not text.is_empty() else "{0}"
+
 static func _fill(code: String) -> Color:
 	var index := ManaCounter.KEYS.find(code)
 	return ManaCounter.FILLS[index] if index >= 0 else GENERIC_FILL

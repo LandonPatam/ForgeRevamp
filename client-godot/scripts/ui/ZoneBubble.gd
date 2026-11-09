@@ -10,6 +10,12 @@ var playable := false:
 		if playable == value: return
 		playable = value
 		_restyle()
+## Your tapped mana already pays for one of them: teal rim instead of purple.
+var castable_now := false:
+	set(value):
+		if castable_now == value: return
+		castable_now = value
+		_restyle()
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(52, 66)
@@ -33,13 +39,13 @@ func _restyle() -> void:
 	for state in ["normal", "hover", "pressed", "focus"]:
 		var box := StyleBoxFlat.new()
 		box.bg_color = Color("243d3c") if state == "hover" else Color("102322")
-		box.border_color = Color("b48cff") if playable else (Color("8edbc3") if state in ["hover", "focus"] else Color("476d65"))
+		box.border_color = (Color("3fe6d4") if castable_now else Color("b48cff")) if playable else (Color("8edbc3") if state in ["hover", "focus"] else Color("476d65"))
 		box.set_border_width_all(3 if playable else 1)
 		box.set_corner_radius_all(12)
 		box.content_margin_top = 33
 		box.content_margin_bottom = 3
 		if playable:
-			box.shadow_color = Color(0.71, 0.55, 1.0, 0.45)
+			box.shadow_color = Color(0.25, 0.9, 0.83, 0.45) if castable_now else Color(0.71, 0.55, 1.0, 0.45)
 			box.shadow_size = 6
 		add_theme_stylebox_override(state, box)
 	tooltip_text = kind + (" / something here can be cast now" if playable else "") + " / click to browse"

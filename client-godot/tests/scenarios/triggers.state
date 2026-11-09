@@ -1,0 +1,15 @@
+# Cast Elvish Visionary (G + 1): four of your abilities trigger at once and you order them on the stack builder
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Forest;Forest;Plains;Mountain;Soul Warden;Impact Tremors;Guardian Project;Ajani's Welcome
+p0hand=Elvish Visionary;Grizzly Bears;Llanowar Elves
+p0library=Forest;Island;Swamp;Mountain;Plains;Forest;Island;Swamp;Mountain;Plains;Forest;Forest
+p1life=40
+p1battlefield=Plains;Serra Angel
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Mountain;Goblin Guide
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

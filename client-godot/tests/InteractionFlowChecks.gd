@@ -111,7 +111,7 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(not popup.panel.visible, "Routine abilities remain in the stack rail until explicitly reviewed")
 	popup.review()
 	assert(popup.panel.visible and popup.active.stackId == 500 and popup.rules.text == item.text, "Any pending ability needs its actual effect text and source, without a targeted-event special case")
-	assert(not popup.targets_scroll.visible and popup.resolve_button.text == "Resolve")
+	assert(not popup.targets_scroll.visible and popup.resolve_button.text != "Close", "A pending effect offers its accept button, not Close")
 	var acknowledged: Array = []
 	popup.acknowledged.connect(func(id): acknowledged.append(id))
 	popup.browse_button.pressed.emit()
@@ -162,6 +162,11 @@ func run(ui: Control, directory: String = "") -> void:
 	ui.decision_scroll.show()
 	ui.stack_scroll.hide()
 	ui.rail_space.hide()
+	# Live combat hides the ordinary priority/footer controls while the
+	# decision owns the rail. Match that layout in this mock-table fixture.
+	var ordinary_controls: Array = [ui.stack_header, ui.prompt_body, ui.primary, ui.cancel_button].filter(func(control): return is_instance_valid(control))
+	var ordinary_visibility: Array = ordinary_controls.map(func(control): return control.visible)
+	for control in ordinary_controls: control.hide()
 	state.stack = []
 	state.prompt = {"inputKind": "InputAttack", "message": "Select creatures to attack Bot 1 or select player/card you wish to attack.", "cancelEnabled": true, "cancelLabel": "Alpha Strike", "okEnabled": true, "okLabel": "Skip attacking", "chosen": ["card:1"]}
 	panel.present(state, false)
@@ -268,6 +273,7 @@ func run(ui: Control, directory: String = "") -> void:
 	ui.decision_scroll.hide()
 	ui.stack_scroll.show()
 	ui.rail_space.show()
+	for index in range(ordinary_controls.size()): ordinary_controls[index].visible = ordinary_visibility[index]
 	for button in navigation: button.queue_free()
 	panel.queue_free()
 	await ui.get_tree().process_frame

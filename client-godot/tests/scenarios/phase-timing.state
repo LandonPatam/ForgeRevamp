@@ -1,0 +1,19 @@
+# Timing probe: a busy table on your Main 1. Pass to Main 2 (no attack), then through a bot's turn; times every step
+activeplayer=p0
+activephase=MAIN1
+turn=7
+removesummoningsickness=true
+p0life=31
+p0battlefield=Forest;Forest;Forest;Forest;Island;Island;Swamp;Llanowar Elves;Llanowar Elves;Llanowar Elves;Grizzly Bears|Id:1;Rancor|AttachedTo:1;Tarmogoyf|Counters:P1P1=2;Sol Ring;Mind Stone;Swiftfoot Boots;Doubling Season;Hidden Herbalists|FaceDown
+p0hand=Counterspell;Lightning Bolt;Cultivate;Craw Wurm;Demonic Tutor;Opt;Swords to Plowshares
+p0graveyard=Lingering Souls;Grizzly Bears;Opt
+p0command=Gravecrawler|IsCommander
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=24
+p1battlefield=Plains;Plains;Plains;Plains;Island;Soul Warden;Soul Warden;Soul Warden;Serra Angel;Darksteel Gargoyle;Glorious Anthem
+p1hand=Plains;Plains;Plains;Plains;Plains
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=12
+p2battlefield=Mountain;Mountain;Mountain;Mountain;Goblin Guide;Goblin Guide;Goblin Guide;Goblin Guide;Impact Tremors;Shivan Dragon|Counters:P1P1=1
+p2hand=Mountain;Mountain
+p2library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain

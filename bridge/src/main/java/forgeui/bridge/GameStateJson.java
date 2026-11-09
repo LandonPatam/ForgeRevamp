@@ -107,7 +107,13 @@ final class GameStateJson {
         int autoPassStackId = -1;
         if (gui.getGameController() instanceof PlayerControllerHuman human) {
             var top = human.getGame().getStack().peek();
-            if (top != null && stackItems.containsKey(top.getId())
+            // An opposing wipe that reaches this seat, or a spell/ability aimed at its things (Aether
+            // Spellbomb bouncing a blocker), waits for it even with no legal response, so its popup
+            // comes before the permanents go, not after.
+            boolean opposing = top != null && top.getSpellAbility().getActivatingPlayer() != human.getPlayer();
+            boolean wipeHere = opposing && (TargetedEffectHistory.massRemovalReaches(top.getSpellAbility(), human.getPlayer())
+                    || (stackItems.containsKey(top.getId()) && StackInteractionPolicy.targetsLocal(stackItems.get(top.getId()), me)));
+            if (top != null && stackItems.containsKey(top.getId()) && !wipeHere
                     && input instanceof forge.gamemodes.match.input.InputPassPriority
                     && StackInteractionPolicy.mayAutoPass(top.getSpellAbility(),
                             top.getSpellAbility().getActivatingPlayer() == human.getPlayer(),
@@ -181,6 +187,31 @@ final class GameStateJson {
                 prompt.addProperty("cardId", host.getId());
             }
         }
+        if (currentPrompt && gui.getGameController() instanceof PlayerControllerHuman combatant
+                && (input instanceof forge.gamemodes.match.input.InputBlock || input instanceof forge.gamemodes.match.input.InputAttack)) {
+            // Your creatures that can't block / attack this combat, with the reason, so the table can
+            // mark them before you try (Taunt from the Rampart, summoning sickness, defender...).
+            boolean blocking = input instanceof forge.gamemodes.match.input.InputBlock;
+            JsonObject unable = new JsonObject();
+            try {
+                var combatGame = combatant.getGame();
+                for (var creature : combatant.getPlayer().getCreaturesInPlay()) {
+                    if (!blocking && combatGame.getCombat() != null && combatGame.getCombat().isAttacking(creature)) continue;
+                    String reason = blocking ? CombatReasons.cantBlock(creature, combatGame.getCombat()) : CombatReasons.cantAttack(creature);
+                    if (reason != null) unable.addProperty(String.valueOf(creature.getId()), reason);
+                }
+            } catch (RuntimeException unreadable) {
+                // Nothing is marked; Forge still refuses illegal clicks.
+            }
+            prompt.add(blocking ? "cantBlock" : "cantAttack", unable);
+        }
+        if (currentPrompt && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
+            CardView leaving = commanderReplacement(confirm);
+            if (leaving != null) {
+                cards.put(leaving.getId(), leaving);
+                prompt.addProperty("cardId", leaving.getId());
+            }
+        }
         if (prompt.has("cardId")) {
             CardView source = cards.get(prompt.get("cardId").getAsInt());
             if (source != null) prompt.add("sourceCard", describeCard(source, gui.mayView(source)));
@@ -199,6 +230,29 @@ final class GameStateJson {
             selectionCards.add(describeCard(card, gui.mayView(card)));
         }
         prompt.add("cards", selectionCards);
+        if (currentPrompt && sel.cards().isEmpty() && input instanceof forge.gamemodes.match.input.InputSelectCardsForConvokeOrImprovise improvise) {
+            // Improvise/convoke never publishes its tappable cards as a selection; offer them so the
+            // table can outline them (Forge still validates every click).
+            try {
+                var field = improvise.getClass().getDeclaredField("availableCards");
+                field.setAccessible(true);
+                JsonArray offered = new JsonArray();
+                JsonArray offeredCards = new JsonArray();
+                for (var card : (forge.game.card.CardCollectionView) field.get(improvise)) {
+                    CardView view = card.getView();
+                    cards.put(view.getId(), view);
+                    offered.add(view.getId());
+                    offeredCards.add(describeCard(view, gui.mayView(view)));
+                }
+                JsonArray picked = new JsonArray();
+                for (var card : improvise.getSelected()) picked.add("card:" + card.getId());
+                prompt.add("selectable", offered);
+                prompt.add("cards", offeredCards);
+                prompt.add("chosen", picked);
+            } catch (ReflectiveOperationException | RuntimeException unreadable) {
+                // Clicking the artifacts still works; they just are not outlined.
+            }
+        }
         JsonArray entities = new JsonArray();
         for (TrackableObject offered : sel.targets()) {
             if (offered instanceof StackItemView stackTarget) {
@@ -245,6 +299,24 @@ final class GameStateJson {
     }
 
     /** Forge keeps the confirming ability private; its host card is the card being asked about. */
+    /** "Apply replacement effect of Commander Effect?" comes from the player's single rules object,
+     *  not the commander; name the commander that is actually leaving (the one outside the command zone). */
+    static CardView commanderReplacement(forge.gamemodes.match.input.InputConfirm confirm) {
+        try {
+            var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");
+            field.setAccessible(true);
+            if (field.get(confirm) instanceof forge.game.spellability.SpellAbility ability && ability.getHostCard() != null
+                    && "Commander Effect".equals(ability.getHostCard().getName()) && ability.getHostCard().getOwner() != null) {
+                for (var commander : ability.getHostCard().getOwner().getCommanders()) {
+                    if (!commander.isInZone(forge.game.zone.ZoneType.Command)) return commander.getView();
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Keep Forge's own source.
+        }
+        return null;
+    }
+
     static CardView confirmSource(forge.gamemodes.match.input.InputConfirm confirm) {
         try {
             var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");
@@ -287,7 +359,19 @@ final class GameStateJson {
         JsonArray targets = new JsonArray();
         stackTargets(item, targets, new java.util.HashSet<>());
         result.add("targets", targets);
+        Integer x = xPaid(item.getId());
+        if (x != null) result.addProperty("xValue", x);
         return result;
+    }
+
+    /** The X a stack item was cast or activated with, when it has one (Earthquake for 4 -> 4). */
+    private Integer xPaid(int stackId) {
+        if (!(gui.getGameController() instanceof PlayerControllerHuman human)) return null;
+        for (var instance : human.getGame().getStack()) {
+            if (instance.getId() != stackId) continue;
+            return TargetedEffectHistory.xPaid(instance.getSpellAbility());
+        }
+        return null;
     }
 
     private void stackTargets(StackItemView item, JsonArray targets, java.util.Set<String> seen) {

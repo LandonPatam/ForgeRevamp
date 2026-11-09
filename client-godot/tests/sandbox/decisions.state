@@ -1,0 +1,16 @@
+# Untapped mana and a hand of decision cards: tutor search, targets, modes, scry, land search, counter
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Island;Island;Island;Swamp;Swamp;Mountain;Mountain;Forest;Forest;Command Tower;Grizzly Bears
+p0hand=Demonic Tutor;Lightning Bolt;Kolaghan's Command;Opt;Cultivate;Counterspell;Ponder;Swords to Plowshares
+p0graveyard=Grizzly Bears;Craw Wurm
+p0library=Forest;Island;Swamp;Mountain;Plains;Sol Ring;Craw Wurm;Ornithopter;Mind Stone;Forest;Island;Swamp;Mountain;Opt;Ponder
+p1life=40
+p1battlefield=Plains;Serra Angel;Soul Warden
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Mountain;Goblin Guide;Shivan Dragon
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

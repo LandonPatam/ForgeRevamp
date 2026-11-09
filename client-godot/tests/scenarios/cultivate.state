@@ -1,0 +1,13 @@
+# Library search for two cards: cast Cultivate (three Forests), mark two basics in the carousel, OK
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Forest
+p0hand=Cultivate
+p0library=Island;Swamp;Mountain;Plains;Grizzly Bears;Craw Wurm;Island;Swamp;Opt;Ponder
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

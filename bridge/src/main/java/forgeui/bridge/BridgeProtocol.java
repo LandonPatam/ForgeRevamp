@@ -94,6 +94,23 @@ final class BridgeProtocol {
                 }
             }
             case "message" -> { /* Any explicit JSON acknowledgment is accepted. */ }
+            case "scry" -> {
+                require(value.isJsonObject(), "Scry must be {top, bottom}");
+                int count = ask.getAsJsonArray("options").size();
+                Set<Integer> seen = new HashSet<>();
+                for (String side : new String[] {"top", "bottom"}) {
+                    JsonElement picks = value.getAsJsonObject().get(side);
+                    if (picks == null) continue;
+                    require(picks.isJsonArray(), "Scry sides must be arrays");
+                    require(side.equals("top") ? ask.get("canTop").getAsBoolean() : ask.get("canBottom").getAsBoolean() || picks.getAsJsonArray().isEmpty(), "That side is not allowed");
+                    for (JsonElement item : picks.getAsJsonArray()) {
+                        int index = integer(item);
+                        require(index >= 0 && index < count, "Invalid option index");
+                        require(seen.add(index), "Duplicate option index");
+                    }
+                }
+                require(seen.size() == count, "Place every card");
+            }
             default -> throw new IllegalArgumentException("Unknown decision kind");
         }
     }
@@ -117,6 +134,14 @@ final class BridgeProtocol {
                 return amounts;
             }
             case "input" -> { return JsonNull.INSTANCE; }
+            case "scry" -> {
+                JsonObject keep = new JsonObject();
+                JsonArray top = new JsonArray();
+                for (int i = 0; i < ask.getAsJsonArray("options").size(); i++) top.add(i);
+                keep.add("top", top);
+                keep.add("bottom", new JsonArray());
+                return keep;
+            }
             default -> { return new JsonPrimitive(true); }
         }
     }

@@ -1,0 +1,14 @@
+# The opponent's Lightning Bolt kills your commander (I accept): moving it to the command zone is a tether from the commander
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Gravecrawler|IsCommander|Id:1;Swamp;Swamp
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Mountain
+p1putonstack=Lightning Bolt->1
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

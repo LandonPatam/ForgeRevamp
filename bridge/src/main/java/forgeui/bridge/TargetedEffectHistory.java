@@ -19,6 +19,21 @@ final class TargetedEffectHistory {
         record(item, localPlayer, null);
     }
 
+    /** X as paid for this spell/ability or any of its parts, when its cost has an X. */
+    static Integer xPaid(forge.game.spellability.SpellAbility ability) {
+        for (var part = ability; part != null; part = part.getSubAbility()) {
+            Integer x = part.getXManaCostPaid();
+            if (x != null) return x;
+        }
+        if (ability != null && ability.getPayCosts() != null && ability.getPayCosts().getTotalMana() != null
+                && ability.getPayCosts().getTotalMana().countX() > 0) {
+            Object root = ability.getRootAbility().getXManaCostPaid();
+            if (root instanceof Integer x) return x;
+            return 0;
+        }
+        return null;
+    }
+
     static boolean isMassRemoval(forge.game.spellability.SpellAbility ability) {
         if (ability == null) return false;
         var api = ability.getApi();
@@ -65,6 +80,37 @@ final class TargetedEffectHistory {
         }
     }
 
+    /** Every permanent on the table a wipe will reach (all players'), frozen when it is first seen,
+     *  so the client can draw the spell's lines to each one before it resolves. */
+    static JsonArray affectedPermanents(forge.game.spellability.SpellAbility ability) {
+        JsonArray result = new JsonArray();
+        Set<Integer> seen = new HashSet<>();
+        for (var part = ability; part != null; part = part.getSubAbility()) {
+            if (!isMassRemoval(part) || part.getHostCard() == null || part.getHostCard().getGame() == null) continue;
+            var api = part.getApi();
+            if (api != forge.game.ability.ApiType.DestroyAll && api != forge.game.ability.ApiType.SacrificeAll
+                    && api != forge.game.ability.ApiType.DamageAll && api != forge.game.ability.ApiType.ChangeZoneAll
+                    && api != forge.game.ability.ApiType.PumpAll) continue;
+            try {
+                var host = part.getHostCard();
+                Iterable<forge.game.card.Card> reached;
+                if (part.hasParam("Defined")) {
+                    reached = forge.game.ability.AbilityUtils.getDefinedCards(host, part.getParam("Defined"), part);
+                } else {
+                    String valid = part.getParamOrDefault("ValidCards", part.getParamOrDefault("ChangeType", ""));
+                    if (valid.isEmpty()) continue;
+                    reached = forge.game.card.CardLists.getValidCards(host.getGame().getCardsIn(ZoneType.Battlefield), valid, part.getActivatingPlayer(), host, part);
+                }
+                for (var card : reached) {
+                    if (card.isInZone(ZoneType.Battlefield) && seen.add(card.getId())) result.add(card.getId());
+                }
+            } catch (RuntimeException unreadable) {
+                // The popup still announces the wipe; it just draws no lines.
+            }
+        }
+        return result;
+    }
+
     synchronized void record(StackItemView item, PlayerView localPlayer, forge.game.spellability.SpellAbility ability) {
         forge.game.player.Player local = null;
         if (ability != null && localPlayer != null && ability.getHostCard() != null && ability.getHostCard().getGame() != null) {
@@ -99,7 +145,59 @@ final class TargetedEffectHistory {
         event.addProperty("kind", massRemoval ? "massRemoval" : (targets.isEmpty() ? "notice" : "targeted"));
         event.add("source", GameStateJson.describeCard(source, publicSource));
         event.add("targets", targets);
+        Integer x = xPaid(ability);
+        if (x != null) event.addProperty("xValue", x);
+        if (massRemoval && ability != null) event.add("affected", affectedPermanents(ability));
         events.put(item.getId(), event);
+        while (events.size() > 32) events.remove(events.keySet().iterator().next());
+    }
+
+    /** Another player's announced choice ("Bot 1 picked Human" for Secluded Courtyard): a "choice"
+     *  event naming the card, shown off it on the table. */
+    synchronized void recordChoice(CardView card, String message) {
+        if (card == null || message == null) return;
+        JsonObject event = new JsonObject();
+        event.addProperty("id", ++sequence);
+        event.addProperty("stackId", -1);
+        event.addProperty("cardId", card.getId());
+        event.addProperty("kind", "choice");
+        event.addProperty("effectText", message);
+        event.add("source", GameStateJson.describeCard(card, isPublic(card) || card.getZone() == null));
+        events.put(-sequence, event);
+        while (events.size() > 32) events.remove(events.keySet().iterator().next());
+    }
+
+    /** Another player revealed cards (search results, top of library): a "reveal" notice with the
+     *  source card and the revealed faces as its targets. */
+    synchronized void recordReveal(forge.game.spellability.SpellAbility effect, JsonArray shown) {
+        if (effect == null || effect.getHostCard() == null || effect.getActivatingPlayer() == null) return;
+        JsonArray revealed = new JsonArray();
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (var entry : shown) {
+            var option = entry.getAsJsonObject();
+            if (!option.has("card")) continue;
+            var card = option.getAsJsonObject("card");
+            JsonObject target = new JsonObject();
+            target.addProperty("id", card.has("id") ? card.get("id").getAsInt() : -1);
+            target.addProperty("kind", "card");
+            target.addProperty("name", card.has("name") ? card.get("name").getAsString() : "Card");
+            target.add("card", card.deepCopy());
+            revealed.add(target);
+            names.add(target.get("name").getAsString());
+        }
+        if (revealed.isEmpty()) return;
+        CardView source = effect.getHostCard().getView();
+        JsonObject event = new JsonObject();
+        event.addProperty("id", ++sequence);
+        event.addProperty("stackId", -1);
+        event.addProperty("controller", effect.getActivatingPlayer().getId());
+        event.addProperty("controllerName", effect.getActivatingPlayer().getName());
+        event.addProperty("ability", true);
+        event.addProperty("effectText", effect.getActivatingPlayer().getName() + " revealed " + String.join(", ", names) + ".");
+        event.addProperty("kind", "reveal");
+        event.add("source", GameStateJson.describeCard(source, isPublic(source)));
+        event.add("targets", revealed);
+        events.put(-sequence, event);
         while (events.size() > 32) events.remove(events.keySet().iterator().next());
     }
 

@@ -13,19 +13,39 @@ func run(ui: Control) -> void:
 	state.connectionReady = true
 	state.asks = []
 	state.pendingDraws = []
-	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Discard one card", "cards": saved.players[0].zones.Hand.slice(0, 2), "selMin": 1, "selMax": 1, "chosen": [], "okEnabled": false}
-	ui._apply_state(state)
-	var panel: Control = ui.modal_panel
-	assert(ui.modal.visible and ui.open_ask == -2 and panel.confirm_button.disabled)
 	var outside := InputEventMouseButton.new()
 	outside.button_index = MOUSE_BUTTON_LEFT
 	outside.pressed = true
 	outside.position = Vector2(2, 2)
-	ui.modal.get_child(0).gui_input.emit(outside)
-	assert(ui.modal.visible and ui.modal_panel == panel and ui.open_ask == -2, "Outside clicks must not dismiss required discard selections")
 	var escape := InputEventKey.new()
 	escape.keycode = KEY_ESCAPE
 	escape.pressed = true
+	# Discarding from your own hand is picked on the hand: no gallery, the table dims, the prompt confirms.
+	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Discard one card", "cards": saved.players[0].zones.Hand.slice(0, 2), "selMin": 1, "selMax": 1, "chosen": [], "okEnabled": false, "cancelEnabled": false}
+	ui._apply_state(state)
+	assert(not ui.modal.visible and ui.hand_pick_panel.visible and ui.hand_pick_shade.visible and ui.hand_pick_confirm.disabled, "A hand-only discard must be picked on the dimmed table's hand")
+	ui.hand_pick_shade.gui_input.emit(outside)
+	ui._unhandled_key_input(escape)
+	assert(ui.hand_pick_panel.visible, "Outside clicks and Escape must not dismiss a required discard")
+	# A click marks the card locally (Forge would finish at its maximum); the red button sends it.
+	var requests: int = ui.adapter.request_counter if ui.adapter != null and "request_counter" in ui.adapter else -1
+	assert(ui._stage_hand_pick(ui.cards[int(state.prompt.cards[0].id)].data))
+	assert(not ui.hand_pick_confirm.disabled and int(ui.cards[int(state.prompt.cards[0].id)].data.get("pickMark", 0)) == 2, "A picked hand card must be marked for discard and the prompt completable")
+	assert(requests < 0 or ui.adapter.request_counter == requests, "Picking alone sends nothing to Forge")
+	state.prompt.inputKind = "InputPassPriority"
+	state.prompt.cards = []
+	state.prompt.chosen = []
+	ui._apply_state(state)
+	assert(not ui.hand_pick_panel.visible and not ui.hand_pick_shade.visible, "Engine completion must restore the table")
+	# A selection that includes cards outside the hand keeps the required gallery.
+	var elsewhere: Dictionary = saved.players[0].zones.Hand[0].duplicate(true)
+	elsewhere.id = 990001
+	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Choose a card", "cards": [elsewhere, saved.players[0].zones.Hand[1]], "selMin": 1, "selMax": 1, "chosen": [], "okEnabled": false}
+	ui._apply_state(state)
+	var panel: Control = ui.modal_panel
+	assert(ui.modal.visible and ui.open_ask == -2 and panel.confirm_button.disabled and not ui.hand_pick_panel.visible)
+	ui.modal.get_child(0).gui_input.emit(outside)
+	assert(ui.modal.visible and ui.modal_panel == panel and ui.open_ask == -2, "Outside clicks must not dismiss required selections")
 	ui._unhandled_key_input(escape)
 	assert(ui.modal.visible and ui.modal_panel == panel, "Escape must not hide a required selection")
 	ui.modal.hide() # Simulate an older client's dismissed prompt/recovery snapshot.
@@ -34,7 +54,7 @@ func run(ui: Control) -> void:
 	state.prompt.chosen = ["card:" + str(state.prompt.cards[0].id)]
 	state.prompt.okEnabled = true
 	ui._apply_state(state)
-	assert(not panel.confirm_button.disabled, "The protected discard must remain completable")
+	assert(not panel.confirm_button.disabled, "The protected selection must remain completable")
 	state.prompt.inputKind = "InputPassPriority"
 	state.prompt.cards = []
 	ui._apply_state(state)

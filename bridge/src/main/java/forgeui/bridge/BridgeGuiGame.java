@@ -71,6 +71,14 @@ final class BridgeGuiGame extends AbstractGuiGame {
             yields.setPref(FPref.YIELD_INTERRUPT_ON_TARGETING, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL, "false");
+            // Forge's desktop pacing sleeps 200 ms at each stop it passes for you and 400 ms before
+            // each stack item it resolves for you; the table animates and feeds those itself.
+            yields.setPref(FPref.YIELD_SKIP_PHASE_DELAY, "true");
+            yields.setPref(FPref.YIELD_SKIP_RESOLVE_DELAY, "true");
+            // Solo against bots: skip the actionable scan in phases passed anyway (forge-patches/
+            // phase-scan.patch). Online keeps it, where its result also decides some stops.
+            human.setSkipScanOnSkippedPhases(() -> !onlineMatch);
+            installModeChooser(human);
         }
         super.setOriginalGameController(player, controller);
         if (controller instanceof PlayerControllerHuman human) {
@@ -519,6 +527,20 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     // ---------------------------------------------------------------- asks
 
+    private CardView castingCard() {
+        if (!(getGameController() instanceof PlayerControllerHuman human)) return null;
+        var game = human.getGame();
+        for (var card : game.getCardsIn(ZoneType.Stack)) {
+            if (!human.getPlayer().equals(card.getController())) continue;
+            boolean placed = false;
+            for (var instance : game.getStack()) {
+                if (instance.getSourceCard() == card) { placed = true; break; }
+            }
+            if (!placed) return card.getView();
+        }
+        return null;
+    }
+
     private JsonElement ask(JsonObject ask) {
         if (abandoned) return BridgeProtocol.fallbackAnswer(ask);
         if (ask.has("kind") && ask.get("kind").getAsString().equals("choose") && !ask.has("revealedCards")) {
@@ -534,6 +556,12 @@ final class BridgeGuiGame extends AbstractGuiGame {
                 ask.addProperty("effectText", resolving.toString());
             } else if (decisionCard != null) {
                 source = decisionCard;
+            }
+            if (source == null) {
+                // A spell this seat is casting (its targets, modes, X) sits in the stack zone before it
+                // becomes a stack item: name it, so the client can show "Counterspell -> Wrath of God".
+                source = castingCard();
+                if (source != null) ask.addProperty("casting", true);
             }
             if (source != null) ask.add("sourceCard", GameStateJson.describeCard(source, mayView(source)));
         }
@@ -662,11 +690,74 @@ final class BridgeGuiGame extends AbstractGuiGame {
         return picked.isEmpty() ? defaultIndex : picked.get(0);
     }
 
+    /**
+     * Forge picks "choose one or more" modes one prompt at a time, but first offers the whole set
+     * (min and max) to the controller's macro system. That hook notes the range so the first mode
+     * prompt becomes one multi-select ask; the picks then answer Forge's remaining prompts here, on
+     * the game thread, with no client round trip. Repeatable modes keep Forge's own loop.
+     */
+    private void installModeChooser(PlayerControllerHuman human) {
+        try {
+            var field = PlayerControllerHuman.class.getDeclaredField("macros");
+            field.setAccessible(true);
+            if (!(field.get(human) instanceof ModeRangeMacros)) field.set(human, new ModeRangeMacros(human));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Forge's one-at-a-time mode prompts still work.
+        }
+    }
+
+    private final class ModeRangeMacros extends forge.player.RecordActionsMacroSystem {
+        ModeRangeMacros(PlayerControllerHuman human) { super(human); }
+        @Override
+        public List<String> consumeRememberedModeChoice(List<String> choices, int min, int num, boolean allowRepeat) {
+            List<String> remembered = super.consumeRememberedModeChoice(choices, min, num, allowRepeat);
+            modeRange = remembered == null && !allowRepeat && num > 1 ? new int[] {min, num} : null;
+            modeQueue.clear();
+            modeQueueActive = false;
+            return remembered;
+        }
+    }
+
+    private int[] modeRange;
+    private final List<SpellAbilityView> modeQueue = new ArrayList<>();
+    private boolean modeQueueActive;
+    private int modesLeft;
+
+    @SuppressWarnings("unchecked")
+    private <T> List<T> modeChoices(String message, int min, int max, List<T> choices) {
+        if (max != 1 || !choices.stream().allMatch(choice -> choice instanceof SpellAbilityView)) return null;
+        if (modeRange != null) {
+            int low = modeRange[0], high = Math.min(modeRange[1], choices.size());
+            modeRange = null;
+            if (high <= 1) return null;
+            JsonObject metadata = new JsonObject();
+            metadata.addProperty("modeChoice", true);
+            String range = low == high ? String.valueOf(high) : low + " to " + high;
+            List<Integer> picked = choose(message, "Choose " + range + " modes", low, high, options(choices, null), null, metadata);
+            if (picked.size() < Math.max(low, 1)) return null;
+            for (int i : picked) modeQueue.add((SpellAbilityView) choices.get(i));
+            modeQueueActive = true;
+            modesLeft = high;
+        }
+        if (!modeQueueActive) return null;
+        modeQueue.removeIf(view -> !choices.contains(view));
+        if (modeQueue.isEmpty()) {
+            modeQueueActive = false;
+            return min == 0 ? new ArrayList<>() : null;
+        }
+        List<T> next = new ArrayList<>();
+        next.add((T) modeQueue.remove(0));
+        if (--modesLeft <= 0) modeQueueActive = false;
+        return next;
+    }
+
     @Override
     public <T> List<T> getChoices(String message, int min, int max, List<T> choices, List<T> selected, FSerializableFunction<T, String> display) {
         if (choices == null || choices.isEmpty()) {
             return new ArrayList<>();
         }
+        List<T> modes = modeChoices(message, min, max, choices);
+        if (modes != null) return modes;
         if (min == -1 && max == -1) {
             // reveal: nothing to choose, just acknowledge
             JsonObject a = newAsk("message", "", message);
@@ -692,6 +783,14 @@ final class BridgeGuiGame extends AbstractGuiGame {
                     && next != null && next.getApi() == forge.game.ability.ApiType.ChangeZone
                     && next.getParamOrDefault("Origin", "").equals("Library")
                     && next.getParamOrDefault("ChangeType", "").contains("IsRemembered");
+            // Another player's reveal (their plainscycled Plains, their Lay of the Land) is news, not
+            // a decision: a small notice on this seat, and the game never waits for it.
+            var revealer = effect == null ? null : effect.getActivatingPlayer();
+            if (revealer != null && getGameController() instanceof PlayerControllerHuman me && !revealer.equals(me.getPlayer())) {
+                targetedEffects.recordReveal(effect, shown);
+                listener.stateChanged();
+                return new ArrayList<>();
+            }
             if (!combinedChoice) ask(a);
             return new ArrayList<>();
         }
@@ -746,11 +845,62 @@ final class BridgeGuiGame extends AbstractGuiGame {
         return new OrderResult<>(out, false);
     }
 
+    /**
+     * Scry and similar "top or bottom" moves. Forge passes the whole library plus the few cards
+     * this player may actually move and see (`manipulable`); only those are offered, so hidden
+     * library cards (and their names) never reach the client. Answer: {"top": [i...], "bottom": [i...]}
+     * covering each offered card once, top in order from the top. Anything left unplaced stays on top.
+     */
     @Override
     public List<CardView> manipulateCardList(String title, Iterable<CardView> cards, Iterable<CardView> manipulable, boolean toTop, boolean toBottom, boolean toAnywhere) {
-        List<CardView> list = new ArrayList<>();
-        cards.forEach(list::add);
-        return order(title, "Order (first = top)", 0, 0, list, null, null, false, false).ordered();
+        List<CardView> all = new ArrayList<>();
+        cards.forEach(all::add);
+        List<CardView> movable = new ArrayList<>();
+        manipulable.forEach(movable::add);
+        if (movable.isEmpty()) return all;
+        if (toAnywhere || (!toTop && !toBottom)) {
+            // Rare "anywhere" moves keep the ordering dialog, still limited to the movable cards.
+            List<CardView> ordered = order(title, "Order (first = top)", 0, 0, movable, null, null, false, false).ordered();
+            List<CardView> rest = new ArrayList<>(all);
+            rest.removeAll(movable);
+            List<CardView> result = new ArrayList<>(ordered);
+            result.addAll(rest);
+            return result;
+        }
+        JsonObject a = newAsk("scry", title, title);
+        a.addProperty("canTop", toTop);
+        a.addProperty("canBottom", toBottom);
+        JsonArray offered = new JsonArray();
+        for (CardView card : movable) {
+            JsonObject o = new JsonObject();
+            o.addProperty("label", card.getName());
+            o.addProperty("cardId", card.getId());
+            // Forge shows these to their owner for this decision (tempShowCards).
+            o.add("card", GameStateJson.describeCard(card, true));
+            offered.add(o);
+        }
+        a.add("options", offered);
+        JsonElement res = ask(a);
+        List<CardView> top = new ArrayList<>();
+        List<CardView> bottom = new ArrayList<>();
+        if (res != null && res.isJsonObject()) {
+            for (String side : List.of("top", "bottom")) {
+                JsonElement picks = res.getAsJsonObject().get(side);
+                if (picks == null || !picks.isJsonArray()) continue;
+                for (JsonElement e : picks.getAsJsonArray()) {
+                    int i = e.getAsInt();
+                    if (i < 0 || i >= movable.size() || top.contains(movable.get(i)) || bottom.contains(movable.get(i))) continue;
+                    (side.equals("top") ? top : bottom).add(movable.get(i));
+                }
+            }
+        }
+        for (CardView card : movable) if (!top.contains(card) && !bottom.contains(card)) top.add(card);
+        List<CardView> rest = new ArrayList<>(all);
+        rest.removeAll(movable);
+        List<CardView> result = new ArrayList<>(top);
+        result.addAll(rest);
+        result.addAll(bottom);
+        return result;
     }
 
     private Map<Object, Integer> distribute(String title, String message, List<?> keys, List<String> labels, int amount, boolean atLeastOne) {
@@ -914,6 +1064,18 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     @Override
     public void message(String message, String title) {
+        // Forge's notifyOfValue ("Bot 1 picked Human", titled with the card: "Secluded Courtyard (352)")
+        // is news about another player's choice: a non-blocking "choice" event the table shows off
+        // that card once it is on the board. Other messages still wait for an acknowledgment.
+        var titled = title == null ? null : java.util.regex.Pattern.compile("\\((\\d+)\\)\\s*$").matcher(title);
+        if (titled != null && titled.find() && getGameController() instanceof PlayerControllerHuman human) {
+            var card = human.getGame().findById(Integer.parseInt(titled.group(1)));
+            if (card != null) {
+                targetedEffects.recordChoice(card.getView(), message);
+                listener.stateChanged();
+                return;
+            }
+        }
         ask(newAsk("message", title, message));
     }
 
@@ -1026,7 +1188,10 @@ final class BridgeGuiGame extends AbstractGuiGame {
     // ---------------------------------------------------------------- input prompt state
 
     private forge.game.spellability.SpellAbility resolvingEffect() {
-        if (getGameController() instanceof PlayerControllerHuman human && human.getGame().getStack().isResolving()) {
+        // Forge can report "resolving" with an empty stack (seen applying a combat board); peeking then
+        // threw on every snapshot and the table never loaded.
+        if (getGameController() instanceof PlayerControllerHuman human && human.getGame().getStack().isResolving()
+                && !human.getGame().getStack().isEmpty()) {
             return human.getGame().getStack().peekAbility();
         }
         return null;

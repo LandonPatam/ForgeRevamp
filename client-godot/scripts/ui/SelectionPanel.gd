@@ -41,6 +41,22 @@ var source_column: VBoxContainer
 var list_box: VBoxContainer
 var instance_box: Control
 var list_scroll: ScrollContainer
+var preview_column: VBoxContainer
+## Library searches show a carousel of the stacked groups instead of the list and preview.
+var carousel: Control
+var carousel_caption: Label
+var carousel_mode := false
+## Library searches: the card that started the search, as large as the carousel's cards, on its left.
+var carousel_row: HBoxContainer
+var carousel_source_box: VBoxContainer
+var carousel_source: Control
+## Carousel picks are marked here first (exact option indexes); OK sends them to Forge one at a time.
+var staged: Array = []
+## Marks adopted from Forge's own chosen list; when Forge drops one, the mark goes too.
+var forge_held: Array = []
+var committing := false
+var awaiting_ref := ""
+var last_prompt: Dictionary = {}
 
 func _ready() -> void:
 	Terminal.panel(self, 18)
@@ -60,6 +76,30 @@ func _ready() -> void:
 	title.max_lines_visible = 2
 	column.add_child(title)
 	column.add_child(HSeparator.new())
+	carousel = preload("res://scripts/ui/CardCarousel.gd").new()
+	carousel.focus_requested.connect(_highlight)
+	carousel.pick_requested.connect(_stage_group)
+	carousel.unpick_requested.connect(_unstage_group)
+	carousel.hide()
+	carousel_row = HBoxContainer.new()
+	carousel_row.add_theme_constant_override("separation", 28)
+	carousel_row.hide()
+	column.add_child(carousel_row)
+	carousel_source_box = VBoxContainer.new()
+	carousel_source_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	carousel_source_box.add_theme_constant_override("separation", 8)
+	carousel_row.add_child(carousel_source_box)
+	carousel_source_box.add_child(_label(12, Terminal.MUTED, "SOURCE"))
+	carousel_source = Card.new()
+	carousel_source.inspection = true
+	carousel_source.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	carousel_source.custom_minimum_size = preload("res://scripts/ui/CardCarousel.gd").CARD_SIZE
+	carousel_source_box.add_child(carousel_source)
+	carousel_row.add_child(carousel)
+	carousel_caption = _label(16, Terminal.INK)
+	carousel_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	carousel_caption.hide()
+	column.add_child(carousel_caption)
 	body = HBoxContainer.new()
 	body.add_theme_constant_override("separation", 22)
 	column.add_child(body)
@@ -103,7 +143,7 @@ func _ready() -> void:
 	source_rules.hide()
 	source_context.hide()
 	# Right: the highlighted card, large.
-	var preview_column := VBoxContainer.new()
+	preview_column = VBoxContainer.new()
 	preview_column.add_theme_constant_override("separation", 8)
 	body.add_child(preview_column)
 	preview_column.add_child(_label(12, Terminal.MUTED, "PREVIEW"))
@@ -139,7 +179,9 @@ func _ready() -> void:
 	footer.add_child(cancel_button)
 	board_button = _button("View battlefield", func(): board_requested.emit())
 	footer.add_child(board_button)
-	confirm_button = _button("Confirm selection", func(): action_requested.emit("ok"))
+	confirm_button = _button("Confirm selection", func():
+		if carousel_mode: _commit()
+		else: action_requested.emit("ok"))
 	Terminal.button(confirm_button, true)
 	footer.add_child(confirm_button)
 
@@ -200,16 +242,46 @@ func present(snapshot: Dictionary) -> void:
 		entry.ref = str(entry.kind) + ":" + str(int(entry.get("engineId", entry.id)))
 		if entry.kind == "stack": entry.name = entry.get("sourceName", entry.get("card", {}).get("name", "Spell or ability"))
 		cards.append(entry)
+	_set_carousel_mode(_from_library(snapshot, cards))
+	if carousel_mode:
+		# The source sits large beside the carousel; the small corner copy would only repeat it.
+		carousel_source_box.visible = not source.is_empty()
+		if not source.is_empty(): carousel_source.update_card(source)
+		source_context.visible = false
+		# With the source beside it the carousel shows one fewer neighbor per side, so the window
+		# keeps its width and can still slide clear of the card that started the search.
+		var Carousel = preload("res://scripts/ui/CardCarousel.gd")
+		carousel.custom_minimum_size.x = Carousel.SPACING * (2.6 if not source.is_empty() else 4.0) + Carousel.CARD_SIZE.x * 0.62 + 24.0
 	if cards != options: _rebuild(cards)
 	var refs: Array = options.map(func(option): return str(option.ref))
 	chosen_refs = prompt.get("chosen", []).filter(func(ref): return refs.has(str(ref)))
+	last_prompt = prompt
+	if carousel_mode:
+		# Anything Forge already holds as chosen counts as marked, so OK can complete it.
+		if not committing:
+			for i in range(options.size()):
+				if chosen_refs.has(str(options[i].ref)):
+					if not staged.has(i): staged.append(i)
+					if not forge_held.has(i): forge_held.append(i)
+				elif forge_held.has(i):
+					forge_held.erase(i)
+					staged.erase(i)
+		elif ready: _advance_commit()
 	for i in range(options.size()):
 		option_buttons[i].disabled = not ready or not options[i].get("eligible", true)
 		option_buttons[i].text = ("✓ " if chosen_refs.has(str(options[i].ref)) else "") + str(options[i].get("name", "Face-down card"))
 	for r in range(rows.size()): _paint_row(r, ready)
+	if carousel_mode: _sync_carousel()
 	(source_column.get_node("ResultsCaption") as Label).text = "RESULTS (%d)" % options.size()
 	hint.text = "%d selected" % chosen_refs.size() if prompt.get("inputKind", "") == "InputSelectStackItems" else "%d selected / %d–%d required" % [chosen_refs.size(), prompt.get("selMin", 0), prompt.get("selMax", 0)]
 	confirm_button.disabled = not ready or not prompt.get("okEnabled", false) or chosen_refs.is_empty()
+	confirm_button.text = "Confirm selection"
+	confirm_button.custom_minimum_size.x = 160 if carousel_mode else 0
+	if carousel_mode:
+		hint.text = "%d selected / %d–%d required" % [staged.size(), prompt.get("selMin", 0), prompt.get("selMax", 0)]
+		confirm_button.text = "OK"
+		none_button.disabled = none_button.disabled or not staged.is_empty()
+		confirm_button.disabled = not ready or committing or staged.size() < maxi(1, int(prompt.get("selMin", 0))) or staged.size() > int(prompt.get("selMax", 1))
 	# Forge represents an optional 1-card effect as Cancel rather than a 0 minimum.
 	var decline: bool = prompt.get("inputKind", "") in ["InputSelectCardsFromList", "InputSelectEntitiesFromList"] and prompt.get("cancelEnabled", false) and not prompt.has("selectionShortcut")
 	none_button.set_meta("action", "cancel" if decline else "ok")
@@ -226,10 +298,14 @@ func present(snapshot: Dictionary) -> void:
 	board_button.text = "Choose on board" if prompt.get("inputKind", "") == "InputSelectTargets" else "View battlefield"
 	board_button.visible = true
 	board_button.disabled = not ready
-	keys.text = "↑↓ move   ENTER pick" + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else "")
+	keys.text = ("←→ / drag browse   left-click middle card / ENTER select   right-click / BACKSPACE remove   then OK") if carousel_mode else ("↑↓ move   ENTER pick" + ("   ×N rows: click again for another copy" if groups.any(func(group): return group.size() > 1) else ""))
 
 func _rebuild(cards: Array) -> void:
 	options = cards.duplicate(true)
+	staged.clear()
+	forge_held.clear()
+	committing = false
+	awaiting_ref = ""
 	for child in list_box.get_children() + instance_box.get_children():
 		child.get_parent().remove_child(child)
 		child.queue_free()
@@ -312,12 +388,133 @@ func _highlight(r: int) -> void:
 	if previous != r and previous < rows.size(): _paint_row(previous, last_ready)
 	_paint_row(r, last_ready)
 	list_scroll.ensure_control_visible(rows[r])
+	if carousel_mode:
+		carousel.set_focus(r)
+		_caption_carousel()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or rows.is_empty() or not event is InputEventKey or not event.pressed: return
 	match event.keycode:
-		KEY_DOWN: _highlight(mini(highlighted + 1, rows.size() - 1))
-		KEY_UP: _highlight(maxi(highlighted - 1, 0))
-		KEY_ENTER, KEY_KP_ENTER: if not rows[highlighted].disabled: _pick_row(highlighted)
+		KEY_DOWN, KEY_RIGHT: _highlight(mini(highlighted + 1, rows.size() - 1))
+		KEY_UP, KEY_LEFT: _highlight(maxi(highlighted - 1, 0))
+		KEY_ENTER, KEY_KP_ENTER:
+			if carousel_mode: _stage_group(highlighted)
+			elif not rows[highlighted].disabled: _pick_row(highlighted)
+		KEY_BACKSPACE, KEY_DELETE:
+			if not carousel_mode: return
+			_unstage_group(highlighted)
 		_: return
 	get_viewport().set_input_as_handled()
+
+## Cards that appear in no visible zone (hand, battlefield, graveyard, exile, command) come from a
+## library search; those get the carousel. Players, stack items or board cards keep the list.
+func _from_library(snapshot: Dictionary, cards: Array) -> bool:
+	if cards.is_empty() or cards.any(func(card): return card.get("kind", "card") != "card"): return false
+	var visible := {}
+	for player in snapshot.get("players", []):
+		for zone in player.get("zones", {}).values():
+			for card in zone: visible[int(card.get("id", -1))] = true
+	return not cards.any(func(card): return visible.has(int(card.id)))
+
+func _set_carousel_mode(value: bool) -> void:
+	carousel_mode = value
+	carousel.visible = value
+	carousel_row.visible = value
+	carousel_caption.visible = value
+	list_scroll.visible = not value
+	preview_column.visible = not value
+	(source_column.get_node("ResultsCaption") as Label).visible = not value
+
+func _sync_carousel() -> void:
+	var items: Array = []
+	var copies: Array = []
+	var picked: Array = []
+	var labels: Array = []
+	# Each mark reads as which of your picks it is ("1 OF 2"), never against the copies in the library.
+	var limit := maxi(1, int(last_prompt.get("selMax", 1)))
+	for group in groups:
+		var data: Dictionary = options[group[0]]
+		items.append(data if not data.get("hidden", false) else {"id": -1, "hidden": true})
+		copies.append(group.size())
+		var mine: Array = group.filter(func(i): return staged.has(i))
+		picked.append(mine.size())
+		var numbers: Array = mine.map(func(i): return staged.find(i) + 1)
+		numbers.sort()
+		labels.append("✓ %s OF %d" % [", ".join(numbers.map(func(n): return str(n))), limit] if not mine.is_empty() else "")
+	carousel.set_items(items, copies, picked, labels)
+	carousel.set_focus(highlighted)
+	_caption_carousel()
+
+func _caption_carousel() -> void:
+	if groups.is_empty() or highlighted >= groups.size():
+		carousel_caption.text = ""
+		return
+	var group: Array = groups[highlighted]
+	var first: Dictionary = options[group[0]]
+	var picked := group.filter(func(i): return staged.has(i)).size()
+	var parts := [str(first.get("name", "Face-down card")).to_upper()]
+	if not str(first.get("typeLine", "")).is_empty(): parts.append(str(first.typeLine))
+	if group.size() > 1: parts.append("×%d" % group.size())
+	if picked > 0: parts.append("✓ selected" + (" %d" % picked if group.size() > 1 else ""))
+	if not first.get("eligible", true): parts.append("viewed only")
+	carousel_caption.text = "   ·   ".join(parts) + "      [%d / %d]" % [highlighted + 1, groups.size()]
+
+## Left-clicking the middle card (or Enter) adds a mark locally; nothing reaches Forge until OK.
+## A one-card search moves its single mark; a stacked group marks its next copy up to the maximum.
+func _stage_group(r: int) -> void:
+	if committing or r < 0 or r >= groups.size() or not last_ready: return
+	_highlight(r)
+	var group: Array = groups[r].filter(func(i): return options[i].get("eligible", true))
+	if group.is_empty(): return
+	var unmarked: Array = group.filter(func(i): return not staged.has(i))
+	if int(last_prompt.get("selMax", 1)) <= 1:
+		if unmarked.size() == group.size():
+			staged.clear()
+			staged.append(group[0])
+	elif not unmarked.is_empty() and staged.size() < int(last_prompt.get("selMax", 1)):
+		staged.append(unmarked[0])
+	_refresh_staged()
+
+## Right-click (or Backspace/Delete on the middle card) removes one mark from that card.
+func _unstage_group(r: int) -> void:
+	if committing or r < 0 or r >= groups.size(): return
+	_highlight(r)
+	var marked: Array = groups[r].filter(func(i): return staged.has(i))
+	if marked.is_empty(): return
+	staged.erase(marked.back())
+	_refresh_staged()
+
+func _refresh_staged() -> void:
+	for r in range(rows.size()): _paint_row(r, last_ready)
+	_sync_carousel()
+	hint.text = "%d selected / %d–%d required" % [staged.size(), last_prompt.get("selMin", 0), last_prompt.get("selMax", 0)]
+	confirm_button.disabled = not last_ready or committing or staged.size() < maxi(1, int(last_prompt.get("selMin", 0))) or staged.size() > int(last_prompt.get("selMax", 1))
+	none_button.disabled = not last_ready or not staged.is_empty() or not none_button.visible
+
+func _commit() -> void:
+	if staged.is_empty() or committing: return
+	committing = true
+	confirm_button.disabled = true
+	_advance_commit()
+
+## One exact instance per snapshot: toggle Forge's chosen set to match the marks, then answer OK.
+func _advance_commit() -> void:
+	if not awaiting_ref.is_empty():
+		var landed := chosen_refs.has(awaiting_ref) == staged.any(func(i): return str(options[i].ref) == awaiting_ref)
+		if not landed: return # Wait for Forge to report the last toggle.
+		awaiting_ref = ""
+	for i in staged:
+		if not chosen_refs.has(str(options[i].ref)):
+			awaiting_ref = str(options[i].ref)
+			option_buttons[i].pressed.emit()
+			return
+	for ref in chosen_refs:
+		var index := -1
+		for i in range(options.size()):
+			if str(options[i].ref) == ref: index = i
+		if index >= 0 and not staged.has(index):
+			awaiting_ref = ref
+			option_buttons[index].pressed.emit()
+			return
+	committing = false
+	if last_prompt.get("okEnabled", false): action_requested.emit("ok")

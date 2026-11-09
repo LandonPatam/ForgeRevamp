@@ -44,7 +44,25 @@ var notice_targets: HBoxContainer
 var notice_ok: Button
 var notices: Array = []
 var notice_active: Dictionary = {}
-const NOTICE_CARD := Vector2(100, 140)
+const NOTICE_CARD := Vector2(150, 210)
+## A board wipe waiting on this seat: its card large in the middle of the table, lines branching
+## out to every permanent it will reach (all players'), and a small terminal bar with Resolve.
+var wipe_mode := false
+var wipe_card: Control
+var wipe_bar: PanelContainer
+var wipe_title: Label
+var wipe_detail: Label
+var wipe_resolve: Button
+var wipe_started := 0
+## Main supplies the table's card views: func(id: int) -> Control (or null).
+var card_view: Callable
+## ...and player portraits by engine id, for effects that target a player.
+var player_view: Callable
+var wipe_heading: Label
+## The same table view for a spell or ability aimed at your things (Aether Spellbomb -> your Angel):
+## its card mid-table, a branch to each of your targets.
+var aimed := false
+const WIPE_LINE := Color("ffb978")
 const NOTICE_MAX_TARGETS := 3
 ## Targeted-player portraits stay near the 100 px Forge atlas cell instead of stretching to card size.
 const PLAYER_PORTRAIT_SIDE := 112.0
@@ -65,8 +83,8 @@ func _ready() -> void:
 	top.add_child(eyebrow)
 	var close := Button.new()
 	browse_button = close
-	close.text = "View battlefield"
-	close.tooltip_text = "Keep priority and return to the battlefield to cast a response or activate an ability"
+	close.text = "Respond with action"
+	close.tooltip_text = "Keep priority and go to the table to cast a spell or activate an ability in response."
 	P.style_popup_button(close)
 	close.custom_minimum_size = Vector2(56, 30)
 	close.add_theme_font_size_override("font_size", 16)
@@ -124,6 +142,7 @@ func _ready() -> void:
 	add_child(hover_preview)
 	hover_preview.hide()
 	_build_notice()
+	_build_wipe()
 	panel.minimum_size_changed.connect(_layout)
 	get_viewport().size_changed.connect(_layout)
 	resized.connect(_layout)
@@ -152,7 +171,10 @@ func present(state: Dictionary) -> void:
 	var events: Array = state.get("targetedEffects", [])
 	var auto_resolve: bool = state.get("autoResolveAll", false)
 	for event in events:
-		if event.get("kind", "") == "notice":
+		if event.get("kind", "") == "choice":
+			latest = maxi(latest, int(event.id)) # Shown as a tether off the card (InteractionPanel).
+			continue
+		if event.get("kind", "") in ["notice", "reveal"]:
 			if int(event.id) > latest and initialized: _queue_notice(event)
 			latest = maxi(latest, int(event.id))
 			continue
@@ -223,7 +245,8 @@ func review() -> void:
 	responding.erase(id)
 	dismissed.erase(id)
 	_offer_priority(true)
-	panel.show()
+	if wipe_mode: _set_wipe_visible(true)
+	else: panel.show()
 	_update_actions()
 
 func respond() -> void:
@@ -232,11 +255,12 @@ func respond() -> void:
 	if not responding.has(id): responding.append(id)
 	_clear_hover()
 	panel.hide()
+	_set_wipe_visible(false)
 	response_requested.emit(id)
 
 func _update_actions() -> void:
 	var pending_effect: bool = stack_ids.has(int(active.get("stackId", -1)))
-	resolve_button.text = "Resolve" if pending_effect else "Close"
+	resolve_button.text = "I accept" if pending_effect else "Close"
 	browse_button.visible = pending_effect
 
 func _next() -> void:
@@ -244,6 +268,7 @@ func _next() -> void:
 	if waiting.is_empty():
 		active = {}
 		panel.hide()
+		_hide_wipe()
 		return
 	active = waiting.pop_front()
 	var source: Dictionary = active.get("source", {})
@@ -252,7 +277,7 @@ func _next() -> void:
 	eyebrow.add_theme_color_override("font_color", Color("ffb978") if mass_removal else Color("6d9fa3"))
 	effect_arrow.visible = not mass_removal and not active.get("targets", []).is_empty()
 	targets_scroll.visible = effect_arrow.visible
-	title.text = source.get("name", "Hidden source")
+	title.text = str(source.get("name", "Hidden source")) + _x_suffix(active)
 	caster.text = "From " + active.get("controllerName", "Opponent")
 	var names: Array = active.get("targets", []).map(func(target): return str(target.get("name", "Your card")))
 	targets.text = "Targets: " + ", ".join(names) if names.size() <= 3 else "%d targets - use the card pages above to inspect each one." % names.size()
@@ -277,8 +302,12 @@ func _next() -> void:
 	rules.max_lines_visible = -1
 	face.update_card(source)
 	_update_actions()
+	aimed = not mass_removal and not active.get("targets", []).is_empty()
+	wipe_mode = (mass_removal or aimed) and table_rect.has_area()
+	if wipe_mode: _show_wipe()
+	else: _hide_wipe()
 	_layout()
-	panel.visible = not responding.has(int(active.stackId))
+	panel.visible = not wipe_mode and not responding.has(int(active.stackId))
 	panel.modulate.a = 0
 	create_tween().tween_property(panel, "modulate:a", 1.0, 0.12)
 
@@ -395,6 +424,12 @@ func _queue_notice(event: Dictionary) -> void:
 	if notice_active.is_empty(): _next_notice()
 	else: _update_notice_count()
 
+## Another player revealed cards: a small "REVEALED" card from its source to what was revealed.
+func show_reveal(source: Dictionary, controller_name: String, cards: Array) -> void:
+	var targets: Array = cards.map(func(card): return {"id": int(card.get("id", -1)), "kind": "card", "name": str(card.get("name", "Card")), "card": card})
+	var names: Array = targets.map(func(target): return target.name)
+	_queue_notice({"id": -1, "stackId": -1, "kind": "reveal", "source": source, "controllerName": controller_name, "targets": targets, "effectText": "%s revealed %s." % [controller_name, ", ".join(names)]})
+
 ## OK on the small card: clears it from this screen only, never an engine answer.
 func close_notice() -> void:
 	var stack_id := int(notice_active.get("stackId", -1))
@@ -416,9 +451,13 @@ func _next_notice() -> void:
 	var source: Dictionary = notice_active.get("source", {})
 	var kind: String = notice_active.get("kind", "")
 	var targets: Array = notice_active.get("targets", [])
-	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU")
-	notice_title.text = "%s  ·  %s  ·  %s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source")]
+	var heading := "BOARD-WIDE EFFECT" if kind == "massRemoval" else ("REVEALED" if kind == "reveal" else ("TARGETED YOU" if not targets.is_empty() else "AFFECTS YOU"))
+	notice_title.text = "%s  ·  %s  ·  %s%s" % [heading, notice_active.get("controllerName", "Opponent"), source.get("name", "Hidden source"), _x_suffix(notice_active)]
 	notice_title.add_theme_color_override("font_color", Color("ffb978") if kind == "massRemoval" else Color("6d9fa3"))
+	# Revealed cards are the point of a reveal: show them (and the source) twice as large.
+	var card_size: Vector2 = NOTICE_CARD * (2.0 if kind == "reveal" else 1.0)
+	notice_source.custom_minimum_size = card_size
+	notice_arrow.custom_minimum_size.y = card_size.y
 	notice_source.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
 	for child in notice_targets.get_children():
 		notice_targets.remove_child(child)
@@ -427,14 +466,14 @@ func _next_notice() -> void:
 		var target: Dictionary = targets[index]
 		if target.get("kind", "") == "player":
 			var tile := _player_target(target)
-			_size_player_target(tile, NOTICE_CARD)
+			_size_player_target(tile, card_size)
 			tile.get_node("PlayerName").add_theme_font_size_override("font_size", 14)
 			notice_targets.add_child(tile)
 			continue
 		var view := Card.new()
 		view.inspection = true
 		view.table_angle = false
-		view.custom_minimum_size = NOTICE_CARD
+		view.custom_minimum_size = card_size
 		notice_targets.add_child(view)
 		_enable_card_hover(view)
 		view.update_card(target.get("card", {"id": target.get("id", -1), "name": target.get("name", "Target")}))
@@ -444,7 +483,7 @@ func _next_notice() -> void:
 	notice_targets.visible = not targets.is_empty()
 	var names: Array = targets.map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
 	var lead := ""
-	if not names.is_empty(): lead = "Targeted " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + ".  "
+	if not names.is_empty() and kind != "reveal": lead = "Targeted " + (", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()) + ".  "
 	notice_text.text = lead + str(notice_active.get("effectText", source.get("text", "")))
 	_update_notice_count()
 	notice_panel.show()
@@ -469,15 +508,179 @@ func reset() -> void:
 	latest = 0
 	initialized = false
 	panel.hide()
+	_hide_wipe()
+
+## "  ·  X = 4" for a spell or ability cast with X (Earthquake, Blaze), else "".
+func _x_suffix(event: Dictionary) -> String:
+	var x: Variant = event.get("xValue", null)
+	if x == null:
+		for item in current_state.get("stack", []):
+			if int(item.get("id", -1)) == int(event.get("stackId", -2)): x = item.get("xValue", null)
+	return "" if x == null else "  ·  X = %d" % int(x)
+
+## Whether a decision-style popup (the large one or the wipe overlay) is up on this seat.
+func showing() -> bool:
+	return panel.visible or (wipe_card != null and wipe_card.visible)
+
+func _build_wipe() -> void:
+	var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+	wipe_card = Card.new()
+	wipe_card.inspection = true
+	wipe_card.table_angle = false
+	add_child(wipe_card)
+	_enable_card_hover(wipe_card)
+	wipe_bar = PanelContainer.new()
+	Terminal.panel(wipe_bar, 12)
+	var frame := wipe_bar.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	frame.border_color = WIPE_LINE
+	frame.shadow_color = Color(0, 0, 0, 0.5)
+	frame.shadow_size = 10
+	wipe_bar.add_theme_stylebox_override("panel", frame)
+	wipe_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(wipe_bar)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	wipe_bar.add_child(column)
+	wipe_heading = _label("BOARD-WIDE EFFECT", 12, WIPE_LINE)
+	wipe_heading.add_theme_font_override("font", Terminal.font())
+	column.add_child(wipe_heading)
+	wipe_title = _label("", 20, Color.WHITE)
+	wipe_title.add_theme_font_override("font", Terminal.font())
+	column.add_child(wipe_title)
+	wipe_detail = _label("", 14, Terminal.INK)
+	wipe_detail.add_theme_font_override("font", Terminal.font())
+	wipe_detail.custom_minimum_size.x = 260
+	column.add_child(wipe_detail)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	column.add_child(row)
+	var view := Button.new()
+	view.text = "Respond with action"
+	view.tooltip_text = "Keep priority and go to the table to cast a spell or activate an ability in response."
+	Terminal.button(view)
+	view.pressed.connect(respond)
+	row.add_child(view)
+	wipe_resolve = Button.new()
+	wipe_resolve.text = "I accept"
+	wipe_resolve.tooltip_text = "Pass priority: you accept that this board-wide effect resolves."
+	Terminal.button(wipe_resolve, true)
+	wipe_resolve.pressed.connect(dismiss)
+	row.add_child(wipe_resolve)
+	wipe_card.hide()
+	wipe_bar.hide()
+
+func _show_wipe() -> void:
+	var source: Dictionary = active.get("source", {})
+	wipe_card.update_card(source if not source.is_empty() else {"id": -1, "hidden": true})
+	wipe_title.text = str(source.get("name", "Hidden source")).to_upper() + _x_suffix(active)
+	wipe_heading.text = "TARGETED EFFECT" if aimed else "BOARD-WIDE EFFECT"
+	_count_wipe()
+	wipe_started = Time.get_ticks_msec()
+	_set_wipe_visible(not responding.has(int(active.get("stackId", -1))))
+	wipe_card.modulate.a = 0.0
+	wipe_bar.modulate.a = 0.0
+	var tween := create_tween().set_parallel()
+	tween.tween_property(wipe_card, "modulate:a", 1.0, 0.18)
+	tween.tween_property(wipe_bar, "modulate:a", 1.0, 0.18)
+
+## Counted from the table each frame: the views settle after the snapshot that opened the wipe.
+func _count_wipe() -> void:
+	if aimed:
+		var names: Array = active.get("targets", []).map(func(target): return "you" if target.get("kind", "") == "player" else "your " + str(target.get("name", "card")))
+		wipe_detail.text = "> from %s\n> targets %s" % [active.get("controllerName", "Opponent"), ", ".join(names) if names.size() <= 3 else "%d of your things" % names.size()]
+		return
+	var reached := _wipe_views()
+	var yours := 0
+	for view in reached:
+		if int(view.data.get("owner", -1)) == 0: yours += 1
+	wipe_detail.text = "> from %s\n> reaches %d permanent%s, %d of yours" % [active.get("controllerName", "Opponent"), reached.size(), "" if reached.size() == 1 else "s", yours]
+
+func _hide_wipe() -> void:
+	wipe_mode = false
+	_set_wipe_visible(false)
+
+func _set_wipe_visible(value: bool) -> void:
+	if wipe_card == null: return
+	wipe_card.visible = value and wipe_mode
+	wipe_bar.visible = wipe_card.visible
+	queue_redraw()
+
+## The table views of the permanents the wipe reaches, one per visible view (a pile counts once).
+func _wipe_views() -> Array:
+	var views: Array = []
+	if not card_view.is_valid(): return views
+	if aimed:
+		for target in active.get("targets", []):
+			var aimed_view: Control = null
+			if target.get("kind", "") == "player":
+				if player_view.is_valid(): aimed_view = player_view.call(int(target.get("id", -1)))
+			else: aimed_view = card_view.call(int(target.get("id", -1)))
+			if is_instance_valid(aimed_view) and aimed_view.is_visible_in_tree() and not views.has(aimed_view): views.append(aimed_view)
+		return views
+	for id in active.get("affected", []):
+		var view: Control = card_view.call(int(id))
+		if is_instance_valid(view) and view.is_visible_in_tree() and not views.has(view): views.append(view)
+	return views
+
+## Branches grow out from the spell to each permanent it reaches; yours are brighter, each gets a
+## pulsing frame and a spark that runs along its branch.
+func _draw() -> void:
+	if wipe_card == null or not wipe_card.visible: return
+	var to_local := get_global_transform().affine_inverse()
+	var origin: Vector2 = to_local * wipe_card.get_global_rect().get_center()
+	var age := (Time.get_ticks_msec() - wipe_started) / 1000.0
+	var grow := clampf(age / 0.45, 0.0, 1.0)
+	grow = 1.0 - pow(1.0 - grow, 3.0)
+	var pulse := 0.55 + 0.45 * sin(age * 4.0)
+	for view in _wipe_views():
+		# The card's own transform, so a tapped (turned) card gets its frame and branch where it is.
+		var card_transform: Transform2D = to_local * view.get_global_transform()
+		var target: Vector2 = card_transform * (view.size * 0.5)
+		var mine := aimed or int(view.data.get("owner", -1)) == 0
+		var color := Color(WIPE_LINE, 1.0 if mine else 0.7)
+		var bend := origin.lerp(target, 0.5) + Vector2(0, -0.12 * origin.distance_to(target))
+		var points := PackedVector2Array()
+		var steps := 24
+		for i in range(int(steps * grow) + 1):
+			var t := float(i) / steps
+			points.append(origin.lerp(bend, t).lerp(bend.lerp(target, t), t))
+		if points.size() >= 2:
+			draw_polyline(points, Color(color, color.a * 0.28), 16.0 if mine else 11.0, true)
+			draw_polyline(points, color, 4.5 if mine else 3.0, true)
+		if grow >= 1.0:
+			var spark_t := fmod(age * 0.7 + float(view.get_instance_id() % 97) / 97.0, 1.0)
+			var spark := origin.lerp(bend, spark_t).lerp(bend.lerp(target, spark_t), spark_t)
+			draw_circle(spark, 6.0 if mine else 4.5, Color(1, 0.9, 0.75, 0.95))
+			var frame := P.box(Color(WIPE_LINE, 0.12 * pulse), Color(WIPE_LINE, 0.4 + 0.6 * pulse), 8, 0)
+			frame.set_border_width_all(4 if mine else 3)
+			draw_set_transform_matrix(card_transform)
+			draw_style_box(frame, Rect2(Vector2.ZERO, view.size).grow(4))
+			draw_set_transform_matrix(Transform2D.IDENTITY)
+
+func _layout_wipe() -> void:
+	if wipe_card == null or not table_rect.has_area(): return
+	var height := clampf(table_rect.size.y * 0.62, 260, 520)
+	var card_size := Vector2(height * 144.0 / 202.0, height).round()
+	wipe_card.size = card_size
+	wipe_card.custom_minimum_size = card_size
+	wipe_bar.reset_size()
+	var gap := 24.0
+	var total := card_size.x + gap + wipe_bar.size.x
+	var left := table_rect.get_center().x - total * 0.5
+	wipe_card.position = Vector2(left, table_rect.get_center().y - card_size.y * 0.5).round()
+	wipe_bar.position = Vector2(left + card_size.x + gap, table_rect.get_center().y - wipe_bar.size.y * 0.5).round()
 
 func _layout() -> void:
 	if panel == null:
 		return
+	_layout_wipe()
 	var available := get_viewport_rect().size
 	if notice_panel != null and notice_panel.visible:
 		# A small card in the middle of the table, never over the rail.
 		var area: Rect2 = table_rect if table_rect.has_area() else Rect2(Vector2.ZERO, available)
-		var notice_width := minf(460, area.size.x - 32)
+		var cards_shown: int = 1 + mini(notice_active.get("targets", []).size(), NOTICE_MAX_TARGETS)
+		var wide: float = notice_source.custom_minimum_size.x * cards_shown + 60.0 * (cards_shown - 1) + 48.0
+		var notice_width := minf(maxf(460, wide), area.size.x - 32)
 		notice_text.custom_minimum_size.x = notice_width - 32
 		notice_panel.size = Vector2(notice_width, 0)
 		notice_panel.size = Vector2(notice_width, notice_panel.get_combined_minimum_size().y)
@@ -533,6 +736,13 @@ func _process(_delta: float) -> void:
 	if notice_panel != null: notice_panel.visible = not notice_active.is_empty() and not suspended
 	if active.is_empty():
 		return
-	panel.visible = not suspended and not responding.has(int(active.get("stackId", -1)))
+	panel.visible = not wipe_mode and not suspended and not responding.has(int(active.get("stackId", -1)))
+	if wipe_mode:
+		var shown := not suspended and not responding.has(int(active.get("stackId", -1)))
+		if shown != wipe_card.visible: _set_wipe_visible(shown)
+		if shown:
+			_layout_wipe()
+			_count_wipe()
+			queue_redraw()
 	if suspended:
 		_clear_hover()

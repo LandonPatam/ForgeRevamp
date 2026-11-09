@@ -42,6 +42,24 @@ Don't rerun the whole suite after every edit. When one check fails, rerun just t
 
 `ui` with no names runs the whole headless smoke suite, and `visual` with no names runs every rendered check. Leave those to `all`.
 
+## UI sandbox (try a change by hand)
+
+For UI work, open the real table directly on a prepared board instead of playing a game to reach it:
+
+```
+node client-godot/tools/sandbox.mjs                  # list boards with one-line descriptions
+node client-godot/tools/sandbox.mjs busy-table       # real Forge on that board, playable window
+node client-godot/tools/sandbox.mjs --mock           # MockAdapter table (layout only, no rules)
+node client-godot/tools/sandbox.mjs decisions --shot # screenshot to client-godot/artifacts/sandbox-decisions.png, then exit
+```
+
+- It starts a real `BridgeMain` with `--test-state`, clicks through startup (notices, Keep, starting player) and stops on your priority in the board's phase. From there every decision is yours and Forge is the rules authority.
+- Saving a `.gd`/`.tscn`/`.tres`/`.gdshader` relaunches only the window. The engine keeps running, so the new code opens on the same board as you left it. Saving the board file restarts the board. In the terminal: `r` relaunch window, `b` restart board, `q` quit. Closing the window also quits.
+- Boards: `client-godot/tests/sandbox/` holds UI playgrounds (`busy-table`, `decisions`, `wide-combat`, `empty`). Every `tests/scenarios/` board works too. A sandbox board with the same name wins. The first `#` line is the description shown in the list; lines starting with `#` are comments. Copy `empty.state` to make a new one; the launcher strips blank lines (Forge's parser rejects them).
+- Options: `--opponents=1..3`, `--deck=<tests/*.dck>` (commander/library fixture), `--size=WxH`, `--no-watch`.
+- Logs: `client-godot/artifacts/sandbox-bridge.log` and `sandbox-godot.log`. Script errors and unknown card names are echoed in the terminal.
+- Agents present every UI change through the sandbox (procedure in `AGENTS.md`, "Presenting a UI/table change"): a board that shows it, a `--shot` they looked at first, then the exact command, the steps to reach the change and what to expect. Example: `node client-godot/tools/sandbox.mjs discard`, "tap a Mountain, cast Faithless Looting, then click two hand cards". Sandbox boards have no driver and are not part of `check.mjs`; boards under `tests/scenarios/` do have one.
+
 ## Real-engine scenarios
 
 `scenario <name>` starts a real Forge `BridgeMain` with a prepared board and drives the real Godot table the way a player would (`client-godot/tools/live-check.mjs --scenario=<name>`). `--render` also saves `client-godot/artifacts/scenario-<name>-1600-<stage>.png`. Each scenario takes about 15–40 s. `scenario` with no name lists the existing ones.
@@ -57,6 +75,40 @@ Adding one (no other registration needed):
 3. **Prove it:** run it against the broken code (or temporarily reintroduce the bug) and confirm it fails with your message; then confirm it passes with the fix.
 
 `mind_stone()` is the template: it clicks Mind Stone, clicks the "Add {C}" ability in the real Forge popup, and asserts that the stone tapped and `{C}` is floating. With the old Confirm-required popup it fails with "Choosing the ability must tap Mind Stone".
+
+### Probe, then design
+
+Before designing a UI change for an engine decision, see exactly what Forge sends. Add the board and a throwaway driver that reaches the moment and prints it, run it, read it, then design:
+
+```gdscript
+func my_case() -> bool:
+	ui._click_card(find_card("Temple of Malice").id)
+	await pass_until(func(): return not ui.snapshot.asks.is_empty())
+	await dump("temple")  # prints prompt, asks, stack and which UI is showing; captures with --render
+	return true
+```
+
+Turn the probe into the real check once the design works (assert what the player sees and the engine result). Delete probes the user does not need.
+
+### Board and driver tricks
+
+- Card modifiers: `|Tapped`, `|Damage:2`, `|Counters:P1P1=2`, `|Id:1`, `|AttachedTo:1`, `|IsCommander`, `|FaceDown`. Lines starting `#` are comments; the first one is the sandbox description.
+- `p1putonstack=Card` or `Card->1` (target id 1) puts an opponent's **spell** on the stack (X is 0; activated abilities cannot be placed). For an AI X spell or ability, give the AI the card and mana on its turn (`activeplayer=p1`) and let it cast (Earthquake, Blaze work); for upkeep triggers start in your `MAIN2` and pass.
+- Helpers in `ScenarioIntegration.gd` / `LiveIntegration.gd`:
+  - `pass_until(cond, limit)` passes priority/declarations frame-fast until `cond` holds (no settle waits);
+  - `dump(tag)` prints a probe;
+  - `press_card_tether(name)` answers a card-list tether;
+  - `answer_off_popup(value)` answers an ask shown on a tether instead of a popup;
+  - `submit_choice()` and `step()` already handle tethers.
+- `wait_ready()` waits at least 300 ms per call. Do not use it in timing measurements; `phase-timing` shows how to measure frame-fast.
+
+### Working habits that keep this fast
+
+- **One Godot run at a time.** Never start a check, a sandbox or a probe while a background suite runs, and do not edit scripts it will load (a half-edited file breaks every later scenario). Prepare edits in the scratchpad and apply them when the run finishes. The full scenario list: `node tools/check.mjs scenario "$(ls tests/scenarios/*.state | xargs -n1 basename | sed 's/\.state$//' | paste -sd, -)"` (`scenario all` is not a name).
+- **Backslashes in GDScript regexes:** shell heredocs and Python string layers eat them (`" \\(\\d+\\)"` becomes an invalid `" \(\d+\)"`, `"\n"` becomes a real newline inside a string). Write those lines with the Edit tool, or check the file afterwards (`grep -n create_from_string`).
+- **Bridge Java changes:** `node client-godot/tools/check.mjs bridge` rebuilds and tests. **Trap:** VS Code's Java extension compiles into the same `bridge/target/classes` and writes a class that throws "Unresolved compilation problem" for a file with errors; Maven then treats it as up to date and `check.mjs bridge` reports PASS while the bridge fails at runtime (symptom: scenarios time out "CONNECTING TO FORGE", no first snapshot, no error printed). After non-trivial bridge edits, compile with the direct `javac` command under "Stale bridge classes" below; it reports real errors. **Forge source changes** (rare; record them in `FORGE_PATCHES.md` with a patch file) also need `forge-gui` installed first (commands in `FORGE_PATCHES.md`, "Building").
+- **Failures that look random:** rerun the scenario alone 2–3 times before changing code; several drivers time out only under the load of a long suite (`blink`, `tokens`). `blocking` and `insights` fail independently of recent work.
+- **Look at every capture you mention to the user.** Several bugs (a frame under a window, a hidden Yes button, a counter off by meaning) were only visible in the PNG.
 
 ## Stale bridge classes
 

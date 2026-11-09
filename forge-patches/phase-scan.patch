@@ -1,0 +1,28 @@
+--- a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
++++ b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+@@ -1711,7 +1711,11 @@
+         // shouldAutoYield, not isYieldActive: it clears yields that have run their course, so an expiring one no longer skips the scan
+         // Compute the actionable set when APINA / suggestions / highlights need it.
+         boolean highlightsEnabled = yieldController.getBoolPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS);
+-        if (!yieldController.shouldAutoYield() && (needsAvailableActions() || highlightsEnabled)) {
++        // ForgeUI: a phase this player skips with an empty stack is passed whatever the scan finds,
++        // so a host that opts in skips the actionable scan there (it otherwise runs at every priority).
++        boolean skippedPhase = skipScanOnSkippedPhases != null && skipScanOnSkippedPhases.getAsBoolean()
++                && stack.isEmpty() && skipsPromptForStackOrPhase();
++        if (!skippedPhase && !yieldController.shouldAutoYield() && (needsAvailableActions() || highlightsEnabled)) {
+             long timeoutMs = computeAvailableActionsBudgetMs(getPlayer());
+             if (highlightsEnabled) {
+                 // Highlights need the full set; APINA derives its boolean from the same scan.
+@@ -4073,6 +4077,12 @@
+     }
+ 
+     /** True if yield consumer needs the synced wire field. */
++    /** ForgeUI: when this answers true, skip the actionable scan in phases this player skips anyway. */
++    private java.util.function.BooleanSupplier skipScanOnSkippedPhases;
++    public void setSkipScanOnSkippedPhases(final java.util.function.BooleanSupplier enabled) {
++        skipScanOnSkippedPhases = enabled;
++    }
++
+     private boolean needsAvailableActions() {
+         if (yieldController.getBoolPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS)) return true;
+         if (yieldController.getDeclineScope(FPref.YIELD_DECLINE_SCOPE_NO_ACTIONS) != DeclineScope.NEVER) return true;

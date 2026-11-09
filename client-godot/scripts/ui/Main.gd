@@ -68,6 +68,34 @@ var mana_pool: VBoxContainer
 var live_buttons: Array[Button] = []
 var integration_checks: RefCounted
 var snapshot: Dictionary = {}
+var sandbox_starting := false
+var hand_pick_shade: ColorRect
+var hand_pick_panel: PanelContainer
+var hand_pick_title: Label
+var hand_pick_message: Label
+var hand_pick_count: Label
+var hand_pick_confirm: Button
+var hand_pick_cancel: Button
+## Branches from the pick box to each picked hand card (red for a discard), like a wipe's lines.
+var hand_pick_lines: Control
+var hand_pick_since: Dictionary = {} ## Card id -> when it was picked, so its branch grows in.
+var hand_pick_red := false
+## Picks stay local until the red Discard / Confirm: Forge finishes a selection the moment it has
+## its maximum, so each click would otherwise discard at once. The button then sends them in turn.
+var hand_pick_staged: Array = []
+var hand_pick_queue: Array = []
+var hand_pick_awaiting := -1
+var hand_pick_committing := false
+## Targets of a tethered effect: picked locally, sent on the tether's Confirm (Forge would finish a
+## one-target choice on the first click). {kind: "card"|"player", id, name}; player ids are seats.
+var target_staged: Array = []
+var target_queue: Array = []
+var target_awaiting: Dictionary = {}
+var target_committing := false
+var target_prompt_key := ""
+## A library search branches off the card that caused it: line + pulsing frame over the dimmed table.
+var search_link: Control
+var sandbox_start: RefCounted
 var selected: Dictionary = {}
 var targeting := false
 var cards: Dictionary = {}
@@ -172,6 +200,8 @@ var stack_waiting := false
 var token_artwork: Node
 var stack_scroll: ScrollContainer
 var incoming_effect: Control
+## "Counterspell -> Wrath of God": target choices for a spell you are casting at the stack.
+var response_target: Control
 var interaction_panel: Control
 var decision_scroll: ScrollContainer
 var rail_space: Control
@@ -198,6 +228,9 @@ var modal_center: CenterContainer
 var modal_panel: Control
 var decision_board_button: Button
 var native_reveal := false
+## Another player's reveal confirmation already turned into a notice and acknowledged (by prompt).
+var reveal_notice_key := ""
+var reveal_ack_key := ""
 var open_ask := -1
 var hud_values: Dictionary = {}
 var toast: Label
@@ -205,6 +238,11 @@ var toast_tween: Tween
 
 func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
+		if arg == "--sandbox":
+			# tools/sandbox.mjs: click through startup onto the prepared board, then play by hand.
+			sandbox_starting = true
+			sandbox_start = load("res://tests/SandboxStart.gd").new()
+			sandbox_start.run.call_deferred(self)
 		if arg == "--live-check":
 			integration_checks = load("res://tests/LiveIntegration.gd").new()
 			integration_checks.run.call_deferred(self)
@@ -231,6 +269,7 @@ func _ready() -> void:
 	adapter.state_changed.connect(_apply_state)
 	adapter.feedback.connect(_notify)
 	adapter.action_rejected.connect(_reject_card_action)
+	if adapter.has_signal("action_explained"): adapter.action_explained.connect(_explain_card)
 	adapter.status_changed.connect(func(message): status_label.text = message)
 	adapter.session_reset.connect(_clear_live_session)
 	if not verification_mode and ProjectSettings.get_setting("application/config/client_diagnostics", false):
@@ -489,11 +528,21 @@ func _build_shell() -> void:
 	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(note)
 	footer.add_child(_label("SPACE  Pass turn    Q  Advance    D  Draw    T  Tap / attack    H  Help", 10, P.MUTED))
+	# Picking from your hand (discard, put back): the table dims and stops taking clicks; the hand,
+	# a later sibling with a higher z_index, stays bright and usable.
+	hand_pick_shade = ColorRect.new()
+	hand_pick_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hand_pick_shade.color = Color(0.01, 0.015, 0.02, 0.66)
+	hand_pick_shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	hand_pick_shade.z_index = 19
+	hand_pick_shade.hide()
+	add_child(hand_pick_shade)
 	hand_root = Control.new()
 	hand_root.mouse_filter = Control.MOUSE_FILTER_PASS
 	hand_root.z_index = 20
 	hand_root.gui_input.connect(_hand_scroll)
 	add_child(hand_root)
+	_build_hand_pick_panel()
 	library_pile = Library.new()
 	library_pile.z_index = 22
 	library_pile.tooltip_text = "Library / drag a face-down card into your hand"
@@ -565,6 +614,13 @@ func _build_shell() -> void:
 	modal_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	modal_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	modal.add_child(modal_center)
+	search_link = Control.new()
+	search_link.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	search_link.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	search_link.z_index = 101
+	search_link.hide()
+	add_child(search_link)
+	search_link.draw.connect(_draw_search_link)
 	decision_board_button = _terminal_button("Return to decision", _toggle_decision_board, "Go back to the decision you were making (Escape).", true)
 	decision_board_button.add_theme_font_size_override("font_size", 24)
 	decision_board_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -588,6 +644,18 @@ func _build_shell() -> void:
 	incoming_effect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	incoming_effect.blocked = func(): return modal.visible or opening_hand.visible or (live and snapshot.get("prompt", {}).get("inputKind", "") not in ["InputPassPriority", "InputLockUI", ""])
 	incoming_effect.inspect_requested.connect(_show_card_detail)
+	incoming_effect.card_view = func(id: int) -> Control: return cards.get(id)
+	incoming_effect.player_view = func(engine_id: int) -> Control:
+		for seat in hud_values:
+			if seat < snapshot.get("players", []).size() and int(snapshot.players[seat].get("engineId", seat)) == engine_id: return hud_values[seat].portrait
+		return null
+	response_target = preload("res://scripts/ui/ResponseTarget.gd").new()
+	add_child(response_target)
+	response_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	response_target.answered.connect(func(id: int, value: Variant): _intent("answer", {"id": id, "value": value}))
+	response_target.stack_rect = func(id: int) -> Rect2:
+		var entry: Control = stack_box.entries.get(id)
+		return entry.get_global_rect() if is_instance_valid(entry) and entry.is_visible_in_tree() else Rect2()
 	incoming_effect.acknowledged.connect(func(stack_id: int):
 		if live: adapter.acknowledge_effect(stack_id))
 	interaction_panel = preload("res://scripts/ui/InteractionPanel.gd").new()
@@ -598,6 +666,16 @@ func _build_shell() -> void:
 	interaction_panel.action_requested.connect(func(action):
 		_primary_action() if action == "ok" else _secondary_action())
 	interaction_panel.entity_selected.connect(func(action, id): _intent(action, {"id": id}))
+	interaction_panel.zone_view = func(id: int) -> Control:
+		if snapshot.get("players", []).is_empty() or not hud_values.has(0): return null
+		for zone_name in hud_values[0].zones:
+			if snapshot.players[0].get("zones", {}).get(zone_name, []).any(func(card): return int(card.get("id", -1)) == id): return hud_values[0].zones[zone_name]
+		return null
+	interaction_panel.modes_answered.connect(func(id, picks): _intent("answer", {"id": id, "value": picks}))
+	interaction_panel.card_chosen.connect(func(card_id): _intent("card", {"id": card_id}))
+	interaction_panel.target_player_clicked.connect(func(seat): _stage_target("player", seat))
+	interaction_panel.targets_confirmed.connect(_commit_targets)
+	interaction_panel.targets_cancelled.connect(func(): _intent("cancel"))
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -621,10 +699,11 @@ func _build_shell() -> void:
 
 func _present_interaction() -> void:
 	if not is_instance_valid(interaction_panel): return
-	var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
+	_sync_targets()
+	var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
-	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible, cards, avatars)
+	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible, cards, avatars)
 	var rail_decision: bool = interaction_panel.uses_stack_rail() or board_choice.visible
 	decision_scroll.visible = rail_decision
 	rail_space.visible = not rail_decision and stack_box.entries.is_empty()
@@ -679,7 +758,9 @@ func _apply_table_style() -> void:
 		if not snapshot.is_empty() and snapshot.has("players"):
 			for p in snapshot.players:
 				if hud_values.has(p.id):
-					for zone in hud_values[p.id].zones: hud_values[p.id].zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+					for zone in hud_values[p.id].zones:
+						hud_values[p.id].zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+						hud_values[p.id].zones[zone].castable_now = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone) and _ready_now(card, zone))
 	if adapter != null and "stack_mode" in adapter:
 		adapter.stack_mode = int(ui_layout.stack_mode)
 		adapter.auto_resolve_all = int(ui_layout.stack_mode) == 2
@@ -887,6 +968,7 @@ func _apply_state(value: Dictionary) -> void:
 	_close_accepted_commander_browser()
 	_announce_returned_lands()
 	incoming_effect.present(snapshot)
+	if live: interaction_panel.note_choices(snapshot.get("targetedEffects", []))
 	stack_attention.present(snapshot)
 	# Sound once when the stack starts waiting on this player, not on every snapshot.
 	if stack_attention.attention and not stack_waiting and notify_sound != null: notify_sound.play_cue()
@@ -905,6 +987,7 @@ func _apply_state(value: Dictionary) -> void:
 		values.info.hide()
 		for zone in values.zones:
 			values.zones[zone].playable = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone))
+			values.zones[zone].castable_now = Card.playable_glow and p.zones[zone].any(func(card): return _playable(card, int(p.id), zone) and _ready_now(card, zone))
 			values.zones[zone].text = str(p.zones[zone].size())
 			values.zones[zone].tooltip_text = zone + " / " + str(p.zones[zone].size()) + " cards." + (" Something here can be cast now." if values.zones[zone].playable else "") + " Click to browse."
 	library_count.text = str(snapshot.players[0].libraryCount) + " Library"
@@ -945,16 +1028,39 @@ func _apply_state(value: Dictionary) -> void:
 		_inspect(snapshot.players[0].zones.Battlefield[1])
 	if not snapshot.asks.is_empty():
 		var ask: Dictionary = snapshot.asks[0]
-		if _board_ask(ask):
+		var mode_id: int = interaction_panel.mode_source(ask)
+		if mode_id < 0: mode_id = interaction_panel.look_source(ask)
+		var mode_card: Control = cards.get(mode_id) if live else null
+		var answering: bool = live and response_target.accepts(ask)
+		var scrying: bool = live and ask.get("kind", "") == "scry"
+		response_target.present(ask if answering else {}, snapshot.get("connectionReady", false))
+		if answering:
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes({})
+		elif scrying:
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes(ask)
+		elif is_instance_valid(mode_card) and mode_card.is_visible_in_tree():
+			# Mode choices hang off the card itself, not a popup.
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes(ask)
+		elif _board_ask(ask):
+			interaction_panel.show_modes({})
 			if modal.visible: _close_modal()
 			var avatars := {}
 			for seat in hud_values:
 				if seat < snapshot.players.size(): avatars[int(snapshot.players[seat].get("engineId", seat))] = hud_values[seat].portrait
 			board_choice.present(ask, cards, snapshot.get("connectionReady", false), avatars)
 		else:
+			interaction_panel.show_modes({})
 			board_choice.hide()
 			if ask.id != open_ask or not modal.visible or not is_instance_valid(modal_panel): _open_decision(ask)
 	else:
+		response_target.present({})
+		interaction_panel.show_modes({})
 		board_choice.hide()
 		if open_ask >= 0: _close_modal()
 	if live:
@@ -999,13 +1105,28 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		card_size = FieldLayout.fit_card_size(automatic, dimensions - Vector2(16, 16), TABLE_CARD_SIZE, spacing)
 	pack_values = pack_values.filter(func(card): return automatic.any(func(other): return other.id == card.id))
 	var packed: Dictionary = FieldLayout.arrange(pack_values, dimensions - Vector2(16, 16), card_size, spacing, zone == "Battlefield")
+	var hand_pick := zone == "Hand" and _hand_pick_active()
+	var hand_pick_discard := hand_pick and _hand_pick_is_discard()
+	var hand_pick_offered := {}
+	if hand_pick:
+		for offered in snapshot.prompt.get("cards", []): hand_pick_offered[int(offered.id)] = true
 	for i in range(values.size()):
 		var c: Dictionary = values[i].duplicate(true)
 		c.owner = owner
 		c.zone = zone
 		c.playable = _playable(c, owner, zone)
+		# Combat: your creatures that can't block / attack right now, with Forge's reason (bridge).
+		var unable: Dictionary = snapshot.get("prompt", {}).get("cantBlock", snapshot.get("prompt", {}).get("cantAttack", {}))
+		if owner == 0 and zone == "Battlefield" and unable.has(str(c.id)):
+			c.unableReason = str(unable[str(c.id)])
+			c.unableTag = "CAN'T BLOCK" if snapshot.prompt.has("cantBlock") else "CAN'T ATTACK"
+		c.ready = c.playable and _ready_now(c, zone)
 		if snapshot.prompt.get("inputKind", "") == "InputBlock" and snapshot.prompt.get("chosen", []).has("card:" + str(c.id)):
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
+		if hand_pick and zone == "Hand" and owner == 0:
+			# Forge's own chosen list marks the pick; cards it cannot take are shaded.
+			if hand_pick_staged.has(int(c.id)) or snapshot.prompt.get("chosen", []).has("card:" + str(c.id)): c.pickMark = 2 if hand_pick_discard else 1
+			elif not hand_pick_offered.has(int(c.id)): c.pickBlocked = true
 		c.stackCount = int(anchored_counts.get(c.id, packed.counts.get(c.id, 1)))
 		c.pileSize = int(pile_sizes.get(c.id, 1))
 		seen[c.id] = true
@@ -1585,6 +1706,7 @@ func _layout_inspection() -> void:
 		# Small effect cards sit in the middle of the table, never over the rail.
 		if is_instance_valid(board_scroller):
 			var table: Rect2 = get_global_transform().affine_inverse() * board_scroller.get_global_rect()
+			response_target.table_rect = table
 			if incoming_effect.table_rect != table:
 				incoming_effect.table_rect = table
 				incoming_effect._layout()
@@ -1654,11 +1776,25 @@ func _card_unhovered(source: Control) -> void:
 		raised_card.hide()
 
 func _process(_delta: float) -> void:
+	if explain_note != null and explain_note.visible: _place_explain_note()
+	if is_instance_valid(search_link):
+		var searching: bool = live and modal.visible and is_instance_valid(modal_panel) and modal_panel is SelectionDialog and modal_panel.carousel_mode and _search_anchor() != null
+		if searching != search_link.visible:
+			search_link.visible = searching
+			# A lighter shade keeps the source card readable behind the search.
+			(modal.get_child(0) as ColorRect).color.a = 0.66 if searching else 0.84
+			if not searching:
+				modal_center.offset_left = 0
+				modal_center.offset_right = 0
+		if searching:
+			_slide_search_clear()
+			search_link.queue_redraw()
+	if is_instance_valid(hand_pick_lines) and hand_pick_lines.visible: hand_pick_lines.queue_redraw()
 	adapter.poll(_delta)
 	if layout_paused: return
 	if live and is_instance_valid(interaction_panel):
-		var popup_showing: bool = incoming_effect.panel.visible and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
-		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing): _present_interaction()
+		var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
+		if interaction_panel.suspended != (modal.visible or opening_hand.visible or popup_showing or hand_pick_panel.visible): _present_interaction()
 	_layout_zone_browser()
 	_layout_mana_pool()
 	if is_instance_valid(decision_board_button) and decision_board_button.visible: _place_decision_board_button()
@@ -1860,6 +1996,8 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 			return
 		if targeting:
 			return
+		if _stage_hand_pick(data): return
+		if interaction_panel.target_tether and _stage_target("card", int(data.id)): return
 		_select_card(data)
 		if data.get("zone", "") == "Stack":
 			return # Pending casts can be inspected/moved, but cannot activate abilities.
@@ -2225,6 +2363,9 @@ func _primary_action() -> void:
 		return
 	if targeting:
 		return
+	if live and is_instance_valid(hand_pick_panel) and hand_pick_panel.visible:
+		_commit_hand_pick() # Q presses the pick's own button.
+		return
 	if live:
 		_intent("ok")
 		return
@@ -2285,6 +2426,7 @@ func _choose_player(id: int) -> void:
 				_cancel_attack_target()
 				_intent("attack", {"id": attacker_id, "target": id})
 			return
+		if interaction_panel.target_tether and _stage_target("player", id): return
 		_intent("player", {"id": id})
 		return
 	if targeting and _attackable_seat(id) and _can_attack():
@@ -2325,6 +2467,8 @@ func _secondary_action() -> void:
 		return
 	if targeting:
 		_cancel_attack_target()
+	elif hand_pick_panel.visible and not snapshot.get("prompt", {}).get("cancelEnabled", false):
+		return # A required hand pick (discard) has nothing to cancel.
 	else:
 		_intent("cancel")
 
@@ -2575,6 +2719,19 @@ func _playable(card: Dictionary, owner: int, zone: String) -> bool:
 	if snapshot.get("prompt", {}).get("inputKind", "") != "InputPassPriority" or not snapshot.get("asks", []).is_empty(): return false
 	return int(card.get("weakSelection", 0)) > 0
 
+## A playable card your floating mana already pays for (teal instead of purple). Lands and other
+## free plays stay purple: tapping mana changes nothing for them. Graveyard/exile casts use other
+## costs (flashback, escape) than the printed one, so only hand and commander casts turn teal.
+func _ready_now(card: Dictionary, zone: String) -> bool:
+	if zone not in ["Hand", "Command"]: return false
+	var pool: Dictionary = snapshot.get("players", [{}])[0].get("mana", {})
+	if pool.values().all(func(amount): return int(amount) <= 0): return false
+	if str(card.get("typeLine", "")).contains("Land") and not str(card.get("typeLine", "")).contains("//"): return false
+	var cost := str(card.get("manaCost", ""))
+	var ManaPips = preload("res://scripts/ui/ManaPips.gd")
+	if ManaPips.parse(cost).is_empty(): return false
+	return ManaPips.pool_covers(cost, pool, int(card.get("commanderTax", 0)) if zone == "Command" else 0)
+
 ## A land you played that bounced straight back (Dimir Aqueduct with no other land) looks like a
 ## rejected play; Forge's log says it was accepted, so explain that the land drop is spent.
 func _announce_returned_lands() -> void:
@@ -2593,6 +2750,53 @@ func _announce_returned_lands() -> void:
 		var card_name := text.get_slice(" played ", 1).get_slice(" (", 0)
 		if me.get("zones", {}).get("Hand", []).any(func(card): return int(card.get("id", -1)) == id):
 			_show_toast("%s returned to your hand. Your land drop for this turn is used." % card_name, 5.0)
+
+## A short note pinned above the card Forge refused, saying why; it fades after a few seconds.
+var explain_note: PanelContainer
+var explain_label: Label
+var explain_card := -1
+var explain_until := 0
+
+func _explain_card(id: int, reason: String) -> void:
+	if explain_note == null:
+		explain_note = PanelContainer.new()
+		var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+		Terminal.panel(explain_note, 10)
+		var frame := explain_note.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		frame.border_color = Color("ff8a6b")
+		frame.shadow_color = Color(0, 0, 0, 0.5)
+		frame.shadow_size = 8
+		explain_note.add_theme_stylebox_override("panel", frame)
+		explain_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		explain_note.z_index = 85
+		explain_label = Label.new()
+		explain_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		explain_label.custom_minimum_size.x = 320
+		explain_label.add_theme_font_override("font", Terminal.font())
+		explain_label.add_theme_font_size_override("font_size", 14)
+		explain_label.add_theme_color_override("font_color", Color("ffd9cf"))
+		explain_note.add_child(explain_label)
+		add_child(explain_note)
+	explain_card = id
+	explain_label.text = "✕ " + reason
+	explain_until = Time.get_ticks_msec() + 6000
+	explain_note.reset_size()
+	explain_note.show()
+	explain_note.modulate.a = 1.0
+	_place_explain_note()
+
+func _place_explain_note() -> void:
+	if explain_note == null or not explain_note.visible: return
+	var view: Control = cards.get(explain_card)
+	if Time.get_ticks_msec() > explain_until or not is_instance_valid(view) or not view.is_visible_in_tree():
+		explain_note.hide()
+		return
+	var to_local := get_global_transform().affine_inverse()
+	var rect: Rect2 = to_local * view.get_global_rect()
+	var at := Vector2(rect.get_center().x - explain_note.size.x * 0.5, rect.position.y - explain_note.size.y - 10)
+	if at.y < 8: at.y = rect.end.y + 10
+	explain_note.position = Vector2(clampf(at.x, 8, size.x - explain_note.size.x - 8), clampf(at.y, 8, size.y - explain_note.size.y - 8)).round()
+	explain_note.modulate.a = clampf((explain_until - Time.get_ticks_msec()) / 600.0, 0.0, 1.0)
 
 func _reject_card_action(id: int) -> void:
 	var view: Control = cards.get(id, zone_views.get(id))
@@ -2720,9 +2924,330 @@ func _present_coin_toss() -> bool:
 	if current: _close_modal()
 	return false
 
+## A Forge card selection drawn only from your own hand (discard, put back) is made on the hand itself:
+## the table dims, the hand stays usable, a click toggles the card in Forge and this prompt confirms.
+func _hand_pick_active() -> bool:
+	if not live or snapshot.is_empty() or not snapshot.get("asks", []).is_empty() or snapshot.get("players", []).is_empty(): return false
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	if prompt.get("inputKind", "") != "InputSelectCardsFromList" or prompt.has("selectionShortcut"): return false
+	var offered: Array = prompt.get("cards", [])
+	if offered.is_empty(): return false
+	var hand_ids := {}
+	for card in snapshot.players[0].get("zones", {}).get("Hand", []): hand_ids[int(card.id)] = true
+	return offered.all(func(card): return hand_ids.has(int(card.id)))
+
+func _hand_pick_is_discard() -> bool:
+	return str(snapshot.get("prompt", {}).get("message", "")).to_lower().contains("discard")
+
+func _build_hand_pick_panel() -> void:
+	hand_pick_panel = PanelContainer.new()
+	hand_pick_panel.z_index = 30
+	hand_pick_panel.custom_minimum_size.x = 420
+	P.style_popup(hand_pick_panel)
+	hand_pick_panel.hide()
+	add_child(hand_pick_panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	hand_pick_panel.add_child(column)
+	hand_pick_title = _label("", 22)
+	column.add_child(hand_pick_title)
+	hand_pick_message = _label("", 14, Color("bfc4ca"))
+	hand_pick_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hand_pick_message.custom_minimum_size.x = 380
+	column.add_child(hand_pick_message)
+	hand_pick_count = _label("", 13, P.MUTED)
+	column.add_child(hand_pick_count)
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	column.add_child(buttons)
+	hand_pick_confirm = _button("Confirm", _commit_hand_pick, "Confirm the selected cards (Q)")
+	P.style_popup_button(hand_pick_confirm, true)
+	hand_pick_confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	buttons.add_child(hand_pick_confirm)
+	hand_pick_cancel = _button("Cancel", func(): _intent("cancel"))
+	P.style_popup_button(hand_pick_cancel)
+	buttons.add_child(hand_pick_cancel)
+	resized.connect(_place_hand_pick)
+	hand_pick_lines = Control.new()
+	hand_pick_lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hand_pick_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hand_pick_lines.z_index = 29 # Over the hand (20), under the pick box (30).
+	hand_pick_lines.hide()
+	add_child(hand_pick_lines)
+	hand_pick_lines.draw.connect(_draw_hand_pick_lines)
+
+## Shows or hides the hand-pick prompt; true while it owns the decision.
+func _present_hand_pick() -> bool:
+	if hand_pick_panel == null: return false
+	var active := _hand_pick_active()
+	hand_pick_panel.visible = active
+	hand_pick_shade.visible = active
+	hand_pick_lines.visible = active
+	if not active:
+		hand_pick_since.clear()
+		hand_pick_staged.clear()
+		hand_pick_queue.clear()
+		hand_pick_awaiting = -1
+		hand_pick_committing = false
+		return false
+	var prompt: Dictionary = snapshot.prompt
+	var discard := _hand_pick_is_discard()
+	_advance_hand_pick()
+	var chosen: int = hand_pick_staged.size()
+	var low := int(prompt.get("selMin", 0))
+	var high := int(prompt.get("selMax", 0))
+	var ready: bool = snapshot.get("connectionReady", false) and snapshot.get("pendingDraws", []).is_empty()
+	hand_pick_title.text = "DISCARD" if discard else "CHOOSE FROM YOUR HAND"
+	hand_pick_title.add_theme_color_override("font_color", Color("ff6b6b") if discard else P.TEXT)
+	# Forge names the source with its engine id ("Faithless Looting (304)"); players don't need the number.
+	var id_suffix := RegEx.create_from_string(" \\(\\d+\\)")
+	hand_pick_message.text = id_suffix.sub(str(prompt.get("message", "")), "", true).strip_edges()
+	hand_pick_count.text = ("%d of %d selected" % [chosen, high] if low == high else "%d selected (%d–%d)" % [chosen, low, high]) + "   ·   click cards in your hand"
+	hand_pick_confirm.text = "Discard" if discard else "Confirm"
+	if discard != hand_pick_red:
+		hand_pick_red = discard
+		_style_hand_pick_confirm(discard)
+	var picked_now := {}
+	for id in hand_pick_staged: picked_now[id] = hand_pick_since.get(id, Time.get_ticks_msec())
+	hand_pick_since = picked_now
+	hand_pick_confirm.disabled = not ready or hand_pick_committing or chosen < maxi(1, low) or chosen > high
+	hand_pick_cancel.visible = prompt.get("cancelEnabled", false)
+	hand_pick_cancel.disabled = not ready
+	_place_hand_pick.call_deferred()
+	return true
+
+## Where a library search came from: its card on the battlefield, else your zone icon holding it
+## (a cycled or sacrificed card in the graveyard), else the spell's entry on the stack.
+func _search_anchor() -> Control:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var id := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
+	if id < 0: return null
+	var view: Control = cards.get(id)
+	if is_instance_valid(view) and view.is_visible_in_tree() and str(view.data.get("zone", "")) == "Battlefield": return view
+	var zone: Control = interaction_panel.zone_view.call(id) if interaction_panel.zone_view.is_valid() else null
+	if is_instance_valid(zone) and zone.is_visible_in_tree(): return zone
+	for item in snapshot.get("stack", []):
+		if int(item.get("sourceId", -1)) == id:
+			var entry: Control = stack_box.entries.get(int(item.id))
+			if is_instance_valid(entry) and entry.is_visible_in_tree(): return entry
+	return null
+
+## Slides the search window sideways so the card it came from stays in view beside it.
+func _slide_search_clear() -> void:
+	var anchor := _search_anchor()
+	if anchor == null or not is_instance_valid(modal_panel): return
+	var to_local := get_global_transform().affine_inverse()
+	var spot: Rect2 = to_local * anchor.get_global_rect()
+	var width: float = modal_panel.size.x
+	var centered := (size.x - width) * 0.5
+	var shift := 0.0
+	if spot.get_center().x >= size.x * 0.5: shift = minf(0.0, spot.position.x - 48.0 - width - centered)
+	else: shift = maxf(0.0, spot.end.x + 48.0 - centered)
+	shift = clampf(shift, 8.0 - centered, size.x - 8.0 - width - centered)
+	if absf(modal_center.offset_left - shift) > 0.5:
+		modal_center.offset_left = shift
+		modal_center.offset_right = shift
+
+func _draw_search_link() -> void:
+	var anchor := _search_anchor()
+	if anchor == null or not is_instance_valid(modal_panel): return
+	var to_local := search_link.get_global_transform().affine_inverse()
+	var anchor_transform: Transform2D = to_local * anchor.get_global_transform()
+	var target: Vector2 = anchor_transform * (anchor.size * 0.5)
+	var box := Rect2(to_local * modal_panel.global_position, modal_panel.size)
+	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+	var accent := Color("bd9bf2")
+	if box.has_point(target): return # Still under the window (no room to slide): no stray frame.
+	if not box.has_point(target):
+		var start := Vector2(clampf(target.x, box.position.x, box.end.x), clampf(target.y, box.position.y, box.end.y))
+		search_link.draw_line(start, target, Color(accent, 0.3), 12.0, true)
+		search_link.draw_line(start, target, accent, 3.5, true)
+		search_link.draw_circle(start, 6.0, accent)
+	var frame := P.box(Color(accent, 0.12 * pulse), Color(accent, 0.45 + 0.55 * pulse), 9, 0)
+	frame.set_border_width_all(3)
+	search_link.draw_set_transform_matrix(anchor_transform)
+	search_link.draw_style_box(frame, Rect2(Vector2.ZERO, anchor.size).grow(5))
+	search_link.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## Marks or unmarks a legal target for the tethered effect; true when it was a legal target.
+func _stage_target(kind: String, id: int) -> bool:
+	if target_committing: return true
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var name := ""
+	if kind == "card":
+		if not prompt.get("selectable", []).any(func(value): return int(value) == id): return false
+		var card: Dictionary = cards[id].data if cards.has(id) else {}
+		name = str(card.get("name", "card"))
+	else:
+		var entity: Array = prompt.get("entities", []).filter(func(value): return value.get("kind", "") == "player" and int(value.get("id", -1)) == id)
+		if entity.is_empty(): return false
+		name = str(entity[0].get("name", "player"))
+	var existing := target_staged.filter(func(ref): return ref.kind == kind and int(ref.id) == id)
+	if not existing.is_empty(): target_staged.erase(existing[0])
+	elif int(prompt.get("selMax", 1)) == 1: target_staged = [{"kind": kind, "id": id, "name": name}]
+	elif target_staged.size() < int(prompt.get("selMax", 1)): target_staged.append({"kind": kind, "id": id, "name": name})
+	interaction_panel.set_target_staged(target_staged)
+	return true
+
+## Confirm: each pick in turn, each confirmed by Forge's chosen list, then OK if Forge still waits.
+func _commit_targets() -> void:
+	if target_committing: return
+	target_committing = true
+	target_queue = target_staged.duplicate(true)
+	target_awaiting = {}
+	_advance_targets()
+
+func _target_ref(ref: Dictionary) -> String:
+	if ref.kind == "card": return "card:" + str(int(ref.id))
+	return "player:" + str(int(snapshot.players[int(ref.id)].get("engineId", ref.id)))
+
+func _advance_targets() -> void:
+	if not target_committing or not snapshot.get("connectionReady", false): return
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	if prompt.get("inputKind", "") != "InputSelectTargets": return
+	var chosen: Array = prompt.get("chosen", [])
+	if not target_awaiting.is_empty():
+		if not chosen.has(_target_ref(target_awaiting)): return
+		target_awaiting = {}
+	while not target_queue.is_empty() and chosen.has(_target_ref(target_queue[0])): target_queue.pop_front()
+	if not target_queue.is_empty():
+		target_awaiting = target_queue.pop_front()
+		if target_awaiting.kind == "card": _intent("card", {"id": int(target_awaiting.id)})
+		else: _intent("player", {"id": int(target_awaiting.id)})
+	elif prompt.get("okEnabled", false):
+		_intent("ok")
+
+## A new targeting prompt starts with nothing staged; a finished one clears the commit.
+func _sync_targets() -> void:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var key := str(prompt.get("inputKind", "")) + "|" + str(prompt.get("message", "")) + "|" + str(prompt.get("sourceCard", {}).get("id", -1))
+	if key != target_prompt_key:
+		target_prompt_key = key
+		target_staged.clear()
+		target_queue.clear()
+		target_awaiting = {}
+		target_committing = false
+		interaction_panel.target_staged = []
+	_advance_targets()
+
+## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
+func _stage_hand_pick(data: Dictionary) -> bool:
+	if not _hand_pick_active() or data.get("zone", "") != "Hand" or int(data.get("owner", -1)) != 0: return false
+	if hand_pick_committing: return true
+	var id := int(data.id)
+	if not snapshot.prompt.get("cards", []).any(func(card): return int(card.id) == id): return true
+	var high := int(snapshot.prompt.get("selMax", 1))
+	if hand_pick_staged.has(id): hand_pick_staged.erase(id)
+	elif high == 1: hand_pick_staged = [id]
+	elif hand_pick_staged.size() < high: hand_pick_staged.append(id)
+	_apply_state(snapshot)
+	return true
+
+func _commit_hand_pick() -> void:
+	if hand_pick_committing or hand_pick_staged.is_empty(): return
+	hand_pick_committing = true
+	hand_pick_queue = hand_pick_staged.duplicate()
+	hand_pick_awaiting = -1
+	_advance_hand_pick()
+
+## One card per snapshot, each confirmed by Forge's chosen list; Forge ends the selection itself at
+## its maximum, otherwise OK finishes it once every pick has landed.
+func _advance_hand_pick() -> void:
+	if not hand_pick_committing or not snapshot.get("connectionReady", false): return
+	var chosen: Array = snapshot.prompt.get("chosen", [])
+	if hand_pick_awaiting >= 0:
+		if not chosen.has("card:" + str(hand_pick_awaiting)): return
+		hand_pick_awaiting = -1
+	while not hand_pick_queue.is_empty() and chosen.has("card:" + str(hand_pick_queue[0])): hand_pick_queue.pop_front()
+	if not hand_pick_queue.is_empty():
+		hand_pick_awaiting = int(hand_pick_queue.pop_front())
+		_intent("card", {"id": hand_pick_awaiting})
+	elif snapshot.prompt.get("okEnabled", false):
+		_intent("ok")
+
+## A discard confirms with a red button; other hand picks keep the purple primary style.
+func _style_hand_pick_confirm(red: bool) -> void:
+	P.style_popup_button(hand_pick_confirm, true)
+	if not red: return
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color("8a1c1c") if state == "normal" else (Color("b02626") if state in ["hover", "focus"] else (Color("6e1414") if state == "pressed" else Color("3a1515")))
+		box.border_color = Color("ff6b6b") if state != "disabled" else Color("5a2a2a")
+		box.set_border_width_all(2)
+		box.set_corner_radius_all(4)
+		box.set_content_margin_all(10)
+		hand_pick_confirm.add_theme_stylebox_override(state, box)
+	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		hand_pick_confirm.add_theme_color_override(key, Color.WHITE)
+	hand_pick_confirm.add_theme_color_override("font_disabled_color", Color("8a6a6a"))
+
+## Grow out from the bottom of the pick box to each picked card, bending like the wipe's branches,
+## with a spark running down each one; the card's own transform keeps the end on a tilted hand card.
+func _draw_hand_pick_lines() -> void:
+	if not hand_pick_panel.visible or hand_pick_since.is_empty(): return
+	var to_local := hand_pick_lines.get_global_transform().affine_inverse()
+	var box := Rect2(to_local * hand_pick_panel.global_position, hand_pick_panel.size)
+	var origin := Vector2(box.get_center().x, box.end.y)
+	var tint: Color = Card.PICK_DISCARD if hand_pick_red else Card.PLAYABLE_GLOW
+	var now := Time.get_ticks_msec()
+	for id in hand_pick_since:
+		var view: Control = cards.get(int(id))
+		if not is_instance_valid(view) or not view.is_visible_in_tree(): continue
+		var target: Vector2 = (to_local * view.get_global_transform()) * Vector2(view.size.x * 0.5, view.size.y * 0.2)
+		var bend := origin.lerp(target, 0.5) + Vector2((target.x - origin.x) * 0.15, -0.1 * origin.distance_to(target))
+		var grow := clampf((now - int(hand_pick_since[id])) / 350.0, 0.0, 1.0)
+		grow = 1.0 - pow(1.0 - grow, 3.0)
+		var points := PackedVector2Array()
+		for i in range(int(24 * grow) + 1):
+			var t := i / 24.0
+			points.append(origin.lerp(bend, t).lerp(bend.lerp(target, t), t))
+		if points.size() < 2: continue
+		hand_pick_lines.draw_polyline(points, Color(tint, 0.28), 14.0, true)
+		hand_pick_lines.draw_polyline(points, tint, 4.0, true)
+		if grow >= 1.0:
+			var spark_t := fmod(now / 1000.0 * 0.8 + float(int(id) % 37) / 37.0, 1.0)
+			hand_pick_lines.draw_circle(origin.lerp(bend, spark_t).lerp(bend.lerp(target, spark_t), spark_t), 5.0, Color(1, 0.85, 0.8, 0.95))
+			hand_pick_lines.draw_circle(target, 7.0, tint)
+	hand_pick_lines.draw_circle(origin, 6.0, tint)
+
+## Centered over the table, above the hand fan, so it never covers the cards being picked.
+func _place_hand_pick() -> void:
+	if hand_pick_panel == null or not hand_pick_panel.visible: return
+	hand_pick_panel.reset_size()
+	var table: Rect2 = board_scroller.get_global_rect() if is_instance_valid(board_scroller) and board_scroller.is_visible_in_tree() else get_global_rect()
+	var center: Vector2 = get_global_transform().affine_inverse() * Vector2(table.get_center().x, table.position.y + table.size.y * 0.4)
+	hand_pick_panel.position = (center - hand_pick_panel.size * 0.5).round()
+
+## The cards were revealed by someone else's effect: the resolving stack item isn't yours.
+func _others_reveal() -> bool:
+	if snapshot.get("stack", []).is_empty() or snapshot.get("players", []).is_empty(): return false
+	return int(snapshot.stack[0].get("controller", -1)) != int(snapshot.players[0].get("engineId", 0))
+
 func _present_card_selection() -> void:
 	if _present_coin_toss(): return
+	if _present_hand_pick():
+		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
+		return
+	# A one-card pick by a card on the table tethers to that card (InteractionPanel), no search window.
+	var tether_source: Control = cards.get(interaction_panel.pick_source(snapshot, cards))
+	if is_instance_valid(tether_source) and tether_source.is_visible_in_tree():
+		if is_instance_valid(modal_panel) and modal_panel is SelectionDialog: _close_modal()
+		return
 	var reveal_pending: bool = snapshot.asks.is_empty() and snapshot.prompt.get("inputKind", "") == "InputConfirm" and not snapshot.get("revealed", []).is_empty()
+	if reveal_pending and _others_reveal():
+		# Another player's effect revealed cards (their plainscycled Plains going to their hand): news,
+		# not a decision. A small notice, and Forge's OK is sent for you (its other button is End Turn).
+		var key := JSON.stringify([snapshot.prompt.get("message", ""), snapshot.revealed.map(func(card): return card.get("id", -1))])
+		if key != reveal_notice_key:
+			reveal_notice_key = key
+			if native_reveal: _close_modal()
+			var item: Dictionary = snapshot.stack[0] if not snapshot.stack.is_empty() else {}
+			incoming_effect.show_reveal(item.get("card", {}), str(item.get("controllerName", "Opponent")), snapshot.revealed)
+		# The notice shows at once; Forge's OK is sent once the connection can take it.
+		if key != reveal_ack_key and snapshot.get("connectionReady", false) and snapshot.prompt.get("okEnabled", false):
+			reveal_ack_key = key
+			_intent("ok")
+		return
 	if reveal_pending:
 		if not native_reveal or not is_instance_valid(modal_panel):
 			_prepare_modal()
@@ -3179,6 +3704,7 @@ func _refresh_zone_browser() -> void:
 		data.owner = zone_owner
 		data.zone = zone_name
 		data.playable = _playable(data, zone_owner, zone_name)
+		data.ready = data.playable and _ready_now(data, zone_name)
 		if zone_name == "Command" and data.get("commander", false):
 			view.tooltip_text = "Commander tax: +{%d} generic mana in addition to the printed cost when cast from the command zone. Previous command-zone casts: %d." % [int(data.get("commanderTax", 0)), int(data.get("commanderCasts", 0))]
 		view.update_card(data)
@@ -3307,6 +3833,13 @@ func _pass_turn() -> void:
 
 func _capture(path: String) -> void:
 	await get_tree().process_frame
+	if live:
+		# A live table (the sandbox's --shot) shows nothing until Forge's first snapshot arrives;
+		# then give the layout and cached artwork a moment to settle.
+		var deadline := Time.get_ticks_msec() + 60000
+		while (snapshot.is_empty() or sandbox_starting) and Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+		await get_tree().create_timer(2.5).timeout
 	await get_tree().create_timer(0.6).timeout
 	await RenderingServer.frame_post_draw
 	var error := get_viewport().get_texture().get_image().save_png(path)

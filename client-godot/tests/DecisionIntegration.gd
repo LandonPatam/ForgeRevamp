@@ -49,6 +49,8 @@ func resolve_to_choice() -> bool:
 	var started := Time.get_ticks_msec()
 	while Time.get_ticks_msec() < mini(deadline, started + 9000):
 		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and not ui.modal.visible and (ui.response_target.visible or ui.interaction_panel.callout.visible):
+			return true # Shown on the table (tether or response callout), not as a popup.
 		if not ui.snapshot.asks.is_empty() or ui.modal_panel is SelectionDialog:
 			var panel: Control = ui.modal_panel
 			var requests: int = ui.adapter.request_counter
@@ -74,9 +76,13 @@ func choose_named(fragment: String) -> bool:
 			return await choose_named(fragment)
 		for i in range(ask.options.size()):
 			if str(ask.options[i].label).to_lower().contains(fragment.to_lower()):
+				if answer_off_popup([i]): return await wait_ready()
 				ui.modal_panel._toggle(i)
 				ui.modal_panel._submit()
 				return await wait_ready()
+	elif ui.interaction_panel.callout.visible and ui.interaction_panel.callout.card_mode:
+		for card in ui.interaction_panel.callout.card_list:
+			if str(card.get("name", "")).contains(fragment) and press_card_tether(str(card.name)): return await wait_ready()
 	else:
 		for i in range(ui.modal_panel.options.size()):
 			if str(ui.modal_panel.options[i].get("name", "")).contains(fragment):

@@ -14,7 +14,7 @@ func step() -> bool:
 		var ask: Dictionary = state.asks[0]
 		print("SCENARIO choice: ", ask.kind, " ", ask.get("title", ""), " / ", ask.get("message", ""))
 		if ask.kind == "choose" and ask.get("min", 0) == 0:
-			ui.modal_panel._emit_answer([])
+			if not answer_off_popup([]): ui.modal_panel._emit_answer([])
 		else: submit_choice()
 		return true
 	if ui.modal_panel is SelectionDialog and ui.modal.visible:
@@ -26,24 +26,29 @@ func step() -> bool:
 	if ui.incoming_effect.panel.visible and not state.stack.is_empty() and int(ui.incoming_effect.active.get("stackId", -1)) == int(state.stack[0].id):
 		ui.incoming_effect.resolve_button.pressed.emit()
 		return true
+	if press_card_tether(): return true
 	if ui.interaction_panel.panel.visible and not ui.interaction_panel.confirm_button.disabled:
 		ui.interaction_panel.confirm_button.pressed.emit()
 		return true
 	if state.prompt.okEnabled:
 		ui._primary_action()
 		return true
-	return check(false, "No usable interaction control: " + JSON.stringify(state.prompt))
+	return check(false, "No usable interaction control (modal=%s %s carousel=%s staged=%s committing=%s tether=%s): " % [ui.modal.visible, (ui.modal_panel.get_script().resource_path.get_file() if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), ui.modal_panel.get("carousel_mode") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("staged") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("committing") if is_instance_valid(ui.modal_panel) else "-", ui.interaction_panel.callout.visible] + JSON.stringify(state.prompt).left(300))
 
 func prepared() -> bool:
 	while Time.get_ticks_msec() < deadline:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
-		if scenario == "blocking" and state.prompt.get("inputKind", "") == "InputBlock": return true
+		if scenario in ["blocking", "combat-reasons"] and state.prompt.get("inputKind", "") == "InputBlock": return true
+		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
+		# the scenario driver answers it.
+		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty() and not (ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd")): return true
 		# The fixture jumps to turn 5 straight after the starting roll; finish that animation as a player would.
 		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
-		if scenario != "blocking" and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
+			ui._present_card_selection() # A choice already waiting behind the coin (Manifold Insights) opens now.
+		if scenario not in ["blocking", "combat-reasons"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
 			else: return true
@@ -58,7 +63,7 @@ func settle() -> bool:
 		if not await wait_ready(): return false
 		if ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": return true
 		if not await step(): return false
-	return check(false, "Interaction did not settle: " + str(ui.snapshot.prompt))
+	return check(false, "Interaction did not settle: " + str(ui.snapshot.prompt) + " modal=" + str(ui.modal.visible) + " " + (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none") + " effect=" + str(ui.incoming_effect.showing()) + " responding=" + str(ui.incoming_effect.responding) + " interaction=" + str(ui.interaction_panel.panel.visible) + " autoPass=" + str(ui.snapshot.get("autoPassStackId", -1)) + " acked=" + str(ui.adapter.acknowledged_effects) + " stack=" + str(ui.snapshot.stack.map(func(item): return [item.id, item.get("sourceName", "")])))
 
 func tap(name: String, count: int = 1) -> bool:
 	var sources: Array = zone("Battlefield").filter(func(card): return card.name == name and not card.get("tapped", false))
@@ -77,6 +82,16 @@ func cast(name: String) -> bool:
 
 func select_named(name: String) -> bool:
 	if not ui.snapshot.asks.is_empty(): return await choose_named(name)
+	# A permanent's targets are a tether: click the card (staged), then the tether's Confirm.
+	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.target_tether:
+		var legal: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
+		var named: Array = ui.snapshot.prompt.get("cards", []).filter(func(card): return card.name == name and legal.has(int(card.id)))
+		if not check(named.size() == 1, "Expected one legal target named " + name + " on the tether"): return false
+		ui._click_card(named[0].id)
+		for index in range(5): await ui.get_tree().process_frame
+		if not check(not ui.interaction_panel.callout.yes_button.disabled, "The tether's Confirm enables once the target is staged"): return false
+		ui.interaction_panel.callout.yes_button.pressed.emit()
+		return await wait_ready()
 	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.panel.visible:
 		var legal_ids: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
 		var targets: Array = ui.snapshot.prompt.get("cards", []).filter(func(card): return card.name == name and legal_ids.has(int(card.id)))
@@ -356,8 +371,13 @@ func triland() -> bool:
 		for code in ["W", "B", "G"]:
 			if label.contains("{" + code + "}"): count += 1
 		if not check(count == 1 and not label.contains(" or "), "Each tri-land choice describes only its actual selected mana: " + label): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 3 and tether.mode_buttons.all(func(button): return button.colors.size() == 1) and not tether.yes_button.visible, "The mana choice is a tether of mana symbols on the land, picked with one click: no popup"): return false
+	if not check(tether.title.text.contains("SANDSTEPPE CITADEL"), "The tether names its card: " + tether.title.text): return false
 	await capture("mana-options")
-	if not await choose_named("Green"): return false
+	for i in range(tether.mode_buttons.size()):
+		if str(ask.options[i].label).begins_with("Green"): tether.mode_buttons[i].pressed.emit()
+	if not await wait_ready(): return false
 	return check(ui.snapshot.players[0].mana.get("G", 0) == 1 and ui.snapshot.players[0].mana.get("W", 0) == 0 and ui.snapshot.players[0].mana.get("B", 0) == 0, "Selecting green produces precisely green mana")
 
 func insights() -> bool:
@@ -368,6 +388,8 @@ func insights() -> bool:
 		if ui.modal.visible and ui.modal_panel is SelectionDialog:
 			if not check(ui.modal_panel.source_context.visible and ui.modal_panel.source_view.data.get("name", "") == "Manifold Insights" and not ui.modal_panel.source_rules.visible, "Native card choices show the resolving source without duplicating its printed rules"): return false
 			chosen = true
+			# The reveal is part of this choice: the revealed cards are shown face up here.
+			revealed = revealed or ui.modal_panel.options.any(func(option): return not option.get("hidden", false) and not str(option.get("name", "")).is_empty())
 			await capture("choice")
 			ui.modal_panel.option_buttons[0].pressed.emit()
 			continue
@@ -383,6 +405,10 @@ func insights() -> bool:
 				await capture("choice")
 		if chosen and ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty():
 			return check(revealed and int(ui.snapshot.players[1].handCount) == 2, "Each opponent's chosen card goes into the caster's hand: " + str(ui.snapshot.players[1].handCount))
+		# Forge is already waiting on the choice but the window opens a frame later (slow under a long suite).
+		if str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect") and not ui.modal.visible:
+			await ui.get_tree().create_timer(0.2).timeout
+			continue
 		if not await step(): return false
 	return check(false, "Manifold Insights did not complete; reveal=%s choice=%s" % [revealed, chosen])
 
@@ -423,9 +449,10 @@ func await_spell(name: String) -> bool:
 	for index in range(60):
 		if not await wait_ready(): return false
 		if not ui.snapshot.stack.is_empty() and ui.snapshot.stack[0].get("sourceName", "") == name and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority":
-			if not check(ui.incoming_effect.panel.visible and ui.incoming_effect.active.get("stackId", -1) == ui.snapshot.stack[0].id, "The response popup must identify " + name): return false
+			# A wipe shows as its card mid-table, anything else as the response popup; both name the spell.
+			if not check(ui.incoming_effect.showing() and ui.incoming_effect.active.get("stackId", -1) == ui.snapshot.stack[0].id, "The response popup must identify " + name): return false
 			await capture("incoming")
-			ui.incoming_effect.browse_button.pressed.emit()
+			ui.incoming_effect.respond() # View battlefield / Respond with action
 			return true
 		if not await step(): return false
 	return check(false, "The opponent did not cast " + name)
@@ -556,7 +583,9 @@ func greater_good() -> bool:
 					ui._click_card(id)
 					if not await wait_ready(): return false
 				discarded = 3
-				if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
+				# Hand picks stay local until the red Discard button sends them.
+				if ui.hand_pick_panel.visible and not ui.hand_pick_confirm.disabled: ui.hand_pick_confirm.pressed.emit()
+				elif ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") != "InputPassPriority": ui._primary_action()
 				continue
 		if sacrificed and state.stack.is_empty() and state.asks.is_empty() and kind == "InputPassPriority" and not find_card("Grizzly Bears", "Graveyard").is_empty():
 			await capture("result")
@@ -589,9 +618,10 @@ func mind_stone() -> bool:
 	var index := -1
 	for i in range(options.size()):
 		if str(options[i].get("label", "")).contains("Add {C}"): index = i
-	if not check(index >= 0 and index < ui.modal_panel.option_buttons.size(), "The popup must offer the {C} ability: " + str(options)): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(index >= 0 and tether.visible and not ui.modal.visible and index < tether.mode_buttons.size(), "The ability choice must be a tether on Mind Stone offering {C}: " + str(options)): return false
 	await capture("choose-ability")
-	ui.modal_panel.option_buttons[index].pressed.emit() # Exactly what a player's click does; no Confirm.
+	tether.mode_buttons[index].pressed.emit() # Exactly what a player's click does; no Confirm.
 	if not await wait_ready(): return false
 	await capture("result")
 	var after := find_card("Mind Stone", "Battlefield")
@@ -661,18 +691,10 @@ func enclave() -> bool:
 	var land := find_card("Bonders' Enclave", "Battlefield")
 	ui._click_card(land.id)
 	if not await wait_ready(): return false
-	if not check(ui.modal.visible and ui.snapshot.asks.any(func(ask): return ask.get("title", "") == "Choose ability"), "Clicking Bonders' Enclave opens Forge's ability choice"): return false
-	ui.modal_panel.board_requested.emit()
-	for index in range(60): await ui.get_tree().process_frame
-	describe_ui("viewing board")
-	var button: Rect2 = ui.decision_board_button.get_global_rect()
-	var table: Rect2 = ui.board_scroller.get_global_rect()
-	if not check(ui.decision_board_button.is_visible_in_tree() and not ui.modal_center.visible, "Viewing the board keeps a Return to decision control"): return false
-	if not check(button.get_center().distance_to(table.get_center()) < 4.0 and button.size.x >= 300, "Return to decision sits large in the middle of the table: " + str(button) + " / " + str(table)): return false
-	if not check(ui.decision_board_button.modulate.a < 0.9, "Return to decision is see-through over the table"): return false
-	await capture("return")
-	ui.decision_board_button.pressed.emit()
-	if not check(ui.modal_center.visible and not ui.decision_board_button.visible and ui.modal_panel.get_script().resource_path.ends_with("PromptPanel.gd"), "Return to decision restores the same ability choice"): return false
+	# The ability choice is a tether on the land, not a popup (Return to decision is covered by the
+	# DecisionReview UI check for popups).
+	if not check(not ui.modal.visible and ui.interaction_panel.callout.visible and ui.snapshot.asks.any(func(ask): return ask.get("title", "") == "Choose ability"), "Clicking Bonders' Enclave opens its ability choice as a tether"): return false
+	await capture("tether")
 	var hand := int(ui.snapshot.players[0].handCount)
 	if not await choose_named("Draw"): return false
 	for index in range(40):
@@ -703,8 +725,22 @@ func playable() -> bool:
 	var stone: Control = ui.cards[find_card("Mind Stone").id]
 	if not check(stone.data.get("playable", false), "The hand card view carries the playable glow"): return false
 	await capture("hand")
+	if not check(not stone.data.get("ready", false), "Nothing is teal before any mana is tapped"): return false
+	# Teal once the tapped mana pays for it: one Swamp pays Gravecrawler ({B}), not Mind Stone ({2}).
+	if not await tap("Swamp", 1): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var ready := func(name: String) -> bool:
+		for zone_name in ["Hand", "Command"]:
+			for card in ui.snapshot.players[0].zones[zone_name]:
+				if card.name == name: return ui._playable(card, 0, zone_name) and ui._ready_now(card, zone_name)
+		return false
+	if not check(ready.call("Gravecrawler") and ui.hud_values[0].zones.Command.castable_now and not ready.call("Mind Stone") and not ready.call("Ornithopter"), "One floating B: the commander is ready, Mind Stone isn't, free spells stay purple"): return false
+	if not await tap("Swamp", 1): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(ready.call("Mind Stone"), "Two floating mana: Mind Stone turns teal"): return false
+	if not check(stone.data.get("ready", false), "The hand card view carries the teal glow"): return false
+	await capture("ready")
 	# Spend the mana: nothing that costs mana stays highlighted.
-	if not await tap("Swamp", 2): return false
 	if not await cast("Mind Stone"): return false
 	if not await settle(): return false
 	for index in range(20): await ui.get_tree().process_frame
@@ -718,8 +754,24 @@ func wrath_hits() -> bool:
 	var events := wipe_events()
 	print("SCENARIO wipe events: ", events.map(func(event): return event.get("source", {}).get("name", "?")))
 	if not check(events.size() == 1 and events[0].get("source", {}).get("name", "") == "Wrath of God", "A wipe that reaches your creature is announced with its real source card"): return false
+	# With no possible response it still waits on you: the spell sits in the middle of the table with a
+	# branch to each creature it will destroy, before anything dies.
+	for index in range(20): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(not ui.snapshot.stack.is_empty() and int(ui.snapshot.get("autoPassStackId", -1)) != int(ui.snapshot.stack[0].id), "The wipe must wait for this seat even without a response"): return false
+	var effect: Control = ui.incoming_effect
+	if not check(effect.wipe_card.visible and not effect.panel.visible, "The wipe shows as its card on the table, not the decision popup"): return false
+	var reached: Array = effect._wipe_views()
+	if not check(reached.size() >= 2, "Branches reach both Grizzly Bears: " + str(events[0].get("affected", []))): return false
+	if not check(zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"), "Nothing is destroyed before you see it"): return false
 	await capture("wipe")
-	return true
+	effect.wipe_resolve.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if not zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(not zone("Battlefield").any(func(card): return card.name == "Grizzly Bears"), "Resolve lets Forge resolve the wipe"): return false
+	return check(not effect.wipe_card.visible, "The wipe overlay closes once it resolves")
 
 func wrath_misses() -> bool:
 	return check(wipe_events().is_empty(), "A wipe that cannot reach any of your permanents is not announced to you: " + str(wipe_events()))
@@ -746,7 +798,688 @@ func wilds() -> bool:
 	if not check(not panel.callout.visible or ui.snapshot.prompt.get("inputKind", "") != "InputConfirm", "Y answers the confirmation"): return false
 	for index in range(20): await ui.get_tree().process_frame
 	print("SCENARIO search: input=", ui.snapshot.prompt.get("inputKind", ""), " asks=", ui.snapshot.asks.map(func(ask): return [ask.kind, ask.get("title", "")]), " modal=", (ui.modal_panel.get_script().resource_path if is_instance_valid(ui.modal_panel) else "none"), " banner=", panel.panel.visible, " callout=", panel.callout.visible)
+	if not await resolve_to_choice(): return false
+	var search: Control = ui.modal_panel
+	if not check(search is SelectionDialog and search.carousel_mode and search.carousel.visible, "A library search must open the card carousel"): return false
+	var island := -1
+	for r in range(search.groups.size()):
+		if search.options[search.groups[r][0]].get("name", "") == "Island": island = r
+	if not check(island >= 0, "The search must offer Island"): return false
+	search.carousel.focus_requested.emit(island) # As the wheel or an arrow key would.
+	await ui.get_tree().create_timer(0.8).timeout
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = search.carousel.size * 0.5 + Vector2(0, 10)
+	click.pressed = true
+	search.carousel._gui_input(click)
+	click.pressed = false
+	search.carousel._gui_input(click)
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Clicking the middle card must mark Island: " + str(search.staged)): return false
+	if not check(ui.snapshot.prompt.get("chosen", []).is_empty() and ui.modal.visible and not search.confirm_button.disabled, "Marking a card must send nothing to Forge until OK"): return false
 	await capture("search")
-	if not await choose_named("Island"): return false
+	search.confirm_button.pressed.emit()
 	if not await settle(): return false
 	return check(not find_card("Evolving Wilds", "Graveyard").is_empty() and zone("Battlefield").filter(func(card): return card.name == "Island").size() == 2, "Evolving Wilds was sacrificed and fetched an Island")
+
+## Discarding happens on your own hand: no card gallery, the table dims, a click marks the card red
+## through Forge's own selection, and the prompt confirms exactly those cards.
+func discard() -> bool:
+	if not await tap("Mountain") or not await cast("Faithless Looting"): return false
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList": break
+		if not await step(): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList", "Faithless Looting must ask for a discard: " + str(ui.snapshot.prompt)): return false
+	if not check(not (ui.modal.visible and ui.modal_panel is SelectionDialog), "Discarding must not open the card gallery"): return false
+	if not check(ui.hand_pick_panel.visible and ui.hand_pick_shade.visible and not ui.interaction_panel.panel.visible, "The discard prompt must show over a dimmed table"): return false
+	if not check(ui.hand_pick_confirm.disabled, "Nothing may be confirmed before a card is picked"): return false
+	var picks: Array = zone("Hand").slice(0, 2)
+	ui._click_card(picks[0].id)
+	if not await wait_ready(): return false
+	if not check(int(ui.cards[picks[0].id].data.get("pickMark", 0)) == 2, "A clicked hand card must be marked for discard: " + str(ui.snapshot.prompt.get("chosen", []))): return false
+	ui._click_card(picks[1].id)
+	if not await wait_ready(): return false
+	# Both picks stay pending until the red Discard button: a branch runs to each picked card.
+	if not check(ui.hand_pick_panel.visible and zone("Hand").any(func(card): return card.id == picks[1].id), "Picking never discards by itself; the red button does"): return false
+	if not check(ui.hand_pick_lines.visible and ui.hand_pick_since.has(int(picks[0].id)) and ui.hand_pick_since.has(int(picks[1].id)), "A branch runs to each picked card: " + str(ui.hand_pick_since.keys())): return false
+	if not check(ui.hand_pick_red and not ui.hand_pick_confirm.disabled, "Discard is the red confirm button, enabled once two cards are picked"): return false
+	await ui.get_tree().create_timer(0.6).timeout
+	await capture("picked")
+	ui.hand_pick_confirm.pressed.emit()
+	if not await settle(): return false
+	var graveyard: Array = zone("Graveyard").map(func(card): return card.id)
+	if not check(graveyard.has(picks[0].id) and graveyard.has(picks[1].id), "Forge must discard the two clicked cards: " + str(zone("Graveyard").map(func(card): return card.name))): return false
+	return check(not ui.hand_pick_panel.visible and not ui.hand_pick_shade.visible, "The table must return to normal after discarding")
+
+## A two-card library search: marks stay local, OK sends each exact instance to Forge in turn.
+func cultivate() -> bool:
+	if not await tap("Forest", 3) or not await cast("Cultivate"): return false
+	if not await resolve_to_choice(): return false
+	var search: Control = ui.modal_panel
+	if not check(search is SelectionDialog and search.carousel_mode, "Cultivate's search must open the carousel"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	if not check(ui.search_link.visible and ui._search_anchor() != null, "The search is linked to Cultivate on the stack"): return false
+	for name in ["Island", "Swamp"]:
+		for r in range(search.groups.size()):
+			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
+	if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
+	if not check(search.carousel.mark_labels.has("✓ 1 OF 2") and search.carousel.mark_labels.has("✓ 2 OF 2"), "Marks count your picks against the two allowed, not the copies: " + str(search.carousel.mark_labels)): return false
+	# Right-clicking the middle card (Swamp, focused by the last mark) removes its mark; left-click adds it back.
+	await ui.get_tree().create_timer(0.8).timeout
+	var click := InputEventMouseButton.new()
+	click.position = search.carousel.size * 0.5 + Vector2(0, 10)
+	click.button_index = MOUSE_BUTTON_RIGHT
+	click.pressed = true
+	search.carousel._gui_input(click)
+	if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Right-click must remove the Swamp mark: " + str(search.staged)): return false
+	click.button_index = MOUSE_BUTTON_LEFT
+	search.carousel._gui_input(click)
+	click.pressed = false
+	search.carousel._gui_input(click)
+	if not check(search.staged.size() == 2, "Left-click must mark the Swamp again"): return false
+	await capture("marked")
+	search.confirm_button.pressed.emit()
+	if not await settle(): return false
+	var found: Array = zone("Battlefield").map(func(card): return card.name) + zone("Hand").map(func(card): return card.name)
+	return check(found.has("Island") and found.has("Swamp") and ui.snapshot.players[0].libraryCount == 8, "Forge must fetch exactly the marked Island and Swamp: " + str(found))
+
+## Four of your own abilities trigger at once: the stack builder orders them, nothing is sent until
+## Confirm, and Forge stacks them so the top row resolves first.
+func triggers() -> bool:
+	if not await tap("Forest", 2) or not await cast("Elvish Visionary"): return false
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order": break
+		if not await step(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order", "Simultaneous triggers must ask for an order: " + str(ui.snapshot.asks)): return false
+	var panel: Control = ui.modal_panel
+	if not check(panel.get("order_stack") != null, "The order must open as the stack builder"): return false
+	print("SCENARIO order options: ", ui.snapshot.asks[0].options.map(func(option): return option.label))
+	await capture("stack")
+	var wanted: Array[int] = panel.order_stack.order.duplicate()
+	wanted.reverse()
+	panel.order_stack.set_order(wanted)
+	if not await wait_ready(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order", "Reordering must not answer Forge"): return false
+	var answers: Array = []
+	panel.answered.connect(func(_id, value): answers.append(value))
+	panel.confirm_button.pressed.emit()
+	if not check(answers == [wanted], "Confirm must send the whole pile, top first: %s vs %s" % [answers, wanted]): return false
+	if not await wait_ready(): return false
+	return check(not ui.snapshot.asks.any(func(ask): return ask.kind == "order"), "Forge must accept the order and close the question")
+
+## "Choose one or more" modes hang off the card as one callout; picks stay local until Confirm,
+## then the bridge feeds every pick to Forge's one-at-a-time mode prompts.
+func concord() -> bool:
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false): break
+		if not await step(): return false
+	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false), "Concord must ask for all its modes at once: " + str(ui.snapshot.asks)): return false
+	var callout: Control = ui.interaction_panel.callout
+	if not check(callout.visible and not ui.modal.visible, "The modes must attach to the card, not open a popup"): return false
+	if not check(callout.mode_buttons.size() == 3 and callout.yes_button.disabled, "Three modes, nothing confirmable before a pick"): return false
+	var hand_before: int = zone("Hand").size()
+	callout.mode_buttons[1].pressed.emit()
+	callout.mode_buttons[2].pressed.emit()
+	await capture("modes")
+	if not await wait_ready(): return false
+	if not check(ui.snapshot.asks.size() == 1 and ui.snapshot.asks[0].get("modeChoice", false), "Picking modes must not answer Forge"): return false
+	callout.yes_button.pressed.emit()
+	for index in range(40):
+		if not await wait_ready(): return false
+		if zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")): break
+		if not await step(): return false
+	if not check(zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")), "Both picked modes must resolve: a Spirit token"): return false
+	return check(zone("Hand").size() > hand_before, "… and a drawn card")
+
+## Only threats with an answer in hand: the wipe waits, View battlefield lets you cast Heroic
+## Intervention on top of it, and your creatures survive while everyone else's die.
+func wrath_response() -> bool:
+	ui.ui_layout.stack_mode = 2.0 # Only threats, for this run only (not saved).
+	ui.adapter.stack_mode = 2
+	ui.adapter.auto_resolve_all = true
+	var effect: Control = ui.incoming_effect
+	for index in range(30): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(not ui.snapshot.stack.is_empty() and effect.wipe_card.visible, "Only threats still stops for a wipe you can answer"): return false
+	await capture("wipe")
+	effect.respond() # View battlefield
+	if not await tap("Forest", 2) or not await cast("Heroic Intervention"): return false
+	for index in range(20):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.size() >= 2: break
+		await ui.get_tree().create_timer(0.2).timeout
+	print("SCENARIO stack after casting: ", ui.snapshot.stack.map(func(item): return item.get("sourceName", "?")))
+	if not check(ui.snapshot.stack.size() >= 2, "Heroic Intervention goes on the stack above the wipe"): return false
+	await capture("responded")
+	# Pass priority until Intervention resolves; then the wipe is back on top.
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.size() <= 1: break
+		if not await step(): return false
+	await ui.get_tree().create_timer(0.8).timeout
+	print("SCENARIO wipe back on top: stack=", ui.snapshot.stack.map(func(item): return item.get("sourceName", "?")), " overlay=", effect.wipe_card.visible, " autoPass=", ui.snapshot.get("autoPassStackId", -1), " input=", ui.snapshot.prompt.get("inputKind", ""), " responding=", effect.responding)
+	await capture("wipe-again")
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.is_empty(): break
+		if effect.wipe_card.visible: effect.wipe_resolve.pressed.emit()
+		elif not await step(): return false
+		await ui.get_tree().create_timer(0.3).timeout
+	var mine: Array = zone("Battlefield").filter(func(card): return card.name in ["Grizzly Bears", "Llanowar Elves"])
+	var theirs: Array = ui.snapshot.players.slice(1).map(func(player): return player.zones.Battlefield.filter(func(card): return card.name in ["Grizzly Bears", "Goblin Guide"]).size())
+	print("SCENARIO survivors: mine=", mine.map(func(card): return card.name), " theirs=", theirs)
+	return check(mine.size() == 2 and theirs == [0, 0], "Your creatures survive (indestructible), everyone else's die")
+
+## Counterspell over a wipe: the target choice hangs off Counterspell and names the spell it answers.
+func wrath_counter() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(30): await ui.get_tree().process_frame
+	await ui.get_tree().create_timer(0.6).timeout
+	if not check(effect.wipe_card.visible, "The wipe waits on you"): return false
+	effect.respond()
+	if not await tap("Island", 2) or not await cast("Counterspell"): return false
+	for index in range(10):
+		if not await wait_ready(): return false
+	await ui.get_tree().create_timer(0.5).timeout
+	var answer: Control = ui.response_target
+	if not check(answer.visible and not ui.modal.visible, "Counterspell's target hangs off Counterspell, not a popup: " + JSON.stringify(ui.snapshot.asks).left(400)): return false
+	if not check(answer.spell_card.data.get("name", "") == "Counterspell" and answer.target_view.data.get("name", "") == "Wrath of God", "Card A (Counterspell) answers card B (Wrath of God)"): return false
+	if not check(answer.confirm.text.contains("COUNTERSPELL") and answer.confirm.text.contains("WRATH OF GOD"), "The confirm names both cards: " + answer.confirm.text): return false
+	if not check(answer.stack_rect.call(int(ui.snapshot.asks[0].options[0].stackId)).has_area(), "The branch reaches the Wrath on the stack"): return false
+	await ui.get_tree().create_timer(0.6).timeout
+	await capture("target")
+	answer.confirm.pressed.emit()
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.stack.is_empty() and ui.snapshot.asks.is_empty(): break
+		if not ui.snapshot.asks.is_empty(): return check(false, "Unexpected decision: " + JSON.stringify(ui.snapshot.asks).left(300))
+		if not await step(): return false
+	if not check(not answer.visible, "The callout closes once answered"): return false
+	var creatures: Array = []
+	for player in ui.snapshot.players: creatures.append_array(player.zones.Battlefield.filter(func(card): return card.name in ["Grizzly Bears", "Llanowar Elves", "Goblin Guide"]))
+	return check(creatures.size() == 4, "Countered: every creature survives: " + str(creatures.map(func(card): return card.name)))
+
+## Only threats: an opponent's ability aimed at your creature (Aether Spellbomb's bounce) waits for you
+## even with no response, so you see it before your creature leaves, not after.
+func spellbomb() -> bool:
+	ui.ui_layout.stack_mode = 2.0 # Only threats, for this run only.
+	ui.adapter.stack_mode = 2
+	ui.adapter.auto_resolve_all = true
+	var effect: Control = ui.incoming_effect
+	var warned := false
+	for index in range(200):
+		if not await wait_ready(): return false
+		var top: Dictionary = ui.snapshot.stack[0] if not ui.snapshot.stack.is_empty() else {}
+		if str(top.get("sourceName", "")) == "Aether Spellbomb":
+			for wait in range(20): await ui.get_tree().process_frame
+			print("SCENARIO spellbomb waiting: autoPass=", ui.snapshot.get("autoPassStackId", -1), " popup=", effect.showing(), " angel=", find_card("Serra Angel", "Battlefield").is_empty() == false)
+			if effect.showing() and int(effect.active.get("stackId", -1)) == int(top.id) and not find_card("Serra Angel", "Battlefield").is_empty():
+				var angel := find_card("Serra Angel", "Battlefield")
+				if not check(effect.wipe_card.visible and not effect.panel.visible and effect.wipe_heading.text == "TARGETED EFFECT", "The targeted effect shows as its card on the table, like a wipe"): return false
+				if not check(effect._wipe_views().has(ui.cards.get(int(angel.id))), "A branch runs from Aether Spellbomb to your Serra Angel"): return false
+				warned = true
+				await ui.get_tree().create_timer(0.6).timeout
+				await capture("warned")
+				effect.dismiss() # I accept
+		if not find_card("Serra Angel", "Hand").is_empty() or (find_card("Serra Angel", "Battlefield").is_empty() and index > 5): break
+		await ui.get_tree().create_timer(0.1).timeout
+	if not check(not find_card("Serra Angel", "Hand").is_empty(), "The fixture needs the AI to bounce Serra Angel"): return false
+	return check(warned, "The bounce aimed at your creature must be shown before it resolves, while it waits for you")
+
+## Your commander dies: Forge's "move it to the command zone?" is a tether from the commander, not a banner.
+func commander_zone() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(40):
+		if not await wait_ready(): return false
+		if effect.showing(): effect.dismiss() # I accept the Bolt
+		var kind: String = ui.snapshot.prompt.get("inputKind", "")
+		if not ui.snapshot.asks.is_empty() or kind == "InputConfirm": break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and ui.snapshot.prompt.get("sourceCard", {}).get("name", "") == "Gravecrawler", "Forge asks about moving the commander: " + JSON.stringify(ui.snapshot.prompt).left(300)): return false
+	for index in range(20): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(panel.callout.visible and not panel.panel.visible, "The commander question is a tether, not the top banner"): return false
+	if not check(panel.callout_card == ui.hud_values[0].zones.Graveyard, "It hangs off your graveyard, where the commander is now"): return false
+	if not check(panel.callout.face.visible and panel.callout.face.data.get("name", "") == "Gravecrawler", "The tether shows the commander's card"): return false
+	if not check(panel.callout.yes_button.text.contains("Command zone"), "Yes reads as moving it to the command zone: " + panel.callout.yes_button.text): return false
+	await capture("ask")
+	panel.callout.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone")
+
+## Five floating mana, then a six-mana spell with improvise: what the screen says you still owe must
+## match Forge (one more), not the printed six.
+func statuary() -> bool:
+	if not await tap("Forest", 5): return false
+	print("SCENARIO pool before cast: ", ui.snapshot.players[0].mana)
+	if not await cast("Craw Wurm"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	print("SCENARIO paying: ", panel.message.text.replace("
+", " | "), " selectable=", ui.snapshot.prompt.get("selectable", []))
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsForConvokeOrImprovise", "Craw Wurm offers improvise: " + str(ui.snapshot.prompt.get("inputKind", ""))): return false
+	if not check(panel.message.text.contains("{1}") and not panel.message.text.contains("{4}{G}{G}"), "With five floating green, the rail must say one more mana is owed, not the printed cost: " + panel.message.text): return false
+	var artifacts: Array = zone("Battlefield").filter(func(card): return card.name in ["Ornithopter", "Mind Stone"]).map(func(card): return int(card.id))
+	var offered: Array = ui.snapshot.prompt.get("selectable", []).map(func(id): return int(id))
+	if not check(artifacts.all(func(id): return offered.has(id)), "The artifacts you can tap for improvise are offered (outlined): " + str(offered)): return false
+	await capture("paying")
+	ui._click_card(artifacts[0])
+	if not await wait_ready(): return false
+	for index in range(30):
+		if not await wait_ready(): return false
+		if zone("Battlefield").any(func(card): return card.name == "Craw Wurm"): break
+		if ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.asks.is_empty() and str(ui.snapshot.prompt.get("inputKind", "")) != "InputPassPriority": ui._intent("ok")
+		elif not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(zone("Battlefield").any(func(card): return card.name == "Craw Wurm"), "Five floating green plus one improvised artifact cast Craw Wurm")
+
+## Card-list tethers: Izzet Boilerworks' "return a land" pick and Explorer's Scope's look both hang
+## off their source card instead of the search window / popup.
+func scope() -> bool:
+	var tether: Control = ui.interaction_panel.callout
+	var works := find_card("Izzet Boilerworks")
+	ui._click_card(works.id)
+	for index in range(30):
+		if not await wait_ready(): return false
+		if tether.visible and tether.card_mode: break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(tether.visible and tether.card_mode and tether.card_pick and not ui.modal.visible, "Boilerworks' land choice is a tether, not the search window"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(find_card("Izzet Boilerworks", "Battlefield").get("id", -1))), "It hangs off Izzet Boilerworks"): return false
+	var names: Array = tether.card_list.map(func(card): return card.name)
+	if not check(names.size() == 3 and names.has("Island"), "All three lands are offered: " + str(names)): return false
+	tether._focus_card(names.find("Island"))
+	if not check(tether.yes_button.text.contains("Return") and tether.yes_button.text.contains("Island"), "Confirm names the choice: " + tether.yes_button.text): return false
+	await ui.get_tree().create_timer(0.4).timeout
+	await capture("boilerworks")
+	tether.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if zone("Hand").any(func(card): return card.name == "Island"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(zone("Hand").any(func(card): return card.name == "Island"), "The chosen Island returns to your hand"): return false
+	# Explorer's Scope: attack, then the look at your top card hangs off the Scope.
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	ui._click_card(bears.id)
+	ui._choose_player(1)
+	if not await wait_ready(): return false
+	ui._intent("ok")
+	for index in range(40):
+		if not await wait_ready(): return false
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	var scope_card := find_card("Explorer's Scope", "Battlefield")
+	if not check(tether.visible and tether.card_mode and not tether.card_pick and not ui.modal.visible, "The look is a tether, not a popup"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(scope_card.id)) and tether.face.data.get("name", "") == "Forest", "It hangs off Explorer's Scope and shows the Forest"): return false
+	await capture("scope")
+	tether.yes_button.pressed.emit()
+	if not await wait_ready(): return false
+	for index in range(10): await ui.get_tree().process_frame
+	return check(ui.snapshot.asks.is_empty() or ui.snapshot.asks[0].kind != "message", "OK acknowledges the look")
+
+## Sword of the Animist's optional search: the tether's Yes must be usable (it was stuck disabled
+## while the rail's Yes worked).
+func animist() -> bool:
+	# A mana-color tether first (its rows answer on click, so it hides Yes) — the real-game sequence.
+	var citadel := find_card("Sandsteppe Citadel", "Battlefield")
+	ui._click_card(citadel.id)
+	for index in range(20):
+		if not await wait_ready(): return false
+		if ui.interaction_panel.callout.visible and not ui.interaction_panel.callout.mode_buttons.is_empty(): break
+		await ui.get_tree().create_timer(0.1).timeout
+	ui.interaction_panel.callout.mode_buttons[0].pressed.emit()
+	if not await wait_ready(): return false
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	ui._click_card(bears.id)
+	ui._choose_player(1)
+	if not await wait_ready(): return false
+	ui._intent("ok")
+	var tether: Control = ui.interaction_panel.callout
+	for index in range(40):
+		if not await wait_ready(): return false
+		if tether.visible or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" or not ui.snapshot.asks.is_empty(): break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	print("SCENARIO animist prompt: ", JSON.stringify(ui.snapshot.prompt).left(500))
+	print("SCENARIO animist asks: ", JSON.stringify(ui.snapshot.asks).left(500))
+	print("SCENARIO animist ui: tether=", tether.visible, " yes=", tether.yes_button.text, " disabled=", tether.yes_button.disabled, " no_disabled=", tether.no_button.disabled, " rail=", ui.interaction_panel.panel.visible, " connectionReady=", ui.snapshot.get("connectionReady", false), " pendingDraws=", ui.snapshot.get("pendingDraws", []))
+	await capture("ask")
+	if not check(tether.visible and tether.yes_button.visible and not tether.yes_button.disabled, "The tether's Yes must be visible and clickable"): return false
+	tether.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"), "Yes starts the land search")
+
+## Your commander is bounced: Forge's replacement question ("put it in the command zone instead?")
+## is a tether from the commander, not the top banner.
+func commander_bounce() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(40):
+		if not await wait_ready(): return false
+		if effect.showing(): effect.dismiss() # I accept the Unsummon
+		if not ui.snapshot.asks.is_empty() or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm": break
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	var commander := find_card("Gravecrawler", "Battlefield")
+	if not check(not commander.is_empty() and panel.callout.visible and not panel.panel.visible, "The commander replacement is a tether, not the top banner"): return false
+	if not check(panel.callout_card == ui.cards.get(int(commander.id)), "It hangs off the commander itself"): return false
+	if not check(panel.callout.yes_button.text.contains("Command zone") and panel.callout.line.text.contains("gravecrawler"), "It asks plainly about moving the commander: " + panel.callout.line.text): return false
+	await capture("ask")
+	panel.callout.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone instead of your hand")
+
+## Timing probe (not a pass/fail check): how long the engine takes between your decisions, from
+## your Main 1 to Main 2 and through the next (bot) turn. It answers on the first frame a new
+## decision appears (no settle waits), so every gap is engine, bridge and transport time.
+func phase_timing() -> bool:
+	var log := []
+	var started := Time.get_ticks_msec()
+	var last := started
+	var start_turn := int(ui.snapshot.game.turn)
+	var my_turn_done := -1
+	var step_seen := ""
+	var steps := []
+	var acted_on := ""
+	while Time.get_ticks_msec() - started < 60000:
+		await ui.get_tree().process_frame
+		var state: Dictionary = ui.snapshot
+		if state.is_empty() or not state.get("connectionReady", false): continue
+		var game: Dictionary = state.get("game", {})
+		var label := "T%d p%d %s" % [int(game.get("turn", 0)), int(game.get("activePlayer", -1)), str(game.get("phase", ""))]
+		if label != step_seen:
+			steps.append([Time.get_ticks_msec() - started, label])
+			step_seen = label
+		if int(game.get("turn", 0)) >= start_turn + 2 or game.get("gameOver", false): break
+		var kind: String = state.prompt.get("inputKind", "")
+		if my_turn_done < 0 and int(game.get("activePlayer", -1)) == 0 and str(game.get("phase", "")) == "Main 2" and kind == "InputPassPriority":
+			my_turn_done = Time.get_ticks_msec() - started
+		var key := "%s|%s|%d|%s|%s" % [label, kind, state.stack.size(), str(state.asks.map(func(ask): return ask.id)), str(state.prompt.get("message", "")).left(40)]
+		if key == acted_on: continue
+		var acted := true
+		if ui.incoming_effect.showing(): ui.incoming_effect.dismiss()
+		elif not state.asks.is_empty(): submit_choice()
+		elif kind in ["InputPassPriority", "InputAttack", "InputBlock"] and state.prompt.get("okEnabled", false): ui._intent("ok")
+		else: acted = false
+		if acted:
+			var now := Time.get_ticks_msec()
+			log.append([now - last, label, kind if state.asks.is_empty() else "ask:" + str(state.asks[0].kind), state.stack.size()])
+			last = now
+			acted_on = key
+	var total := Time.get_ticks_msec() - started
+	print("SCENARIO timing: my M1 -> M2 = %d ms; through the next turn = %d ms; decisions = %d" % [my_turn_done, total, log.size()])
+	for entry in log: print("SCENARIO wait %5d ms before deciding at %s (%s, stack %d)" % entry)
+	for entry in steps: print("SCENARIO step at %6d ms: %s" % entry)
+	# Space from a fresh Main 1 on the next turn of yours is not reachable quickly; instead time Space
+	# from this bot turn's end back around: press Space now and wait for your next decision.
+	var space_started := Time.get_ticks_msec()
+	ui._pass_turn()
+	var space_ms := -1
+	var space_label := ""
+	while Time.get_ticks_msec() - space_started < 30000:
+		await ui.get_tree().process_frame
+		var state: Dictionary = ui.snapshot
+		if state.is_empty() or not state.get("connectionReady", false) or not state.asks.is_empty(): continue
+		var kind: String = state.prompt.get("inputKind", "")
+		if kind in ["InputPassPriority", "InputAttack", "InputBlock"] and state.prompt.get("okEnabled", false) and Time.get_ticks_msec() - space_started > 30:
+			var game: Dictionary = state.get("game", {})
+			space_ms = Time.get_ticks_msec() - space_started
+			space_label = "T%d p%d %s" % [int(game.get("turn", 0)), int(game.get("activePlayer", -1)), str(game.get("phase", ""))]
+			break
+	print("SCENARIO space: pass turn -> next decision at %s = %d ms" % [space_label, space_ms])
+	return true
+
+## --- Probes for the next batch (print what Forge sends; replaced by real checks) ---
+func dump(tag: String) -> void:
+	var s: Dictionary = ui.snapshot
+	print("SCENARIO ", tag, " prompt: ", JSON.stringify(s.prompt).left(700))
+	print("SCENARIO ", tag, " asks: ", JSON.stringify(s.asks).left(1200))
+	print("SCENARIO ", tag, " stack: ", JSON.stringify(s.stack).left(600))
+	print("SCENARIO ", tag, " ui: modal=", (ui.modal_panel.get_script().resource_path.get_file() if ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), " rail=", ui.interaction_panel.panel.visible, " tether=", ui.interaction_panel.callout.visible, " effect=", ui.incoming_effect.showing())
+	await capture(tag)
+
+func pass_until(test: Callable, limit: int = 120) -> bool:
+	for index in range(limit):
+		await ui.get_tree().create_timer(0.1).timeout
+		if ui.snapshot.is_empty() or not ui.snapshot.get("connectionReady", false): continue
+		if test.call(): return true
+		if ui.incoming_effect.showing() and not test.call(): continue
+		if ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") in ["InputPassPriority", "InputAttack", "InputBlock"]: ui._intent("ok")
+	return false
+
+## An opponent's X spell aimed at your things waits for you and its view names X ("X = 4").
+func x_wipe() -> bool:
+	var effect: Control = ui.incoming_effect
+	if not await pass_until(func(): return effect.showing() and not ui.snapshot.stack.is_empty() and ui.snapshot.stack[0].has("xValue"), 300): return check(false, "The AI never cast an X spell at you: " + JSON.stringify(ui.snapshot.stack).left(300))
+	for index in range(20): await ui.get_tree().process_frame
+	var x := int(ui.snapshot.stack[0].xValue)
+	var shown: String = effect.wipe_title.text if effect.wipe_card.visible else effect.title.text
+	print("SCENARIO x: ", ui.snapshot.stack[0].get("sourceName", ""), " X=", x, " shown=", shown)
+	await capture("x")
+	return check(shown.contains("X = %d" % x), "The popup shows the X value: " + shown)
+
+## Damage marked this turn shows under the stats in red as what the creature is right now: a 4/4
+## Angel with 2 damage reads 4/2. Bolting the Craw Wurm adds the badge live.
+func damage() -> bool:
+	var angel := find_card("Serra Angel", "Battlefield")
+	if not check(int(angel.get("damage", 0)) == 2 and int(ui.cards[int(angel.id)].data.get("damage", 0)) == 2, "The Angel's view carries its 2 damage"): return false
+	if not await tap("Mountain") or not await cast("Lightning Bolt"): return false
+	var wurm := find_card("Craw Wurm", "Battlefield")
+	if not await select_named("Craw Wurm"): return false
+	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and int(find_card("Craw Wurm", "Battlefield").get("damage", 0)) == 3): return check(false, "Bolt marks 3 damage on the Wurm")
+	for index in range(10): await ui.get_tree().process_frame
+	await capture("damage")
+	return check(int(ui.cards[int(wurm.id)].data.get("damage", 0)) == 3, "The Wurm's view shows its new damage")
+
+## Combustible Gearhulk's "target opponent" is a tether off the Gearhulk: opponents as rows, the pick
+## staged locally with a line to their portrait, sent only on Confirm.
+func gearhulk() -> bool:
+	if not await tap("Mountain", 6) or not await cast("Combustible Gearhulk"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets"): return check(false, "The Gearhulk trigger must ask for a target")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	var tether: Control = panel.callout
+	if not check(panel.target_tether and tether.visible and not panel.panel.visible and tether.mode_buttons.size() == 2, "The target choice is a tether with both opponents"): return false
+	if not check(tether.line.text.contains("draw three cards"), "It shows the effect's text: " + tether.line.text): return false
+	tether.mode_buttons[0].pressed.emit()
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(panel.target_staged.size() == 1 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Picking stages the opponent locally"): return false
+	await ui.get_tree().create_timer(0.3).timeout
+	await capture("gearhulk")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") != "InputSelectTargets"): return check(false, "Confirm sends the target")
+	return check(ui.snapshot.stack.is_empty() or ui.snapshot.stack.any(func(item): return item.get("targets", []).any(func(target): return str(target.get("name", "")).begins_with("AI 1"))), "The trigger targets the picked opponent: " + JSON.stringify(ui.snapshot.stack).left(300))
+
+## Shivan Gorge's two abilities tether as rows that keep their text and draw costs as mana symbols.
+func shivan_gorge() -> bool:
+	ui._click_card(find_card("Shivan Gorge", "Battlefield").id)
+	if not await wait_ready(): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not ui.modal.visible and tether.mode_buttons.size() == 2, "Shivan Gorge's abilities are a tether"): return false
+	var damage_row: Control = tether.mode_buttons[1]
+	if not check(damage_row.get_script() == preload("res://scripts/ui/AbilityOption.gd") and damage_row.effect_view.text.contains("1 damage") and damage_row.cost_view.text.contains("{2}{R}"), "The damage ability keeps its text with a symbol cost line: " + str([damage_row.get("description")])): return false
+	await capture("gorge")
+	return true
+
+## Persistent Constrictor's "up to one target creature they control": a tether off the Constrictor;
+## clicking their creature stages it with a line, Confirm puts the -1/-1 counter on it.
+func constrictor() -> bool:
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 200): return check(false, "The Constrictor trigger must ask for a target")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(panel.target_tether and panel.callout.visible and not panel.panel.visible, "The target choice is a tether off the Constrictor"): return false
+	var bears: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Grizzly Bears": bears = card
+	ui._click_card(int(bears.id))
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(panel.target_staged.size() == 1 and int(panel.target_staged[0].id) == int(bears.id) and ui.snapshot.prompt.get("chosen", []).is_empty(), "Clicking their creature stages it locally"): return false
+	await ui.get_tree().create_timer(0.3).timeout
+	await capture("constrictor")
+	panel.callout.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears" and int(card.get("counters", {}).get("M1M1", 0)) == 1) or ui.snapshot.players[1].zones.Graveyard.any(func(card): return card.name == "Grizzly Bears")): return check(false, "Confirm puts the -1/-1 counter on the Bears")
+	return true
+
+## Scry shows only the cards you look at, face up, on a tether: Temple of Malice's scry 1 sends
+## Lightning Bolt to the bottom; Preordain's scry 2 then offers the next two (proving it), keeps the
+## Bears on top and bottoms the Wurm, so its draw is the Bears. Hidden library cards never appear.
+func scry() -> bool:
+	var tether: Control = ui.interaction_panel.callout
+	ui._click_card(find_card("Temple of Malice").id)
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Temple of Malice must ask to scry: " + JSON.stringify(ui.snapshot.asks).left(300))
+	for index in range(10): await ui.get_tree().process_frame
+	var ask: Dictionary = ui.snapshot.asks[0]
+	if not check(ask.options.size() == 1 and ask.options[0].card.get("name", "") == "Lightning Bolt" and not ask.options[0].card.get("hidden", false), "Scry 1 offers only the top card, face up: " + str(ask.options.map(func(option): return option.label))): return false
+	if not check(tether.visible and not ui.modal.visible and not tether.scry_ask.is_empty(), "The scry is a tether, not a popup"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(find_card("Temple of Malice", "Battlefield").get("id", -1))), "It hangs off Temple of Malice"): return false
+	tether._flip_scry(0)
+	await capture("temple")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty()): return false
+	await ui.get_tree().create_timer(0.6).timeout # Let the Temple trigger finish settling before casting.
+	if not await tap("Island") or not await cast("Preordain"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Preordain must ask to scry")
+	for index in range(10): await ui.get_tree().process_frame
+	ask = ui.snapshot.asks[0]
+	var names: Array = ask.options.map(func(option): return str(option.card.get("name", "")))
+	if not check(names.size() == 2 and names.has("Grizzly Bears") and names.has("Craw Wurm"), "Scry 2 offers the next two cards (the Bolt went to the bottom): " + str(names)): return false
+	if not check(tether.visible and not ui.modal.visible, "A scry from a spell is a tether too (off the spell if it is on screen, else centered)"): return false
+	tether._flip_scry(names.find("Craw Wurm"))
+	await capture("preordain")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and zone("Hand").any(func(card): return card.name == "Grizzly Bears")): return check(false, "Preordain should draw the kept Grizzly Bears: " + str(zone("Hand").map(func(card): return card.name)))
+	return true
+## Plainscycling Angel of the Ruins: the library search is linked to your graveyard (the Angel went
+## there to pay for the cycle), and picking a Plains puts it in your hand.
+func plainscycling() -> bool:
+	if not await tap("Plains", 2): return false
+	ui._click_card(find_card("Angel of the Ruins").id)
+	var tether: Control = ui.interaction_panel.callout
+	for index in range(60):
+		if not await wait_ready(): return false
+		if ui.modal.visible and ui.modal_panel is SelectionDialog and ui.modal_panel.carousel_mode: break
+		if tether.visible and not tether.mode_ask.is_empty():
+			for i in range(tether.mode_ask.options.size()):
+				if str(tether.mode_ask.options[i].get("label", "")).to_lower().contains("cycling"): tether.mode_buttons[i].pressed.emit()
+			continue
+		if not ui.snapshot.asks.is_empty(): submit_choice()
+		await ui.get_tree().create_timer(0.2).timeout
+	if not check(ui.modal.visible and ui.modal_panel is SelectionDialog and ui.modal_panel.carousel_mode, "Plainscycling opens the library search"): return false
+	for index in range(20): await ui.get_tree().process_frame
+	if not check(ui.search_link.visible and ui._search_anchor() == ui.hud_values[0].zones.Graveyard, "The search is linked to your graveyard, where the Angel went"): return false
+	if not check(ui.modal_panel.carousel_source_box.visible and ui.modal_panel.carousel_source.data.get("name", "") == "Angel of the Ruins" and ui.modal_panel.carousel_source.size.y >= 400, "The Angel sits full size beside the carousel"): return false
+	await capture("search")
+	var search: Control = ui.modal_panel
+	for r in range(search.groups.size()):
+		if search.options[search.groups[r][0]].get("name", "") == "Plains": search._stage_group(r)
+	search.confirm_button.pressed.emit()
+	if not await pass_until(func(): return zone("Hand").any(func(card): return card.name == "Plains")): return check(false, "The Plains goes to your hand")
+	return true
+
+## Another player's reveal (their Lay of the Land finding a basic land) is a small notice on your
+## screen: the source card, an arrow to the revealed card; no question, nothing waits on you.
+func opponent_reveal() -> bool:
+	var effect: Control = ui.incoming_effect
+	var asked := false
+	if not await pass_until(func():
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": asked = true
+		return effect.notice_panel.visible and str(effect.notice_active.get("kind", "")) == "reveal", 150): return check(false, "The reveal must arrive as a small notice (asked=%s) events=%s p1hand=%s stack=%s notices=%s" % [asked, JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(400), ui.snapshot.players[1].get("handCount", -1), ui.snapshot.stack.size(), [effect.notice_active.get("kind", ""), effect.notices.size(), effect.notice_panel.visible]])
+	if not check(not asked and not ui.modal.visible, "No question or popup for another player's reveal"): return false
+	var revealed: Array = effect.notice_active.get("targets", []).map(func(target): return str(target.get("name", "")))
+	if not check(revealed.size() == 1 and str(effect.notice_active.get("source", {}).get("name", "")) == "Lay of the Land", "The notice names the source and the revealed card: " + str(revealed)): return false
+	await capture("notice")
+	return true
+
+
+## Combat reasons: your creatures that can't block are tagged before you try (Pacifism, tapped), and a
+## refused block says why (Craw Wurm can't block the flying Serra Angel).
+func combat_reasons() -> bool:
+	var prompt: Dictionary = ui.snapshot.prompt
+	var unable: Dictionary = prompt.get("cantBlock", {})
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	var elves := find_card("Llanowar Elves", "Battlefield")
+	var wurm := find_card("Craw Wurm", "Battlefield")
+	print("SCENARIO cantBlock: ", unable)
+	if not check(str(unable.get(str(bears.id), "")).contains("Pacifism") and str(unable.get(str(elves.id), "")).contains("tapped") and not unable.has(str(wurm.id)), "Pacifism'd Bears and tapped Elves are marked with their reasons; the Wurm is not"): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(str(ui.cards[int(bears.id)].data.get("unableTag", "")) == "CAN'T BLOCK" and str(ui.cards[int(wurm.id)].data.get("unableTag", "")).is_empty(), "The table tags them CAN'T BLOCK"): return false
+	await capture("marked")
+	var angel: Dictionary = {}
+	var guide: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Serra Angel": angel = card
+		if card.name == "Goblin Guide": guide = card
+	ui._click_card(int(angel.id))
+	if not await wait_ready(): return false
+	ui._click_card(int(wurm.id))
+	for index in range(30):
+		await ui.get_tree().process_frame
+		if ui.explain_note != null and ui.explain_note.visible: break
+	if not check(ui.explain_note != null and ui.explain_note.visible and ui.explain_label.text.contains("flying"), "A refused block says why: " + (ui.explain_label.text if ui.explain_label != null else "(no note)")): return false
+	await capture("explained")
+	ui._click_card(int(guide.id))
+	if not await wait_ready(): return false
+	ui._click_card(int(bears.id))
+	for index in range(30): await ui.get_tree().process_frame
+	return check(ui.explain_label.text.contains("Pacifism"), "Blocking with the Pacified Bears names Pacifism: " + ui.explain_label.text)
+
+## Attack reasons: at Declare attackers, a defender and a summoning-sick creature are tagged
+## CAN'T ATTACK with Forge's reason; a creature that can attack is not.
+func attack_reasons() -> bool:
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputAttack", "Reach attacker declaration"): return false
+	var unable: Dictionary = ui.snapshot.prompt.get("cantAttack", {})
+	print("SCENARIO cantAttack: ", unable)
+	var wall := find_card("Wall of Stone", "Battlefield")
+	var ogre := find_card("Gray Ogre", "Battlefield")
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	if not check(str(unable.get(str(wall.id), "")).contains("defender") and str(unable.get(str(ogre.id), "")).contains("summoning sickness") and not unable.has(str(bears.id)), "The Wall (defender) and the new Ogre are marked with their reasons; the Bears are not"): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(str(ui.cards[int(ogre.id)].data.get("unableTag", "")) == "CAN'T ATTACK", "The table tags them CAN'T ATTACK"): return false
+	await capture("marked")
+	return true
+
+## Another player's choice (the AI's Secluded Courtyard naming a creature type) is an information
+## tether off the Courtyard once it is on their board; never a popup, OK only clears it.
+func courtyard() -> bool:
+	var panel: Control = ui.interaction_panel
+	var asked := false
+	if not await pass_until(func():
+		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "message": asked = true
+		return panel.info_tether.visible, 150): return check(false, "The choice must show as a tether (asked=%s, events=%s)" % [asked, JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(300)])
+	for index in range(10): await ui.get_tree().process_frame
+	var courtyard: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Secluded Courtyard": courtyard = card
+	if not check(not asked and not ui.modal.visible, "No popup for another player's choice"): return false
+	if not check(not courtyard.is_empty() and panel.info_card == ui.cards.get(int(courtyard.id)), "It hangs off the Courtyard on their board"): return false
+	if not check(panel.info_tether.line.text.contains("chose"), "It says what they chose: " + panel.info_tether.line.text): return false
+	await capture("choice")
+	panel.info_tether.yes_button.pressed.emit()
+	for index in range(5): await ui.get_tree().process_frame
+	return check(not panel.info_tether.visible, "OK clears it")

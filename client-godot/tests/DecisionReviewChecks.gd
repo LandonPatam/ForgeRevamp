@@ -108,7 +108,8 @@ func run(ui: Control, directory: String = "") -> void:
 	state.prompt = {"inputKind": "InputSelectCardsFromList", "message": "Choose an artifact from the cards viewed", "sourceCard": source, "cards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}], "revealedCards": [{"id": 911, "name": "Sol Ring", "typeLine": "Artifact"}, {"id": 912, "name": "Island"}], "selMin": 0, "selMax": 1, "chosen": [], "okEnabled": true}
 	ui._apply_state(state)
 	var selection: Control = ui.modal_panel
-	assert(selection.source_context.visible and selection.source_context.get_parent() == selection.source_column, "The source card stays visible under the results list")
+	# A list search shows the source under its results; a library carousel shows it full size beside the carousel.
+	assert((selection.source_context.visible and selection.source_context.get_parent() == selection.source_column) or (selection.carousel_mode and selection.carousel_source_box.visible and selection.carousel_source.data.get("name", "") == "Ingenious Smith"), "The source card stays visible beside the search")
 	assert(selection.options.size() == 2 and not selection.option_buttons[0].disabled and selection.option_buttons[1].disabled, "Viewed cards outside Forge's eligible set must remain visible and unselectable")
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("library-review-enlarged.png"))
@@ -142,15 +143,26 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 	var order := {"id": 950, "kind": "order", "title": "Select order for simultaneous abilities", "message": "Resolve first", "min": 3, "max": 3, "autoOrder": true, "abilityOrder": true, "options": [{"label": "Draw a card.", "card": {"id": 951, "name": "Fathom Mage"}}, {"label": "Gain life.", "card": {"id": 952, "name": "Soul Warden"}}, {"label": "Create a token.", "card": {"id": 953, "name": "Young Pyromancer"}}]}
 	ui._open_decision(order)
 	var panel: Control = ui.modal_panel
-	panel._toggle(1)
-	assert(panel.option_buttons[1].text.contains("1") and panel.order_preview.text.contains("Soul Warden"), "Order numbers and arrows must identify the resolution sequence without repeated card text")
+	assert(panel.order_stack != null and panel.order_stack.order == [0, 1, 2] and not panel.confirm_button.disabled, "Simultaneous abilities open as a stack in Forge's order, ready to confirm")
+	panel.order_stack.move(1, 0)
+	assert(panel.order_stack.order == [1, 0, 2] and panel.order_stack.numbers[1].text == "1", "Moving a row renumbers the pile; the top resolves first")
+	panel.order_stack.hover = 2
+	panel.order_stack._restyle()
+	assert(panel.order_focus_card.data.get("name", "") == "Young Pyromancer", "Hovering a row previews its card")
+	panel.order_stack.dragging = 0
+	panel.order_stack._restyle()
+	assert(panel.order_focus_card.data.get("name", "") == "Fathom Mage", "The dragged row is the one previewed")
+	panel.order_stack.dragging = -1
+	panel.order_stack.hover = -1
+	panel.order_stack._restyle()
 	var answers: Array = []
 	panel.answered.connect(func(_id, value): answers.append(value))
 	if not directory.is_empty():
 		await ui._save_frame(directory.path_join("simultaneous-abilities-large.png"))
-		assert(ui.get_global_rect().encloses(panel.get_global_rect()), "Large simultaneous-ability cards must fit the viewport")
-	panel.auto_button.pressed.emit()
-	assert(answers == [[1, 0, 2]], "Auto preserves chosen order and appends Forge's remaining order exactly once")
+		assert(ui.get_global_rect().encloses(panel.get_global_rect()), "The simultaneous-ability stack must fit the viewport")
+	assert(answers.is_empty(), "Reordering never answers Forge by itself")
+	panel.confirm_button.pressed.emit()
+	assert(answers == [[1, 0, 2]], "Confirm sends the whole pile, first to resolve first")
 	ui._close_modal()
 	ui.live = false
 	ui._apply_state(saved)
@@ -170,4 +182,4 @@ Select a card from your library", "sourceCard": wilds, "cards": lands, "selMin":
 		ui.cancel_button = saved_cancel
 	ui._apply_state(saved)
 	await ui.get_tree().process_frame
-	print("PASS: authorized hand reveal, retained battlefield review, enlarged source/gallery, eligible-only selection, Forge Auto ordering and hover keyboard action")
+	print("PASS: authorized hand reveal, retained battlefield review, enlarged source/gallery, eligible-only selection, stacked ability ordering and hover keyboard action")

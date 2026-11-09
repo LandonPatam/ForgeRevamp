@@ -1,0 +1,13 @@
+# Pass the turn: at the opponent's upkeep Persistent Constrictor's target is picked from a tether with lines to the creature
+activeplayer=p0
+activephase=MAIN2
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Persistent Constrictor;Swamp
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Grizzly Bears;Serra Angel;Plains
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
