@@ -1105,3 +1105,42 @@ func scope() -> bool:
 	if not await wait_ready(): return false
 	for index in range(10): await ui.get_tree().process_frame
 	return check(ui.snapshot.asks.is_empty() or ui.snapshot.asks[0].kind != "message", "OK acknowledges the look")
+
+## Sword of the Animist's optional search: the tether's Yes must be usable (it was stuck disabled
+## while the rail's Yes worked).
+func animist() -> bool:
+	# A mana-color tether first (its rows answer on click, so it hides Yes) — the real-game sequence.
+	var citadel := find_card("Sandsteppe Citadel", "Battlefield")
+	ui._click_card(citadel.id)
+	for index in range(20):
+		if not await wait_ready(): return false
+		if ui.interaction_panel.callout.visible and not ui.interaction_panel.callout.mode_buttons.is_empty(): break
+		await ui.get_tree().create_timer(0.1).timeout
+	ui.interaction_panel.callout.mode_buttons[0].pressed.emit()
+	if not await wait_ready(): return false
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	ui._click_card(bears.id)
+	ui._choose_player(1)
+	if not await wait_ready(): return false
+	ui._intent("ok")
+	var tether: Control = ui.interaction_panel.callout
+	for index in range(40):
+		if not await wait_ready(): return false
+		if tether.visible or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" or not ui.snapshot.asks.is_empty(): break
+		if not ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	print("SCENARIO animist prompt: ", JSON.stringify(ui.snapshot.prompt).left(500))
+	print("SCENARIO animist asks: ", JSON.stringify(ui.snapshot.asks).left(500))
+	print("SCENARIO animist ui: tether=", tether.visible, " yes=", tether.yes_button.text, " disabled=", tether.yes_button.disabled, " no_disabled=", tether.no_button.disabled, " rail=", ui.interaction_panel.panel.visible, " connectionReady=", ui.snapshot.get("connectionReady", false), " pendingDraws=", ui.snapshot.get("pendingDraws", []))
+	await capture("ask")
+	if not check(tether.visible and tether.yes_button.visible and not tether.yes_button.disabled, "The tether's Yes must be visible and clickable"): return false
+	tether.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"), "Yes starts the land search")

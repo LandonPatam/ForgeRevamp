@@ -109,9 +109,11 @@ func present(card_name: String, message: String, ok_label: String, cancel_label:
 	title.visible = not face.visible
 	mode_ask = {}
 	mode_list.hide()
+	# A previous mana/ability tether hides Yes (its rows answer on click); a yes/no needs it back.
+	yes_button.visible = true
 	line.custom_minimum_size.x = 250
 	title.text = "[ %s ]" % card_name.to_upper()
-	question = "> " + message.strip_edges().to_lower()
+	question = "> " + RegEx.create_from_string(" \\(\\d+\\)").sub(message, "", true).strip_edges().to_lower()
 	_show_line()
 	yes_button.text = "[Y] " + ok_label
 	no_button.text = "[N] " + cancel_label
