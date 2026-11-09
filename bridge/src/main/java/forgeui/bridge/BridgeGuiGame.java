@@ -837,11 +837,62 @@ final class BridgeGuiGame extends AbstractGuiGame {
         return new OrderResult<>(out, false);
     }
 
+    /**
+     * Scry and similar "top or bottom" moves. Forge passes the whole library plus the few cards
+     * this player may actually move and see (`manipulable`); only those are offered, so hidden
+     * library cards (and their names) never reach the client. Answer: {"top": [i...], "bottom": [i...]}
+     * covering each offered card once, top in order from the top. Anything left unplaced stays on top.
+     */
     @Override
     public List<CardView> manipulateCardList(String title, Iterable<CardView> cards, Iterable<CardView> manipulable, boolean toTop, boolean toBottom, boolean toAnywhere) {
-        List<CardView> list = new ArrayList<>();
-        cards.forEach(list::add);
-        return order(title, "Order (first = top)", 0, 0, list, null, null, false, false).ordered();
+        List<CardView> all = new ArrayList<>();
+        cards.forEach(all::add);
+        List<CardView> movable = new ArrayList<>();
+        manipulable.forEach(movable::add);
+        if (movable.isEmpty()) return all;
+        if (toAnywhere || (!toTop && !toBottom)) {
+            // Rare "anywhere" moves keep the ordering dialog, still limited to the movable cards.
+            List<CardView> ordered = order(title, "Order (first = top)", 0, 0, movable, null, null, false, false).ordered();
+            List<CardView> rest = new ArrayList<>(all);
+            rest.removeAll(movable);
+            List<CardView> result = new ArrayList<>(ordered);
+            result.addAll(rest);
+            return result;
+        }
+        JsonObject a = newAsk("scry", title, title);
+        a.addProperty("canTop", toTop);
+        a.addProperty("canBottom", toBottom);
+        JsonArray offered = new JsonArray();
+        for (CardView card : movable) {
+            JsonObject o = new JsonObject();
+            o.addProperty("label", card.getName());
+            o.addProperty("cardId", card.getId());
+            // Forge shows these to their owner for this decision (tempShowCards).
+            o.add("card", GameStateJson.describeCard(card, true));
+            offered.add(o);
+        }
+        a.add("options", offered);
+        JsonElement res = ask(a);
+        List<CardView> top = new ArrayList<>();
+        List<CardView> bottom = new ArrayList<>();
+        if (res != null && res.isJsonObject()) {
+            for (String side : List.of("top", "bottom")) {
+                JsonElement picks = res.getAsJsonObject().get(side);
+                if (picks == null || !picks.isJsonArray()) continue;
+                for (JsonElement e : picks.getAsJsonArray()) {
+                    int i = e.getAsInt();
+                    if (i < 0 || i >= movable.size() || top.contains(movable.get(i)) || bottom.contains(movable.get(i))) continue;
+                    (side.equals("top") ? top : bottom).add(movable.get(i));
+                }
+            }
+        }
+        for (CardView card : movable) if (!top.contains(card) && !bottom.contains(card)) top.add(card);
+        List<CardView> rest = new ArrayList<>(all);
+        rest.removeAll(movable);
+        List<CardView> result = new ArrayList<>(top);
+        result.addAll(rest);
+        result.addAll(bottom);
+        return result;
     }
 
     private Map<Object, Integer> distribute(String title, String message, List<?> keys, List<String> labels, int amount, boolean atLeastOne) {

@@ -1228,3 +1228,80 @@ func phase_timing() -> bool:
 			break
 	print("SCENARIO space: pass turn -> next decision at %s = %d ms" % [space_label, space_ms])
 	return true
+
+## --- Probes for the next batch (print what Forge sends; replaced by real checks) ---
+func dump(tag: String) -> void:
+	var s: Dictionary = ui.snapshot
+	print("SCENARIO ", tag, " prompt: ", JSON.stringify(s.prompt).left(700))
+	print("SCENARIO ", tag, " asks: ", JSON.stringify(s.asks).left(1200))
+	print("SCENARIO ", tag, " stack: ", JSON.stringify(s.stack).left(600))
+	print("SCENARIO ", tag, " ui: modal=", (ui.modal_panel.get_script().resource_path.get_file() if ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), " rail=", ui.interaction_panel.panel.visible, " tether=", ui.interaction_panel.callout.visible, " effect=", ui.incoming_effect.showing())
+	await capture(tag)
+
+func pass_until(test: Callable, limit: int = 120) -> bool:
+	for index in range(limit):
+		await ui.get_tree().create_timer(0.1).timeout
+		if ui.snapshot.is_empty() or not ui.snapshot.get("connectionReady", false): continue
+		if test.call(): return true
+		if ui.incoming_effect.showing() and not test.call(): continue
+		if ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") in ["InputPassPriority", "InputAttack", "InputBlock"]: ui._intent("ok")
+	return false
+
+func x_wipe() -> bool:
+	var seen := await pass_until(func(): return not ui.snapshot.stack.is_empty())
+	for index in range(20): await ui.get_tree().process_frame
+	print("SCENARIO events: ", JSON.stringify(ui.snapshot.get("targetedEffects", [])).left(800))
+	await dump("x")
+	return seen
+
+func damage() -> bool:
+	print("SCENARIO damage: ", ui.snapshot.players.map(func(p): return p.zones.Battlefield.map(func(c): return [c.name, c.get("power", -1), c.get("toughness", -1), c.get("damage", -1)])))
+	await capture("damage")
+	return true
+
+func gearhulk() -> bool:
+	if not await tap("Mountain", 6) or not await cast("Combustible Gearhulk"): return false
+	var seen := await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" or not ui.snapshot.asks.is_empty())
+	await dump("gearhulk")
+	return seen
+
+func shivan_gorge() -> bool:
+	ui._click_card(find_card("Shivan Gorge", "Battlefield").id)
+	if not await wait_ready(): return false
+	await dump("gorge")
+	return true
+
+func constrictor() -> bool:
+	var seen := await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" or not ui.snapshot.asks.is_empty(), 200)
+	await dump("constrictor")
+	return seen
+
+## Scry shows only the cards you look at, face up, on a tether: Temple of Malice's scry 1 sends
+## Lightning Bolt to the bottom; Preordain's scry 2 then offers the next two (proving it), keeps the
+## Bears on top and bottoms the Wurm, so its draw is the Bears. Hidden library cards never appear.
+func scry() -> bool:
+	var tether: Control = ui.interaction_panel.callout
+	ui._click_card(find_card("Temple of Malice").id)
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Temple of Malice must ask to scry: " + JSON.stringify(ui.snapshot.asks).left(300))
+	for index in range(10): await ui.get_tree().process_frame
+	var ask: Dictionary = ui.snapshot.asks[0]
+	if not check(ask.options.size() == 1 and ask.options[0].card.get("name", "") == "Lightning Bolt" and not ask.options[0].card.get("hidden", false), "Scry 1 offers only the top card, face up: " + str(ask.options.map(func(option): return option.label))): return false
+	if not check(tether.visible and not ui.modal.visible and not tether.scry_ask.is_empty(), "The scry is a tether, not a popup"): return false
+	if not check(ui.interaction_panel.callout_card == ui.cards.get(int(find_card("Temple of Malice", "Battlefield").get("id", -1))), "It hangs off Temple of Malice"): return false
+	tether._flip_scry(0)
+	await capture("temple")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty()): return false
+	await ui.get_tree().create_timer(0.6).timeout # Let the Temple trigger finish settling before casting.
+	if not await tap("Island") or not await cast("Preordain"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Preordain must ask to scry")
+	for index in range(10): await ui.get_tree().process_frame
+	ask = ui.snapshot.asks[0]
+	var names: Array = ask.options.map(func(option): return str(option.card.get("name", "")))
+	if not check(names.size() == 2 and names.has("Grizzly Bears") and names.has("Craw Wurm"), "Scry 2 offers the next two cards (the Bolt went to the bottom): " + str(names)): return false
+	if not check(tether.visible and not ui.modal.visible, "A scry from a spell is a tether too (off the spell if it is on screen, else centered)"): return false
+	tether._flip_scry(names.find("Craw Wurm"))
+	await capture("preordain")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and zone("Hand").any(func(card): return card.name == "Grizzly Bears")): return check(false, "Preordain should draw the kept Grizzly Bears: " + str(zone("Hand").map(func(card): return card.name)))
+	return true

@@ -33,6 +33,8 @@ var callout: PanelContainer
 var callout_card: Control
 ## A card's modes ("choose one or more —") also attach to that card when it is on the table.
 var mode_ask: Dictionary = {}
+## A tether with nothing on the table to hang from (a scry from a resolving spell): centered, no line.
+var floating := false
 ## Main supplies your zone icon holding a card id (graveyard, exile...), so a decision about a card
 ## that already left the table tethers to where it is: func(id: int) -> Control (or null).
 var zone_view: Callable
@@ -114,6 +116,17 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	player_views = avatars
 	suspended = blocked
 	description = Flow.describe(state)
+	floating = false
+	if mode_ask.get("kind", "") == "scry":
+		# Scry always takes the tether: off its source card or that card's zone, else centered.
+		panel.hide()
+		callout_card = _anchor_for(int(mode_ask.get("sourceCard", {}).get("id", -1)))
+		floating = callout_card == null
+		callout.visible = true
+		callout.present_scry(mode_ask, state.get("connectionReady", false))
+		_place_callout()
+		queue_redraw()
+		return
 	var mode_view := _mode_view()
 	if mode_view != null:
 		panel.hide()
@@ -287,6 +300,15 @@ func show_modes(ask: Dictionary) -> void:
 	mode_ask = ask
 	present(state, suspended, cards, player_views)
 
+## The table card with this id, else your zone icon holding it, else null.
+func _anchor_for(id: int) -> Control:
+	var view: Control = cards.get(id)
+	if is_instance_valid(view) and view.is_visible_in_tree(): return view
+	if zone_view.is_valid():
+		var zone: Control = zone_view.call(id)
+		if is_instance_valid(zone) and zone.is_visible_in_tree(): return zone
+	return null
+
 func _mode_view() -> Control:
 	if mode_ask.is_empty(): return null
 	var source := mode_source(mode_ask)
@@ -313,6 +335,11 @@ func _card_rect(view: Control) -> Rect2:
 
 ## Beside the card (right, else left, else below), clear of the rail and kept on screen.
 func _place_callout() -> void:
+	if floating:
+		callout.reset_size()
+		var room := Vector2(size.x - RAIL_WIDTH, size.y)
+		callout.position = ((room - callout.size) * 0.5).max(Vector2(8, 8)).round()
+		return
 	if not is_instance_valid(callout_card): return
 	callout.reset_size()
 	var box: Vector2 = callout.size
@@ -362,7 +389,9 @@ func _layout() -> void:
 	panel.position = Vector2(maxf(110, (size.x - 300 - width) * 0.5), 20)
 
 func _process(_delta: float) -> void:
-	if callout.visible:
+	if callout.visible and floating:
+		_place_callout()
+	elif callout.visible:
 		if not is_instance_valid(callout_card) or not callout_card.is_visible_in_tree():
 			present(state, suspended, cards, player_views)
 		else:

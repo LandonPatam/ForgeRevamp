@@ -35,6 +35,15 @@ var card_pick := false
 var card_ask_id := -1
 var card_sent := false
 var card_verb := ""
+## Scry: the cards you look at, each kept on top or sent to the bottom; top ones in drag order.
+var scry_ask: Dictionary = {}
+var scry_top: Array = []      ## Per option: true = stays on top.
+var scry_box: VBoxContainer
+var scry_row: HBoxContainer
+var scry_toggles: Array = []
+var scry_order_label: Label
+var scry_order: Control       ## OrderStack of the cards kept on top, first = top of library.
+var scry_sent := false
 
 func _ready() -> void:
 	Terminal.panel(self, 12)
@@ -61,6 +70,16 @@ func _ready() -> void:
 	face.hide()
 	line = _label(16, Terminal.INK)
 	column.add_child(line)
+	scry_box = VBoxContainer.new()
+	scry_box.add_theme_constant_override("separation", 8)
+	scry_box.hide()
+	column.add_child(scry_box)
+	scry_row = HBoxContainer.new()
+	scry_row.add_theme_constant_override("separation", 12)
+	scry_box.add_child(scry_row)
+	scry_order_label = _label(12, Terminal.MUTED)
+	scry_order_label.text = "TOP OF LIBRARY · first = top · drag to reorder"
+	scry_box.add_child(scry_order_label)
 	mode_list = VBoxContainer.new()
 	mode_list.add_theme_constant_override("separation", 6)
 	mode_list.hide()
@@ -69,7 +88,8 @@ func _ready() -> void:
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
 	yes_button = _button(func():
-		if card_mode: _confirm_cards()
+		if not scry_ask.is_empty(): _confirm_scry()
+		elif card_mode: _confirm_cards()
 		elif mode_ask.is_empty(): answered.emit("ok")
 		else: _send_modes())
 	Terminal.button(yes_button, true)
@@ -102,6 +122,7 @@ func _button(callback: Callable) -> Button:
 
 ## `card_name` labels the box; labels come from Forge's own Yes/No (or custom) button text.
 func present(card_name: String, message: String, ok_label: String, cancel_label: String, ok_enabled: bool, cancel_enabled: bool, card: Dictionary = {}) -> void:
+	_leave_scry()
 	_leave_card_mode()
 	face.visible = not card.is_empty()
 	if face.visible: face.update_card(card)
@@ -136,6 +157,7 @@ func _process(delta: float) -> void:
 ## Cards in the tether, largest first: one card alone, or a list whose highlighted row is shown large.
 ## `pick` is a one-card choice (confirm names it); otherwise it is a look/reveal to acknowledge.
 func present_cards(message: String, cards: Array, pick: bool, ready: bool, ask_id: int = -1, verb: String = "") -> void:
+	_leave_scry()
 	var ids: Array = cards.map(func(card): return int(card.get("id", -1)))
 	if not card_mode or ids != card_list.map(func(card): return int(card.get("id", -1))) or ask_id != card_ask_id:
 		card_focus = 0
@@ -194,6 +216,106 @@ func _confirm_cards() -> void:
 func focused_pick() -> Dictionary:
 	return card_list[card_focus] if card_mode and card_pick and card_focus < card_list.size() else {}
 
+## Scry / "top or bottom" moves: every looked-at card face up with its own Top/Bottom toggle.
+func present_scry(ask: Dictionary, ready: bool) -> void:
+	_leave_card_mode()
+	face.hide()
+	mode_list.hide()
+	title.show()
+	var options: Array = ask.get("options", [])
+	if int(ask.get("id", -1)) != int(scry_ask.get("id", -2)):
+		scry_sent = false
+		scry_top = options.map(func(_option): return true)
+		for child in scry_row.get_children(): child.queue_free()
+		scry_toggles.clear()
+		var card_size := Vector2(150, 210) if options.size() <= 3 else Vector2(110, 154)
+		for i in range(options.size()):
+			var slot := VBoxContainer.new()
+			slot.add_theme_constant_override("separation", 6)
+			scry_row.add_child(slot)
+			var view := preload("res://scripts/ui/CardView.gd").new()
+			view.inspection = true
+			view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			view.custom_minimum_size = card_size
+			slot.add_child(view)
+			view.update_card(options[i].card)
+			var toggle := _button(_flip_scry.bind(i))
+			toggle.icon = null
+			slot.add_child(toggle)
+			scry_toggles.append(toggle)
+		if is_instance_valid(scry_order): scry_order.queue_free()
+		scry_order = preload("res://scripts/ui/OrderStack.gd").new()
+		scry_box.add_child(scry_order)
+	scry_ask = ask
+	mode_ask = {}
+	mode_ready = ready
+	var count := options.size()
+	title.text = "[ %s ]" % str(ask.get("sourceCard", {}).get("name", "SCRY")).to_upper()
+	question = "> " + ("look at the top card: keep it on top or put it on the bottom" if count == 1 else "look at the top %d cards: keep each on top or put it on the bottom" % count)
+	_show_line()
+	line.custom_minimum_size.x = maxf(300, count * 162)
+	scry_box.show()
+	yes_button.visible = true
+	no_button.visible = false
+	_refresh_scry()
+
+func _flip_scry(index: int) -> void:
+	if scry_sent or index >= scry_top.size(): return
+	if not bool(scry_ask.get("canBottom", true)) and scry_top[index]: return
+	if not bool(scry_ask.get("canTop", true)) and not scry_top[index]: return
+	scry_top[index] = not scry_top[index]
+	_refresh_scry()
+
+func _refresh_scry() -> void:
+	var options: Array = scry_ask.get("options", [])
+	for i in range(scry_toggles.size()):
+		scry_toggles[i].text = "▲ TOP" if scry_top[i] else "▼ BOTTOM"
+		Terminal.button(scry_toggles[i], scry_top[i])
+		scry_toggles[i].icon = null
+		scry_toggles[i].disabled = scry_sent or not mode_ready
+	# The kept cards' order: those still on top keep their place, newly kept ones join at the end.
+	var previous := _scry_top_order()
+	var kept: Array = previous.filter(func(i): return scry_top[i])
+	for i in range(options.size()):
+		if scry_top[i] and not kept.has(i): kept.append(i)
+	var on_top := kept.size()
+	scry_order_label.visible = on_top > 1
+	scry_order.visible = on_top > 1
+	if kept != previous:
+		# Row n of the order list is option rows[n]; the list's own order gives the top order.
+		var rows: Array = kept.map(func(i): return {"label": "", "card": options[i].card})
+		var initial: Array[int] = []
+		for n in range(rows.size()): initial.append(n)
+		scry_order.set_meta("rows", kept)
+		if on_top > 1: scry_order.setup(rows, initial, 320.0)
+		else: scry_order.order = initial
+	var bottom := options.size() - on_top
+	yes_button.text = "[Y] Confirm  ·  %d on top, %d to the bottom" % [on_top, bottom]
+	yes_button.disabled = scry_sent or not mode_ready
+
+## Option indexes kept on top, first = top of library, as the order list currently shows them.
+func _scry_top_order() -> Array:
+	if not is_instance_valid(scry_order) or not scry_order.has_meta("rows"): return []
+	var rows: Array = scry_order.get_meta("rows")
+	if scry_order.order.size() != rows.size(): return rows.duplicate()
+	return scry_order.order.map(func(n): return rows[n])
+
+## Top in the order shown (first = top of library), the rest to the bottom.
+func _confirm_scry() -> void:
+	if scry_sent or not mode_ready or scry_ask.is_empty(): return
+	scry_sent = true
+	var top: Array = _scry_top_order().filter(func(i): return scry_top[i])
+	var bottom: Array = []
+	for i in range(scry_top.size()):
+		if not scry_top[i]: bottom.append(i)
+	_refresh_scry()
+	ask_answered.emit(int(scry_ask.id), {"top": top, "bottom": bottom})
+
+func _leave_scry() -> void:
+	if scry_ask.is_empty(): return
+	scry_ask = {}
+	scry_box.hide()
+
 func _leave_card_mode() -> void:
 	if not card_mode: return
 	card_mode = false
@@ -204,6 +326,7 @@ func _leave_card_mode() -> void:
 	title.show()
 
 func present_modes(card_name: String, ask: Dictionary, ready: bool) -> void:
+	_leave_scry()
 	_leave_card_mode()
 	face.hide()
 	title.show()

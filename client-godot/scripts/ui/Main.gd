@@ -1007,11 +1007,16 @@ func _apply_state(value: Dictionary) -> void:
 		if mode_id < 0: mode_id = interaction_panel.look_source(ask)
 		var mode_card: Control = cards.get(mode_id) if live else null
 		var answering: bool = live and response_target.accepts(ask)
+		var scrying: bool = live and ask.get("kind", "") == "scry"
 		response_target.present(ask if answering else {}, snapshot.get("connectionReady", false))
 		if answering:
 			if modal.visible: _close_modal()
 			board_choice.hide()
 			interaction_panel.show_modes({})
+		elif scrying:
+			if modal.visible: _close_modal()
+			board_choice.hide()
+			interaction_panel.show_modes(ask)
 		elif is_instance_valid(mode_card) and mode_card.is_visible_in_tree():
 			# Mode choices hang off the card itself, not a popup.
 			if modal.visible: _close_modal()
