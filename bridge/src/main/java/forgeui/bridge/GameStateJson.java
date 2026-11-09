@@ -187,6 +187,24 @@ final class GameStateJson {
                 prompt.addProperty("cardId", host.getId());
             }
         }
+        if (currentPrompt && gui.getGameController() instanceof PlayerControllerHuman combatant
+                && (input instanceof forge.gamemodes.match.input.InputBlock || input instanceof forge.gamemodes.match.input.InputAttack)) {
+            // Your creatures that can't block / attack this combat, with the reason, so the table can
+            // mark them before you try (Taunt from the Rampart, summoning sickness, defender...).
+            boolean blocking = input instanceof forge.gamemodes.match.input.InputBlock;
+            JsonObject unable = new JsonObject();
+            try {
+                var combatGame = combatant.getGame();
+                for (var creature : combatant.getPlayer().getCreaturesInPlay()) {
+                    if (!blocking && combatGame.getCombat() != null && combatGame.getCombat().isAttacking(creature)) continue;
+                    String reason = blocking ? CombatReasons.cantBlock(creature, combatGame.getCombat()) : CombatReasons.cantAttack(creature);
+                    if (reason != null) unable.addProperty(String.valueOf(creature.getId()), reason);
+                }
+            } catch (RuntimeException unreadable) {
+                // Nothing is marked; Forge still refuses illegal clicks.
+            }
+            prompt.add(blocking ? "cantBlock" : "cantAttack", unable);
+        }
         if (currentPrompt && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
             CardView leaving = commanderReplacement(confirm);
             if (leaving != null) {

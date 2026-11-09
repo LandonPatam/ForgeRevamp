@@ -725,6 +725,35 @@ public final class BridgeMain {
         server.send(channel, envelope(seat, response).toString());
     }
 
+    /**
+     * A refused block or attack click, said plainly ("Valeria Richards can't block: Taunt from the
+     * Rampart (Bot 1): ..."), for players who would otherwise read it as a bug. Other refusals keep
+     * the generic message.
+     */
+    private static String rejectionReason(forge.interfaces.IGameController controller, CardView clicked, PlayerView defender, String fallback) {
+        try {
+            if (!(controller instanceof PlayerControllerHuman human)) return fallback;
+            var game = human.getGame();
+            var card = game.findByView(clicked);
+            var input = human.getInputQueue().getInput();
+            if (card == null) return fallback;
+            if (input instanceof forge.gamemodes.match.input.InputBlock block && card.getController() == human.getPlayer()) {
+                var field = forge.gamemodes.match.input.InputBlock.class.getDeclaredField("currentAttacker");
+                field.setAccessible(true);
+                var attacker = (forge.game.card.Card) field.get(block);
+                String reason = attacker == null ? CombatReasons.cantBlock(card, game.getCombat()) : CombatReasons.cantBlock(attacker, card, game.getCombat());
+                return reason != null ? reason : fallback;
+            }
+            if (input instanceof forge.gamemodes.match.input.InputAttack) {
+                String reason = CombatReasons.cantAttack(card, defender == null ? null : game.getPlayer(defender));
+                return reason != null ? reason : fallback;
+            }
+        } catch (ReflectiveOperationException | RuntimeException unreadable) {
+            // Keep Forge's plain refusal.
+        }
+        return fallback;
+    }
+
     private void onClientMessage(Seat seat, Channel channel, String text) {
         String requestId = null;
         try {
@@ -861,7 +890,8 @@ public final class BridgeMain {
                 case "cancel" -> c.selectButtonCancel();
                 case "card" -> {
                     CardView cv = current.cards().get(id);
-                    if (cv != null) BridgeProtocol.require(c.selectCard(cv, null, CLICK), "Forge rejected that card for the current action");
+                    if (cv != null && !c.selectCard(cv, null, CLICK))
+                        throw new IllegalArgumentException(rejectionReason(c, cv, null, "Forge rejected that card for the current action"));
                 }
                 case "undeclare" -> BridgeProtocol.require(c.selectCard(current.cards().get(id), null, RIGHT_CLICK), "Forge rejected calling back that attacker");
                 case "equip" -> BridgeProtocol.require(gui.selectEquip(current.cards().get(id), current.cards().get(target), CLICK), "Forge rejected that equip activation");
@@ -875,8 +905,9 @@ public final class BridgeMain {
                     PlayerView defender = current.players().get(target);
                     c.selectPlayer(defender, CLICK);
                     // Re-selecting the same defender keeps the declaration instead of toggling it off.
-                    if (!human.getGame().getCombat().isAttacking(human.getGame().findByView(attacker), human.getGame().getPlayer(defender)))
-                        BridgeProtocol.require(c.selectCard(attacker, null, CLICK), "Forge rejected that attacker");
+                    if (!human.getGame().getCombat().isAttacking(human.getGame().findByView(attacker), human.getGame().getPlayer(defender))
+                            && !c.selectCard(attacker, null, CLICK))
+                        throw new IllegalArgumentException(rejectionReason(c, attacker, defender, "Forge rejected that attacker"));
                 }
                 case "stack" -> {
                     StackItemView si = current.stackItems().get(id);

@@ -237,8 +237,12 @@ func _receive(message: Dictionary) -> void:
 		_unlock()
 		_publish()
 	elif kind == "error":
+		var explained := false
 		if message.get("requestId", "") == pending and last_card_intent >= 0:
 			action_rejected.emit(last_card_intent)
+			# The reason is shown on the card itself; no second copy as a toast.
+			action_explained.emit(last_card_intent, str(message.get("message", "Forge rejected that card for the current action")))
+			explained = true
 		prepaid_target = -1
 		equip_source = -1
 		equip_target = -1
@@ -249,7 +253,7 @@ func _receive(message: Dictionary) -> void:
 		if message.get("requestId", "") == pending:
 			_clear_pending()
 		syncing = true
-		feedback.emit(message.get("message", "Forge rejected the request"))
+		if not explained: feedback.emit(message.get("message", "Forge rejected the request"))
 		_hello()
 		_publish()
 	elif kind == "flash":

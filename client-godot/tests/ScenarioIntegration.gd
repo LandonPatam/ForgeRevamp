@@ -39,7 +39,7 @@ func prepared() -> bool:
 	while Time.get_ticks_msec() < deadline:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
-		if scenario == "blocking" and state.prompt.get("inputKind", "") == "InputBlock": return true
+		if scenario in ["blocking", "combat-reasons"] and state.prompt.get("inputKind", "") == "InputBlock": return true
 		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
 		# the scenario driver answers it.
 		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty(): return true
@@ -47,7 +47,7 @@ func prepared() -> bool:
 		if int(state.game.turn) >= 5 and ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd"):
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
-		if scenario != "blocking" and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
+		if scenario not in ["blocking", "combat-reasons"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
 			else: return true
@@ -1405,4 +1405,55 @@ func opponent_reveal() -> bool:
 	var revealed: Array = effect.notice_active.get("targets", []).map(func(target): return str(target.get("name", "")))
 	if not check(revealed.size() == 1 and str(effect.notice_active.get("source", {}).get("name", "")) == "Lay of the Land", "The notice names the source and the revealed card: " + str(revealed)): return false
 	await capture("notice")
+	return true
+
+
+## Combat reasons: your creatures that can't block are tagged before you try (Pacifism, tapped), and a
+## refused block says why (Craw Wurm can't block the flying Serra Angel).
+func combat_reasons() -> bool:
+	var prompt: Dictionary = ui.snapshot.prompt
+	var unable: Dictionary = prompt.get("cantBlock", {})
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	var elves := find_card("Llanowar Elves", "Battlefield")
+	var wurm := find_card("Craw Wurm", "Battlefield")
+	print("SCENARIO cantBlock: ", unable)
+	if not check(str(unable.get(str(bears.id), "")).contains("Pacifism") and str(unable.get(str(elves.id), "")).contains("tapped") and not unable.has(str(wurm.id)), "Pacifism'd Bears and tapped Elves are marked with their reasons; the Wurm is not"): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(str(ui.cards[int(bears.id)].data.get("unableTag", "")) == "CAN'T BLOCK" and str(ui.cards[int(wurm.id)].data.get("unableTag", "")).is_empty(), "The table tags them CAN'T BLOCK"): return false
+	await capture("marked")
+	var angel: Dictionary = {}
+	var guide: Dictionary = {}
+	for card in ui.snapshot.players[1].zones.Battlefield:
+		if card.name == "Serra Angel": angel = card
+		if card.name == "Goblin Guide": guide = card
+	ui._click_card(int(angel.id))
+	if not await wait_ready(): return false
+	ui._click_card(int(wurm.id))
+	for index in range(30):
+		await ui.get_tree().process_frame
+		if ui.explain_note != null and ui.explain_note.visible: break
+	if not check(ui.explain_note != null and ui.explain_note.visible and ui.explain_label.text.contains("flying"), "A refused block says why: " + (ui.explain_label.text if ui.explain_label != null else "(no note)")): return false
+	await capture("explained")
+	ui._click_card(int(guide.id))
+	if not await wait_ready(): return false
+	ui._click_card(int(bears.id))
+	for index in range(30): await ui.get_tree().process_frame
+	return check(ui.explain_label.text.contains("Pacifism"), "Blocking with the Pacified Bears names Pacifism: " + ui.explain_label.text)
+
+## Attack reasons: at Declare attackers, a defender and a summoning-sick creature are tagged
+## CAN'T ATTACK with Forge's reason; a creature that can attack is not.
+func attack_reasons() -> bool:
+	for index in range(30):
+		if ui.snapshot.prompt.get("inputKind", "") == "InputAttack": break
+		if not await step() or not await wait_ready(): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputAttack", "Reach attacker declaration"): return false
+	var unable: Dictionary = ui.snapshot.prompt.get("cantAttack", {})
+	print("SCENARIO cantAttack: ", unable)
+	var wall := find_card("Wall of Stone", "Battlefield")
+	var ogre := find_card("Gray Ogre", "Battlefield")
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	if not check(str(unable.get(str(wall.id), "")).contains("defender") and str(unable.get(str(ogre.id), "")).contains("summoning sickness") and not unable.has(str(bears.id)), "The Wall (defender) and the new Ogre are marked with their reasons; the Bears are not"): return false
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(str(ui.cards[int(ogre.id)].data.get("unableTag", "")) == "CAN'T ATTACK", "The table tags them CAN'T ATTACK"): return false
+	await capture("marked")
 	return true

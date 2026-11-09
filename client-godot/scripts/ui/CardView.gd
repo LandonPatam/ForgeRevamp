@@ -230,12 +230,38 @@ func _draw_stats() -> void:
 		var hurt_baseline: float = hurt.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
 		stats_layer.draw_string(font, Vector2(hurt.position.x, hurt_baseline), now, HORIZONTAL_ALIGNMENT_CENTER, hurt.size.x, font_size, Color("ffd6d6"))
 
+## Combat: a creature that can't block / attack right now is dimmed with a small tag; hovering the
+## card shows Forge's reason (set by Main from the bridge's cantBlock / cantAttack).
+func _draw_unable() -> void:
+	var tag := str(data.get("unableTag", ""))
+	tooltip_text = str(data.get("unableReason", "")) if not tag.is_empty() else ""
+	if tag.is_empty(): return
+	var unit := size.x / 144.0
+	var body := Rect2(Vector2.ZERO, size)
+	var shade := StyleBoxFlat.new()
+	shade.bg_color = Color(0.02, 0.03, 0.04, 0.5)
+	shade.set_corner_radius_all(int(7 * unit))
+	trait_layer.draw_style_box(shade, body)
+	var font := get_theme_default_font()
+	var font_size: int = maxi(9, int(13 * unit))
+	var width: float = font.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x + 14 * unit
+	var box := Rect2((size.x - width) * 0.5, size.y * 0.42, width, 20 * unit)
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color("3a1414")
+	plate.border_color = Color("ff8a6b")
+	plate.set_border_width_all(maxi(1, int(2 * unit)))
+	plate.set_corner_radius_all(int(4 * unit))
+	trait_layer.draw_style_box(plate, box)
+	var baseline: float = box.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
+	trait_layer.draw_string(font, Vector2(box.position.x, baseline), tag, HORIZONTAL_ALIGNMENT_CENTER, box.size.x, font_size, Color("ffd9cf"))
+
 func _draw_traits() -> void:
 	if data.get("hidden", false): return
 	if data.get("zone", "") != "Battlefield":
 		_draw_hand_overlays()
 		return
 	if data.get("faceDown", false): return
+	_draw_unable()
 	_draw_chosen_colors()
 	if not show_traits: return
 	var keys: Array = Face.trait_keys(data.get("keywords", []))

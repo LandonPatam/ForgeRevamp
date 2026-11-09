@@ -1,0 +1,13 @@
+# Declare blockers against Serra Angel and Goblin Guide: Pacifism'd Bears and tapped Elves are tagged CAN'T BLOCK; try the Wurm on the Angel to see why it's refused
+activeplayer=p1
+activephase=COMBAT_DECLARE_BLOCKERS
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears|Id:1;Pacifism|AttachedTo:1;Llanowar Elves|Tapped;Craw Wurm;Forest;Jace Beleren|Id:99|Counters:LOYALTY=3
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Serra Angel|Attacking:99;Goblin Guide|Attacking:99;Plains
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

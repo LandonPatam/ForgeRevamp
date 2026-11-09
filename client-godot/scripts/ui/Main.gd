@@ -269,6 +269,7 @@ func _ready() -> void:
 	adapter.state_changed.connect(_apply_state)
 	adapter.feedback.connect(_notify)
 	adapter.action_rejected.connect(_reject_card_action)
+	if adapter.has_signal("action_explained"): adapter.action_explained.connect(_explain_card)
 	adapter.status_changed.connect(func(message): status_label.text = message)
 	adapter.session_reset.connect(_clear_live_session)
 	if not verification_mode and ProjectSettings.get_setting("application/config/client_diagnostics", false):
@@ -1113,6 +1114,11 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		c.owner = owner
 		c.zone = zone
 		c.playable = _playable(c, owner, zone)
+		# Combat: your creatures that can't block / attack right now, with Forge's reason (bridge).
+		var unable: Dictionary = snapshot.get("prompt", {}).get("cantBlock", snapshot.get("prompt", {}).get("cantAttack", {}))
+		if owner == 0 and zone == "Battlefield" and unable.has(str(c.id)):
+			c.unableReason = str(unable[str(c.id)])
+			c.unableTag = "CAN'T BLOCK" if snapshot.prompt.has("cantBlock") else "CAN'T ATTACK"
 		c.ready = c.playable and _ready_now(c, zone)
 		if snapshot.prompt.get("inputKind", "") == "InputBlock" and snapshot.prompt.get("chosen", []).has("card:" + str(c.id)):
 			c.weakSelection = maxi(1, int(c.get("weakSelection", 0)))
@@ -1769,6 +1775,7 @@ func _card_unhovered(source: Control) -> void:
 		raised_card.hide()
 
 func _process(_delta: float) -> void:
+	if explain_note != null and explain_note.visible: _place_explain_note()
 	if is_instance_valid(search_link):
 		var searching: bool = live and modal.visible and is_instance_valid(modal_panel) and modal_panel is SelectionDialog and modal_panel.carousel_mode and _search_anchor() != null
 		if searching != search_link.visible:
@@ -2742,6 +2749,53 @@ func _announce_returned_lands() -> void:
 		var card_name := text.get_slice(" played ", 1).get_slice(" (", 0)
 		if me.get("zones", {}).get("Hand", []).any(func(card): return int(card.get("id", -1)) == id):
 			_show_toast("%s returned to your hand. Your land drop for this turn is used." % card_name, 5.0)
+
+## A short note pinned above the card Forge refused, saying why; it fades after a few seconds.
+var explain_note: PanelContainer
+var explain_label: Label
+var explain_card := -1
+var explain_until := 0
+
+func _explain_card(id: int, reason: String) -> void:
+	if explain_note == null:
+		explain_note = PanelContainer.new()
+		var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+		Terminal.panel(explain_note, 10)
+		var frame := explain_note.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		frame.border_color = Color("ff8a6b")
+		frame.shadow_color = Color(0, 0, 0, 0.5)
+		frame.shadow_size = 8
+		explain_note.add_theme_stylebox_override("panel", frame)
+		explain_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		explain_note.z_index = 85
+		explain_label = Label.new()
+		explain_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		explain_label.custom_minimum_size.x = 320
+		explain_label.add_theme_font_override("font", Terminal.font())
+		explain_label.add_theme_font_size_override("font_size", 14)
+		explain_label.add_theme_color_override("font_color", Color("ffd9cf"))
+		explain_note.add_child(explain_label)
+		add_child(explain_note)
+	explain_card = id
+	explain_label.text = "✕ " + reason
+	explain_until = Time.get_ticks_msec() + 6000
+	explain_note.reset_size()
+	explain_note.show()
+	explain_note.modulate.a = 1.0
+	_place_explain_note()
+
+func _place_explain_note() -> void:
+	if explain_note == null or not explain_note.visible: return
+	var view: Control = cards.get(explain_card)
+	if Time.get_ticks_msec() > explain_until or not is_instance_valid(view) or not view.is_visible_in_tree():
+		explain_note.hide()
+		return
+	var to_local := get_global_transform().affine_inverse()
+	var rect: Rect2 = to_local * view.get_global_rect()
+	var at := Vector2(rect.get_center().x - explain_note.size.x * 0.5, rect.position.y - explain_note.size.y - 10)
+	if at.y < 8: at.y = rect.end.y + 10
+	explain_note.position = Vector2(clampf(at.x, 8, size.x - explain_note.size.x - 8), clampf(at.y, 8, size.y - explain_note.size.y - 8)).round()
+	explain_note.modulate.a = clampf((explain_until - Time.get_ticks_msec()) / 600.0, 0.0, 1.0)
 
 func _reject_card_action(id: int) -> void:
 	var view: Control = cards.get(id, zone_views.get(id))

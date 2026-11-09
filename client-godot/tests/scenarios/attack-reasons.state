@@ -1,0 +1,11 @@
+# Go to Declare attackers: the Wall (defender) and the summoning-sick Ogre are tagged CAN'T ATTACK with the reason; Grizzly Bears can attack
+activeplayer=p0
+activephase=MAIN1
+turn=5
+p0life=40
+p0battlefield=Grizzly Bears;Wall of Stone;Gray Ogre|SummonSick;Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
