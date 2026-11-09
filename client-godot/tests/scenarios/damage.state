@@ -1,0 +1,14 @@
+# Damaged creatures show their remaining power/toughness in red under their stats
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Serra Angel|Damage:2;Grizzly Bears|Damage:1;Craw Wurm;Mountain
+p0hand=Lightning Bolt
+p0library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p1life=40
+p1battlefield=Shivan Dragon|Damage:3
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

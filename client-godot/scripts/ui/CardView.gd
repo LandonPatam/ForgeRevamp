@@ -217,6 +217,18 @@ func _draw_stats() -> void:
 	stats_layer.draw_style_box(_borderless_box(int(rect.size.y * 0.25)), rect)
 	var baseline: float = rect.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
 	stats_layer.draw_string(font, Vector2(rect.position.x, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, font_size, Color.WHITE)
+	# Damage marked this turn: what it is right now (power / toughness left), red, just under the stats.
+	var damage := int(data.get("damage", 0))
+	if damage > 0:
+		var now := "%d/%d" % [int(data.get("power", 0)), int(data.get("toughness", 0)) - damage]
+		var hurt := stats_rect(now, font_size)
+		hurt.position.y = rect.end.y + 2.0 * size.x / 144.0
+		hurt.position.x = rect.position.x + (rect.size.x - hurt.size.x) * 0.5
+		var box := _borderless_box(int(hurt.size.y * 0.25))
+		box.bg_color = Color("8a1c1c")
+		stats_layer.draw_style_box(box, hurt)
+		var hurt_baseline: float = hurt.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5
+		stats_layer.draw_string(font, Vector2(hurt.position.x, hurt_baseline), now, HORIZONTAL_ALIGNMENT_CENTER, hurt.size.x, font_size, Color("ffd6d6"))
 
 func _draw_traits() -> void:
 	if data.get("hidden", false): return

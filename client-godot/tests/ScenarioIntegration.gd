@@ -1254,10 +1254,18 @@ func x_wipe() -> bool:
 	await dump("x")
 	return seen
 
+## Damage marked this turn shows under the stats in red as what the creature is right now: a 4/4
+## Angel with 2 damage reads 4/2. Bolting the Craw Wurm adds the badge live.
 func damage() -> bool:
-	print("SCENARIO damage: ", ui.snapshot.players.map(func(p): return p.zones.Battlefield.map(func(c): return [c.name, c.get("power", -1), c.get("toughness", -1), c.get("damage", -1)])))
+	var angel := find_card("Serra Angel", "Battlefield")
+	if not check(int(angel.get("damage", 0)) == 2 and int(ui.cards[int(angel.id)].data.get("damage", 0)) == 2, "The Angel's view carries its 2 damage"): return false
+	if not await tap("Mountain") or not await cast("Lightning Bolt"): return false
+	var wurm := find_card("Craw Wurm", "Battlefield")
+	if not await select_named("Craw Wurm"): return false
+	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and int(find_card("Craw Wurm", "Battlefield").get("damage", 0)) == 3): return check(false, "Bolt marks 3 damage on the Wurm")
+	for index in range(10): await ui.get_tree().process_frame
 	await capture("damage")
-	return true
+	return check(int(ui.cards[int(wurm.id)].data.get("damage", 0)) == 3, "The Wurm's view shows its new damage")
 
 func gearhulk() -> bool:
 	if not await tap("Mountain", 6) or not await cast("Combustible Gearhulk"): return false
