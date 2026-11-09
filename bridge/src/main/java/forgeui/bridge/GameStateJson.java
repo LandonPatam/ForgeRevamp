@@ -187,6 +187,13 @@ final class GameStateJson {
                 prompt.addProperty("cardId", host.getId());
             }
         }
+        if (currentPrompt && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
+            CardView leaving = commanderReplacement(confirm);
+            if (leaving != null) {
+                cards.put(leaving.getId(), leaving);
+                prompt.addProperty("cardId", leaving.getId());
+            }
+        }
         if (prompt.has("cardId")) {
             CardView source = cards.get(prompt.get("cardId").getAsInt());
             if (source != null) prompt.add("sourceCard", describeCard(source, gui.mayView(source)));
@@ -274,6 +281,24 @@ final class GameStateJson {
     }
 
     /** Forge keeps the confirming ability private; its host card is the card being asked about. */
+    /** "Apply replacement effect of Commander Effect?" comes from the player's single rules object,
+     *  not the commander; name the commander that is actually leaving (the one outside the command zone). */
+    static CardView commanderReplacement(forge.gamemodes.match.input.InputConfirm confirm) {
+        try {
+            var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");
+            field.setAccessible(true);
+            if (field.get(confirm) instanceof forge.game.spellability.SpellAbility ability && ability.getHostCard() != null
+                    && "Commander Effect".equals(ability.getHostCard().getName()) && ability.getHostCard().getOwner() != null) {
+                for (var commander : ability.getHostCard().getOwner().getCommanders()) {
+                    if (!commander.isInZone(forge.game.zone.ZoneType.Command)) return commander.getView();
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Keep Forge's own source.
+        }
+        return null;
+    }
+
     static CardView confirmSource(forge.gamemodes.match.input.InputConfirm confirm) {
         try {
             var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");

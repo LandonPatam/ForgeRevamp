@@ -1144,3 +1144,26 @@ func animist() -> bool:
 		if ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"): break
 		await ui.get_tree().create_timer(0.2).timeout
 	return check(ui.modal.visible or not ui.snapshot.asks.is_empty() or str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputSelect"), "Yes starts the land search")
+
+## Your commander is bounced: Forge's replacement question ("put it in the command zone instead?")
+## is a tether from the commander, not the top banner.
+func commander_bounce() -> bool:
+	var effect: Control = ui.incoming_effect
+	for index in range(40):
+		if not await wait_ready(): return false
+		if effect.showing(): effect.dismiss() # I accept the Unsummon
+		if not ui.snapshot.asks.is_empty() or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm": break
+		await ui.get_tree().create_timer(0.2).timeout
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	var commander := find_card("Gravecrawler", "Battlefield")
+	if not check(not commander.is_empty() and panel.callout.visible and not panel.panel.visible, "The commander replacement is a tether, not the top banner"): return false
+	if not check(panel.callout_card == ui.cards.get(int(commander.id)), "It hangs off the commander itself"): return false
+	if not check(panel.callout.yes_button.text.contains("Command zone") and panel.callout.line.text.contains("gravecrawler"), "It asks plainly about moving the commander: " + panel.callout.line.text): return false
+	await capture("ask")
+	panel.callout.yes_button.pressed.emit()
+	for index in range(30):
+		if not await wait_ready(): return false
+		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
+		await ui.get_tree().create_timer(0.2).timeout
+	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone instead of your hand")

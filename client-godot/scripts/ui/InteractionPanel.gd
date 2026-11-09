@@ -153,7 +153,7 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 			var where := str(callout_card.get("kind")).to_lower() if in_zone and callout_card.get("kind") != null else "its zone"
 			question = "Move %s to the command zone?" % str(source.get("name", "your commander"))
 			ok_label = "Command zone"
-			cancel_label = "Leave in " + where
+			cancel_label = ("Leave in " + where) if in_zone else "Let it leave"
 		callout.present(str(source.get("name", "Card")), question, ok_label, cancel_label, ready_now and ask.get("okEnabled", false), ready_now and ask.get("cancelEnabled", false), source if in_zone else {})
 		_place_callout()
 	if not panel.visible:
