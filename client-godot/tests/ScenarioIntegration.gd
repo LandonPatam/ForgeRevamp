@@ -1167,3 +1167,63 @@ func commander_bounce() -> bool:
 		if ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"): break
 		await ui.get_tree().create_timer(0.2).timeout
 	return check(ui.snapshot.players[0].zones.get("Command", []).any(func(card): return card.name == "Gravecrawler"), "Yes puts the commander in the command zone instead of your hand")
+
+## Timing probe (not a pass/fail check): how long the engine takes between your decisions, from
+## your Main 1 to Main 2 and through the next (bot) turn. It answers on the first frame a new
+## decision appears (no settle waits), so every gap is engine, bridge and transport time.
+func phase_timing() -> bool:
+	var log := []
+	var started := Time.get_ticks_msec()
+	var last := started
+	var start_turn := int(ui.snapshot.game.turn)
+	var my_turn_done := -1
+	var step_seen := ""
+	var steps := []
+	var acted_on := ""
+	while Time.get_ticks_msec() - started < 60000:
+		await ui.get_tree().process_frame
+		var state: Dictionary = ui.snapshot
+		if state.is_empty() or not state.get("connectionReady", false): continue
+		var game: Dictionary = state.get("game", {})
+		var label := "T%d p%d %s" % [int(game.get("turn", 0)), int(game.get("activePlayer", -1)), str(game.get("phase", ""))]
+		if label != step_seen:
+			steps.append([Time.get_ticks_msec() - started, label])
+			step_seen = label
+		if int(game.get("turn", 0)) >= start_turn + 2 or game.get("gameOver", false): break
+		var kind: String = state.prompt.get("inputKind", "")
+		if my_turn_done < 0 and int(game.get("activePlayer", -1)) == 0 and str(game.get("phase", "")) == "Main 2" and kind == "InputPassPriority":
+			my_turn_done = Time.get_ticks_msec() - started
+		var key := "%s|%s|%d|%s|%s" % [label, kind, state.stack.size(), str(state.asks.map(func(ask): return ask.id)), str(state.prompt.get("message", "")).left(40)]
+		if key == acted_on: continue
+		var acted := true
+		if ui.incoming_effect.showing(): ui.incoming_effect.dismiss()
+		elif not state.asks.is_empty(): submit_choice()
+		elif kind in ["InputPassPriority", "InputAttack", "InputBlock"] and state.prompt.get("okEnabled", false): ui._intent("ok")
+		else: acted = false
+		if acted:
+			var now := Time.get_ticks_msec()
+			log.append([now - last, label, kind if state.asks.is_empty() else "ask:" + str(state.asks[0].kind), state.stack.size()])
+			last = now
+			acted_on = key
+	var total := Time.get_ticks_msec() - started
+	print("SCENARIO timing: my M1 -> M2 = %d ms; through the next turn = %d ms; decisions = %d" % [my_turn_done, total, log.size()])
+	for entry in log: print("SCENARIO wait %5d ms before deciding at %s (%s, stack %d)" % entry)
+	for entry in steps: print("SCENARIO step at %6d ms: %s" % entry)
+	# Space from a fresh Main 1 on the next turn of yours is not reachable quickly; instead time Space
+	# from this bot turn's end back around: press Space now and wait for your next decision.
+	var space_started := Time.get_ticks_msec()
+	ui._pass_turn()
+	var space_ms := -1
+	var space_label := ""
+	while Time.get_ticks_msec() - space_started < 30000:
+		await ui.get_tree().process_frame
+		var state: Dictionary = ui.snapshot
+		if state.is_empty() or not state.get("connectionReady", false) or not state.asks.is_empty(): continue
+		var kind: String = state.prompt.get("inputKind", "")
+		if kind in ["InputPassPriority", "InputAttack", "InputBlock"] and state.prompt.get("okEnabled", false) and Time.get_ticks_msec() - space_started > 30:
+			var game: Dictionary = state.get("game", {})
+			space_ms = Time.get_ticks_msec() - space_started
+			space_label = "T%d p%d %s" % [int(game.get("turn", 0)), int(game.get("activePlayer", -1)), str(game.get("phase", ""))]
+			break
+	print("SCENARIO space: pass turn -> next decision at %s = %d ms" % [space_label, space_ms])
+	return true

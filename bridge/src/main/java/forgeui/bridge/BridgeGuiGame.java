@@ -71,6 +71,13 @@ final class BridgeGuiGame extends AbstractGuiGame {
             yields.setPref(FPref.YIELD_INTERRUPT_ON_TARGETING, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL, "true");
             yields.setPref(FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL, "false");
+            // Forge's desktop pacing sleeps 200 ms at each stop it passes for you and 400 ms before
+            // each stack item it resolves for you; the table animates and feeds those itself.
+            yields.setPref(FPref.YIELD_SKIP_PHASE_DELAY, "true");
+            yields.setPref(FPref.YIELD_SKIP_RESOLVE_DELAY, "true");
+            // Solo against bots: skip the actionable scan in phases passed anyway (forge-patches/
+            // phase-scan.patch). Online keeps it, where its result also decides some stops.
+            human.setSkipScanOnSkippedPhases(() -> !onlineMatch);
             installModeChooser(human);
         }
         super.setOriginalGameController(player, controller);

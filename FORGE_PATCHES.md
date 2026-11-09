@@ -54,6 +54,18 @@ Against the **original** Forge jar, the three end-to-end tests fail the way the 
 (from `forge/`, after installing `forge-gui`; about 6 minutes; add `-Drun.stress.tests=true` for Forge's multi-game stress tests, which take over an hour and never disconnect anyone).
 Note: `-pl forge-gui-desktop` tests against the **installed** `forge-gui` jar in `~/.m2`, so install first.
 
+## 2026-11-08: skip the actionable scan in skipped phases (solo speed)
+
+Patch: [`forge-patches/phase-scan.patch`](forge-patches/phase-scan.patch) (`PlayerControllerHuman`, +13 lines).
+
+`chooseSpellAbilityToPlay` scans every card the player could play (up to 50 ms per card, 1.5 s
+cap) at **every** priority, before it checks whether the phase is one the player skips anyway, so
+the result is thrown away in most steps of every turn. The patch adds
+`setSkipScanOnSkippedPhases(BooleanSupplier)`; when it answers true and the stack is empty in a
+phase the player skips, the scan is skipped. Default (null) keeps upstream behavior. The ForgeUI
+bridge opts in for solo games only; online keeps the scan, whose result also decides some stops.
+Measured with `tests/scenarios/phase-timing.state` (probe, not a check).
+
 ## Building
 
 Changes in `forge-gui` must be installed for the bridge and the desktop app to see them:
