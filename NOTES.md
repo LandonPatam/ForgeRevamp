@@ -1,21 +1,22 @@
-﻿# Session notes - 2026-11-08 (evening)
+﻿# Session notes - 2026-11-17
 
 ## Current state
 
-- `main` (`ad3d352`) merges `feature/hand-discard-pick` (34 commits + Mac fixture fix `9ba4082`), validated with `check.mjs all` on Windows and macOS. Includes the UI sandbox (`tools/sandbox.mjs`), tethers (decisions hanging off their card; guide in `docs/tethers.md`), the trigger stack builder, wipe/targeted table views that wait for the affected seat, Counterspell-style response tethers, scry with only the looked-at cards (fixed a hidden-card name leak), library carousel (source card beside it, line to its origin), CAN'T BLOCK / CAN'T ATTACK tags with plain reasons, red damage badge, X values, opponent choice/reveal notices.
-- Forge carries a second local patch, `forge-patches/phase-scan.patch` (skip the actionable scan in skipped phases, solo only); recorded in `FORGE_PATCHES.md`. Every machine must apply it and rebuild `forge-gui`, then the bridge.
-- `blocking` (bridge empty-stack NPE) and `insights` (harness coin-toss race) are fixed; all 56 scenarios pass.
+- `main` is still `cda06eb`. Work waits on `feature/stuck-guard-and-reports` (pushed; it contains `fix/playtest-issues-nov16`): `206e0f3` playtest fixes, `79831e3` stuck guard + F8 reports, `083ba8d` step-2 reliability, plus this wrap-up's docs commit. Windows: targeted checks pass; last full `check.mjs all` passed except `blink`, fixed and rerun 3/3.
+- Playtest fixes: Deepglow Skate targets, Maze of Ith during blocks (`hold_phase`), `effectiveCost` (Hazoret's Monument, commander tax, command-zone cost overlay), Outpost Siege modes, Duelist's Heritage yes/no first (`optionalTrigger`), online lobby reopens after a match and friends rejoin.
+- Reliability: `ui/DecisionGuard.gd` shows Forge's raw question when nothing on screen answers it and saves a report; F8 reports (host includes `board.state`); `tools/report-to-scenario.mjs`. Target tether declines what it can't fully handle, staged picks use checked senders, questions are keyed by structure. Rule recorded in AGENTS.md ("Reliability first").
+- Local only, deliberately uncommitted: card-shape sweep (`tools/shape-sweep.mjs`, `check.mjs shapes`, `shape_probe` in `ScenarioIntegration.gd`, `.gitignore` line). Last run: 55/72 resolved, 4 not castable, 13 failures, all in the test robot; the guard never fired. Leave these files out of commits.
 
 ## Known issues
 
-- Red damage badge can sit under the phase strip on opponents' rows.
-- A target tether applies to triggers/abilities from permanents or your zones; targets for a spell cast from hand still use the rail.
-- Library search window can still cover its source when there is no room to slide (no line then).
-- VS Code's Java extension writes into `bridge/target/classes`; Maven can then report PASS on code that does not compile. After bridge edits, compile with the direct `javac` in `docs/testing.md`.
-- Not yet verified: live cross-platform online play with the new hold/notice behavior; packaged builds (`package.ps1` / `package-macos.py`) since these changes.
+- Mac has not built or tested any of these branches. Online lobby rejoin is unverified between real machines (Windows-host/Mac-join and reverse).
+- Shape-sweep robot gaps: waits on AI/engine are treated as stuck; can't target a player from the rail; can't answer scry.
+- Resolving cleanly isn't proof of the right result: nothing yet compares what the player chose on screen with what Forge received.
+- Forge's board export omits the stack and triggers in flight: reports from mid-trigger moments need a step earlier or a recast in the driver.
+- Older items: red damage badge can sit under the phase strip on opponents' rows; spells cast from hand target from the rail; VS Code's Java extension can leave stale `bridge/target/classes` (use the direct `javac` in `docs/testing.md`).
 
 ## Next steps
 
-- Both machines: `git pull --ff-only`, apply `phase-scan.patch` if not already, rebuild Forge and the bridge, then repackage before sharing builds.
-- Play online Windows-host/Mac-join and the reverse; watch for held priority on opponent wipes/targets and the reveal/choice notices.
-- Possible follow-ups: explain other refused actions (targets, casts) like combat; move the opponent-row damage badge clear of the phase strip.
+- Mac: `git fetch && git switch feature/stuck-guard-and-reports && git pull --ff-only`, rebuild the bridge, run `check.mjs bridge`, `ui OnlineRejoin`, `online`, and scenarios `maze,skate,monument,outpost,heritage,heritage-yes,guard,panther-claws,reanimate,blink`. Then cross-platform online play, then merge to `main`.
+- If wanted: choice log (bridge records what Forge received; compare with on-screen choices in tests and F8 reports).
+- Teach the shape robot the three gaps above, then add more cards per shape.
