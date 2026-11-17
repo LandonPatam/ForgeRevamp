@@ -212,6 +212,15 @@ final class GameStateJson {
                 prompt.addProperty("cardId", leaving.getId());
             }
         }
+        if (currentPrompt && !prompt.has("cardId") && input instanceof forge.gamemodes.match.input.InputSelectTargets targeting) {
+            // Forge's message after a refused pick ("Cannot target this player") carries no card;
+            // the question is still the same ability's, so keep naming its source.
+            CardView host = targetSource(targeting);
+            if (host != null) {
+                cards.put(host.getId(), host);
+                prompt.addProperty("cardId", host.getId());
+            }
+        }
         if (currentPrompt && input instanceof forge.gamemodes.match.input.InputSelectTargets targeting && optionalTrigger(targeting)) {
             // "You may have target…" (Duelist's Heritage): Forge asks for the target first and whether
             // to use it only on resolution; the table asks yes/no first.
@@ -318,6 +327,21 @@ final class GameStateJson {
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             // Keep Forge's own source.
+        }
+        return null;
+    }
+
+    static CardView targetSource(forge.gamemodes.match.input.InputSelectTargets targeting) {
+        try {
+            var field = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
+            field.setAccessible(true);
+            // Only a permanent's own ability or trigger (what the target tether handles). A spell being
+            // cast is left exactly as Forge words it: the cast flow treats it differently.
+            if (field.get(targeting) instanceof forge.game.spellability.SpellAbility ability && ability.getHostCard() != null
+                    && ability.getHostCard().isInZone(forge.game.zone.ZoneType.Battlefield))
+                return ability.getHostCard().getView();
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Keep Forge's own prompt.
         }
         return null;
     }

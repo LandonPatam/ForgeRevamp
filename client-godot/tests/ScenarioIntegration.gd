@@ -1561,6 +1561,16 @@ func skate() -> bool:
 	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 100): return check(false, "Deepglow Skate's trigger asks for targets")
 	for index in range(10): await ui.get_tree().process_frame
 	if not check(ui.interaction_panel.target_tether, "The targets are a tether off the Skate"): return false
+	# Checked sending: a pick Forge refuses stops the send and is unmarked, never a silent wait.
+	# Skate targets permanents only, so a player is refused.
+	ui.target_staged = [{"kind": "player", "id": 1, "name": "AI 1"}]
+	ui.interaction_panel.set_target_staged(ui.target_staged)
+	ui._commit_targets()
+	var started := Time.get_ticks_msec()
+	while ui.target_committing and Time.get_ticks_msec() - started < 6000: await ui.get_tree().process_frame
+	if not check(not ui.target_committing and ui.target_staged.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", "A refused pick ends the send and is unmarked"): return false
+	if not await wait_ready(): return false # The refusal resyncs the table first.
+	for index in range(10): await ui.get_tree().process_frame
 	for name in ["Grizzly Bears", "Jace Beleren"]:
 		ui._click_card(find_card(name, "Battlefield").id)
 		for index in range(5): await ui.get_tree().process_frame

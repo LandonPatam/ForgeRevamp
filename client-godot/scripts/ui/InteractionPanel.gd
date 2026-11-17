@@ -359,6 +359,11 @@ func _target_anchor() -> Control:
 	if prompt.get("inputKind", "") != "InputSelectTargets" or not state.get("asks", []).is_empty(): return null
 	var source: Dictionary = prompt.get("sourceCard", {})
 	if source.is_empty() or source.get("hidden", false): return null
+	# Only when every legal target can be clicked on the table (players are rows in the box). A target
+	# in a graveyard or on the stack can't be staged here: the rail and its card browser take it.
+	for id in prompt.get("selectable", []):
+		var target: Control = cards.get(int(id))
+		if not is_instance_valid(target) or not (target.is_visible_in_tree() or str(target.data.get("zone", "")) == "Battlefield"): return null
 	var view: Control = cards.get(int(source.get("id", -1)))
 	if is_instance_valid(view) and view.is_visible_in_tree() and str(view.data.get("zone", "")) == "Battlefield": return view
 	if zone_view.is_valid():

@@ -90,6 +90,7 @@ var hand_pick_committing := false
 ## one-target choice on the first click). {kind: "card"|"player", id, name}; player ids are seats.
 var target_staged: Array = []
 var target_queue: Array = []
+var target_prompt_source := -1
 var decision_guard: Control
 var target_awaiting: Dictionary = {}
 var target_committing := false
@@ -1785,6 +1786,9 @@ func _card_unhovered(source: Control) -> void:
 
 func _process(_delta: float) -> void:
 	if explain_note != null and explain_note.visible: _place_explain_note()
+	# Staged picks in flight: resend after a dropped request, or notice that Forge refused one.
+	if target_committing: _advance_targets()
+	if hand_pick_committing: _advance_hand_pick()
 	if is_instance_valid(search_link):
 		var searching: bool = live and modal.visible and is_instance_valid(modal_panel) and modal_panel is SelectionDialog and modal_panel.carousel_mode and _search_anchor() != null
 		if searching != search_link.visible:
@@ -3204,21 +3208,59 @@ func _advance_targets() -> void:
 	if prompt.get("inputKind", "") != "InputSelectTargets": return
 	var chosen: Array = prompt.get("chosen", [])
 	if not target_awaiting.is_empty():
-		if not chosen.has(_target_ref(target_awaiting)): return
-		target_awaiting = {}
+		if chosen.has(_target_ref(target_awaiting)): target_awaiting = {}
+		elif _commit_refused():
+			var refused: Dictionary = target_awaiting
+			target_committing = false
+			target_queue.clear()
+			target_awaiting = {}
+			target_staged = target_staged.filter(func(ref): return not (ref.kind == refused.kind and int(ref.id) == int(refused.id)))
+			interaction_panel.set_target_staged(target_staged)
+			_show_toast("Forge didn't accept %s as a target. Pick again." % str(refused.get("name", "that")), 4.0)
+			return
+		else: return
 	while not target_queue.is_empty() and chosen.has(_target_ref(target_queue[0])): target_queue.pop_front()
+	# A second request while one is in flight is dropped by the adapter, and one per snapshot revision.
+	if not _adapter_idle() or int(snapshot.get("revision", -1)) == commit_sent_revision: return
 	if not target_queue.is_empty():
 		target_awaiting = target_queue.pop_front()
+		_note_commit_send()
 		if target_awaiting.kind == "card": _intent("card", {"id": int(target_awaiting.id)})
 		else: _intent("player", {"id": int(target_awaiting.id)})
 	elif prompt.get("okEnabled", false):
+		_note_commit_send()
 		_intent("ok")
+
+## Checked sending for locally staged picks (targets, hand picks): one pick per free adapter, each
+## confirmed by Forge's `chosen` list. Forge moving on without it (a newer snapshot, nothing in
+## flight, a moment later) means it refused that pick; the loop stops instead of waiting forever.
+var commit_sent_revision := -1
+var commit_sent_at := 0
+
+func _adapter_idle() -> bool:
+	return not live or (str(adapter.get("pending")) == "" and adapter.get("syncing") != true)
+
+func _note_commit_send() -> void:
+	commit_sent_revision = int(snapshot.get("revision", -1))
+	commit_sent_at = Time.get_ticks_msec()
+
+func _commit_refused() -> bool:
+	return _adapter_idle() and int(snapshot.get("revision", -1)) > commit_sent_revision and Time.get_ticks_msec() - commit_sent_at > 1500
 
 ## A new targeting prompt starts with nothing staged; a finished one clears the commit.
 func _sync_targets() -> void:
 	var prompt: Dictionary = snapshot.get("prompt", {})
-	var key := str(prompt.get("inputKind", "")) + "|" + _target_prompt_text(str(prompt.get("message", ""))) + "|" + str(prompt.get("sourceCard", {}).get("id", -1))
-	if key != target_prompt_key:
+	# The question's identity is structural (source, kind, legal targets), never its wording: Forge
+	# rewrites the text after each pick ("Targeted: …") and after a refused one ("Cannot target…").
+	var legal: Array = prompt.get("selectable", []).map(func(id): return int(id))
+	legal.sort()
+	# Forge briefly drops the source while it explains a refused pick: that is still the same question,
+	# but a different source card asking (two triggers in a row) is a new one.
+	var source := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
+	var key := str(prompt.get("inputKind", "")) + "|" + str(legal) + "|" + str(prompt.get("selMin", 0)) + "-" + str(prompt.get("selMax", 0))
+	var new_source := source >= 0 and target_prompt_source >= 0 and source != target_prompt_source
+	if source >= 0: target_prompt_source = source
+	if key != target_prompt_key or new_source:
 		target_prompt_key = key
 		target_staged.clear()
 		target_queue.clear()
@@ -3226,15 +3268,6 @@ func _sync_targets() -> void:
 		target_committing = false
 		interaction_panel.target_staged = []
 	_advance_targets()
-
-## Forge rewrites a multi-target prompt after each pick ("Targeted: Grizzly Bears (322)",
-## "(7 more can be targeted)"); that progress is the same prompt, so it must not reset a commit
-## in flight (Deepglow Skate's "any number of target permanents").
-static func _target_prompt_text(message: String) -> String:
-	var cut := message.find("\nTargeted:")
-	if cut >= 0: message = message.left(cut)
-	var lines := Array(message.split("\n")).filter(func(line): return not str(line).contains("more can be targeted"))
-	return "\n".join(PackedStringArray(lines)).strip_edges()
 
 ## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
 func _stage_hand_pick(data: Dictionary) -> bool:
@@ -3262,13 +3295,25 @@ func _advance_hand_pick() -> void:
 	if not hand_pick_committing or not snapshot.get("connectionReady", false): return
 	var chosen: Array = snapshot.prompt.get("chosen", [])
 	if hand_pick_awaiting >= 0:
-		if not chosen.has("card:" + str(hand_pick_awaiting)): return
-		hand_pick_awaiting = -1
+		if chosen.has("card:" + str(hand_pick_awaiting)): hand_pick_awaiting = -1
+		elif _commit_refused():
+			var refused := hand_pick_awaiting
+			hand_pick_committing = false
+			hand_pick_queue.clear()
+			hand_pick_awaiting = -1
+			hand_pick_staged.erase(refused)
+			_show_toast("Forge didn't accept that card. Pick again.", 4.0)
+			_apply_state(snapshot)
+			return
+		else: return
 	while not hand_pick_queue.is_empty() and chosen.has("card:" + str(hand_pick_queue[0])): hand_pick_queue.pop_front()
+	if not _adapter_idle() or int(snapshot.get("revision", -1)) == commit_sent_revision: return
 	if not hand_pick_queue.is_empty():
 		hand_pick_awaiting = int(hand_pick_queue.pop_front())
+		_note_commit_send()
 		_intent("card", {"id": hand_pick_awaiting})
 	elif snapshot.prompt.get("okEnabled", false):
+		_note_commit_send()
 		_intent("ok")
 
 ## A discard confirms with a red button; other hand picks keep the purple primary style.
@@ -3327,6 +3372,9 @@ func _place_hand_pick() -> void:
 ## The cards were revealed by someone else's effect: the resolving stack item isn't yours.
 func _others_reveal() -> bool:
 	if snapshot.get("stack", []).is_empty() or snapshot.get("players", []).is_empty(): return false
+	# Only a plain acknowledgement is answered for you. A real yes/no from Forge ("Yes"/"No",
+	# "pay {2}?") that arrives while revealed cards are still listed stays your question.
+	if str(snapshot.get("prompt", {}).get("okLabel", "OK")) != "OK": return false
 	return int(snapshot.stack[0].get("controller", -1)) != int(snapshot.players[0].get("engineId", 0))
 
 func _present_card_selection() -> void:
