@@ -794,6 +794,21 @@ public final class BridgeMain {
                 shutdown.start();
                 return;
             }
+            if (type.equals("report")) {
+                // A bug report from the host's own app: Forge's full board export (every zone,
+                // hidden ones too), which is exactly the test-board format, written beside the
+                // client's capture. Online seats never get hidden information this way.
+                BridgeProtocol.require(!seat.online(), "Only the host can save the full board");
+                var folder = java.nio.file.Path.of(BridgeProtocol.string(msg, "directory")).toAbsolutePath().normalize();
+                BridgeProtocol.require(java.nio.file.Files.isDirectory(folder) && folder.getFileName().toString().startsWith("report-"), "Report folder is missing");
+                BridgeProtocol.require(gui.getGameController() instanceof forge.player.PlayerControllerHuman, "No game to save");
+                var game = ((forge.player.PlayerControllerHuman)gui.getGameController()).getGame();
+                var state = new forge.game.GameState();
+                state.initFromGame(game);
+                java.nio.file.Files.writeString(folder.resolve("board.state"), state.toString());
+                reply(seat, channel, "ack", requestId, "reported", "Board saved");
+                return;
+            }
             BridgeProtocol.require(!sessionEnding.get(), "This session has ended");
             if (type.equals("answer")) {
                 seat.gui.answer(BridgeProtocol.integer(msg.get("id")), msg.get("value"));
@@ -804,6 +819,8 @@ public final class BridgeMain {
             dispatchAction(seat, channel, requestId, msg);
         } catch (IllegalArgumentException e) {
             reply(seat, channel, "error", requestId, "invalid_request", e.getMessage());
+        } catch (java.io.IOException e) {
+            reply(seat, channel, "error", requestId, "report_failed", "Could not write the board: " + e.getMessage());
         } catch (RuntimeException e) {
             reply(seat, channel, "error", requestId, "invalid_request", "Malformed request");
         }

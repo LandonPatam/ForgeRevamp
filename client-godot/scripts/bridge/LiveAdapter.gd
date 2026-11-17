@@ -18,6 +18,9 @@ var retry_in := 0.0
 var request_counter := 0
 var last_card_intent := -1
 var pending := ""
+## A host bug report waiting for the bridge to write Forge's board export.
+signal report_saved(ok: bool, message: String)
+var report_request := ""
 var pending_revision := -1
 var pending_answer := -1
 var acknowledged := false
@@ -177,6 +180,11 @@ func _receive(message: Dictionary) -> void:
 		_publish()
 		return
 	var kind: String = message.get("type", "")
+	if not report_request.is_empty() and message.get("requestId", "") == report_request:
+		# A bug report's board export: outside the action/revision flow, so it changes no game state.
+		report_request = ""
+		report_saved.emit(kind == "ack", str(message.get("message", "")))
+		return
 	if kind == "sessionEnded":
 		if not session.is_empty() and message.get("sessionId", "") != session: return
 		_finish_session(message.get("message", "The host ended the game."))
@@ -300,6 +308,18 @@ func _publish() -> void:
 		# A card being paid for is provisional, not yet a committed stack item.
 		visible_state.autoPassStackId = -1
 	state_changed.emit(visible_state)
+
+## Asks the host bridge to write Forge's full board export (board.state) into `directory`.
+## Online seats are refused by the bridge (it would reveal hidden cards). False when not sent.
+func request_report(directory: String) -> bool:
+	if not connected or session.is_empty() or not seat_token.is_empty(): return false
+	request_counter += 1
+	report_request = "report-" + str(Time.get_ticks_usec()) + "-" + str(request_counter)
+	var request := {"protocolVersion": 2, "sessionId": session, "type": "report", "directory": directory, "requestId": report_request}
+	if socket.send_text(JSON.stringify(request)) != OK:
+		report_request = ""
+		return false
+	return true
 
 func send_intent(intent: Dictionary) -> void:
 	var action: String = intent.get("action", "")

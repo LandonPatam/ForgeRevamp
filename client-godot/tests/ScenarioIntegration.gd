@@ -1603,3 +1603,33 @@ func monument() -> bool:
 	ui._apply_table_style()
 	await capture("ready")
 	return true
+
+## Never a dead end: with the target tether gone (as when the table doesn't recognise a question),
+## the guard shows Forge's raw question after a few seconds and saves a bug report with Forge's
+## board export; its buttons answer Forge (the Bears get the -1/-1 counter).
+func guard() -> bool:
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 200): return check(false, "The Constrictor trigger must ask for a target")
+	var guard_view: Control = ui.decision_guard
+	var started := Time.get_ticks_msec()
+	while not guard_view.box.visible and Time.get_ticks_msec() - started < 9000:
+		ui.interaction_panel.callout.hide()
+		ui.interaction_panel.panel.hide()
+		ui.primary.disabled = true # "Up to one" also lets OK answer: take every control away.
+		ui.cancel_button.disabled = true
+		await ui.get_tree().process_frame
+	if not check(guard_view.box.visible and Time.get_ticks_msec() - started >= 3500, "The guard shows Forge's question once nothing has answered it for a few seconds"): return false
+	var report: String = guard_view.last_report
+	for index in range(50):
+		if FileAccess.file_exists(report.path_join("board.state")): break
+		await ui.get_tree().create_timer(0.1).timeout
+	for file in ["snapshot.json", "history.json", "ui.json", "notes.txt", "board.state"] + ([] if DisplayServer.get_name() == "headless" else ["screen.png"]):
+		if not check(FileAccess.file_exists(report.path_join(file)), "The report has " + file + ": " + report): return false
+	var board := FileAccess.get_file_as_string(report.path_join("board.state"))
+	if not check(board.contains("Persistent Constrictor") and board.contains("Grizzly Bears"), "board.state is Forge's board export"): return false
+	print("SCENARIO report: ", report)
+	await capture("fallback")
+	var bears: Array = guard_view.body.find_children("*", "Button", true, false).filter(func(button): return button.text == "Grizzly Bears")
+	if not check(bears.size() == 1, "The fallback lists the legal targets"): return false
+	bears[0].pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears" and int(card.get("counters", {}).get("M1M1", 0)) == 1) or ui.snapshot.players[1].zones.Graveyard.any(func(card): return card.name == "Grizzly Bears"), 100): return check(false, "The fallback's pick reaches Forge")
+	return check(not guard_view.box.visible, "The fallback closes once answered")

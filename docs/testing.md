@@ -76,6 +76,16 @@ Adding one (no other registration needed):
 
 `mind_stone()` is the template: it clicks Mind Stone, clicks the "Add {C}" ability in the real Forge popup, and asserts that the stone tapped and `{C}` is floating. With the old Confirm-required popup it fails with "Choosing the ability must tap Mind Stone".
 
+### Bug reports from play
+
+F8 at the table saves a report folder under Godot's `user://reports/` (the path is shown and printed): `snapshot.json` (this seat's view), `history.json` (the last 40 prompts/asks/stacks), `ui.json` (which controls were showing), `notes.txt`, `screen.png` and, for the host or a solo game, `board.state`, Forge's own board export in the test-board format. The stuck guard (`ui/DecisionGuard.gd`) saves one automatically whenever it has to step in. Turn one into a board:
+
+```
+node client-godot/tools/report-to-scenario.mjs "<report folder>" <name>
+```
+
+It writes `tests/scenarios/<name>.state` with the reported decision as comments and prints the driver to add. Forge's export holds the board, not the stack or triggers in flight: when the question came from a trigger or spell, start one step earlier or recast it in the driver. Joined online seats get no `board.state` (it would reveal hidden cards); the host presses F8 instead.
+
 ### Probe, then design
 
 Before designing a UI change for an engine decision, see exactly what Forge sends. Add the board and a throwaway driver that reaches the moment and prints it, run it, read it, then design:

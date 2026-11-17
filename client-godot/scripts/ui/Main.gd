@@ -90,6 +90,7 @@ var hand_pick_committing := false
 ## one-target choice on the first click). {kind: "card"|"player", id, name}; player ids are seats.
 var target_staged: Array = []
 var target_queue: Array = []
+var decision_guard: Control
 var target_awaiting: Dictionary = {}
 var target_committing := false
 var target_prompt_key := ""
@@ -696,6 +697,10 @@ func _build_shell() -> void:
 	board_choice.answered.connect(func(id, value): _intent("answer", {"id": id, "value": value}))
 	add_child(board_choice)
 	board_choice.visibility_changed.connect(_present_interaction)
+	# Never a dead end: Forge's raw question when nothing on screen answers it; F8 bug reports.
+	decision_guard = preload("res://scripts/ui/DecisionGuard.gd").new()
+	decision_guard.main = self
+	add_child(decision_guard)
 
 
 func _present_interaction() -> void:
