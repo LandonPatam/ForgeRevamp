@@ -8,6 +8,11 @@ signal match_started(url: String, token: String)
 const NET_VERSION := 5
 const DEFAULT_PORT := 36743
 const CONNECT_TIMEOUT_MS := 10000
+## After the host ends a match its lobby reopens on the same port; a joined player rejoins it,
+## retrying while the host's match process lets go of the port.
+const REJOIN_WINDOW_MS := 30000
+const REJOIN_RETRY_MS := 1000
+const REJOIN_NOTICE := "RETURNING TO THE HOST'S LOBBY"
 const OFFLINE_ROLE := ""
 var api: Node
 ## "", "hosting", "connecting" or "joined".
@@ -29,6 +34,10 @@ var connect_deadline := 0
 var join_message: Dictionary = {}
 var status_timer: Timer
 var deck_request := -1
+## How this player last joined (address, profile, deck), kept for rejoining after the match.
+var rejoin_info: Dictionary = {}
+var rejoin_until := 0
+var retry_at := 0
 
 func _ready() -> void:
 	status_timer = Timer.new()
@@ -113,6 +122,7 @@ func join(text: String, profile: Dictionary, selected_deck: String) -> void:
 	server_host = parsed.host
 	server_port = parsed.port
 	deck_id = selected_deck
+	rejoin_info = {"address": address, "profile": profile.duplicate(true)}
 	join_message = {"type": "join", "version": NET_VERSION, "name": profile.get("name", ""), "avatar": profile.get("avatar", 0), "portrait": profile.get("portrait", "")}
 	role = "connecting"
 	deck_request = _request("lobby.deckText", {"id": selected_deck})
@@ -145,7 +155,21 @@ func set_profile(profile: Dictionary) -> void:
 		socket.send_text(JSON.stringify({"type": "profile", "avatar": int(profile.get("avatar", 0)), "portrait": str(profile.get("portrait", ""))}))
 
 func leave() -> void:
+	rejoin_until = 0
 	if role in ["connecting", "joined"]: _become_idle("")
+
+## The host ended the match: go back into its lobby with the same profile and deck (not ready).
+## True when a rejoin started.
+func rejoin_after_match() -> bool:
+	if not is_idle() or rejoin_info.is_empty(): return false
+	var info := rejoin_info.duplicate(true)
+	join(str(info.address), info.profile, deck_id)
+	if role != "connecting": return false
+	rejoin_until = Time.get_ticks_msec() + REJOIN_WINDOW_MS
+	notice.emit(REJOIN_NOTICE)
+	return true
+
+func rejoining() -> bool: return rejoin_until > 0 and role == "connecting"
 
 func _request(operation: String, arguments: Dictionary = {}) -> int:
 	if api == null: return -1
@@ -164,6 +188,7 @@ func _response(id: int, operation: String, result: Dictionary) -> void:
 			deck_request = -1
 			if role == "connecting":
 				join_message.deckData = result.get("deckData", "")
+				rejoin_info.deckData = join_message.deckData
 				_open_socket()
 			elif is_joined() and socket != null:
 				socket.send_text(JSON.stringify({"type": "deck", "deckData": result.get("deckData", "")}))
@@ -204,6 +229,9 @@ func _open_socket() -> void:
 		_become_idle("That address could not be used. Check the IP the host gave you.")
 
 func _process(_delta: float) -> void:
+	if socket == null and retry_at > 0 and Time.get_ticks_msec() >= retry_at:
+		retry_at = 0
+		_open_socket()
 	if socket == null: return
 	socket.poll()
 	var state := socket.get_ready_state()
@@ -215,14 +243,32 @@ func _process(_delta: float) -> void:
 		var message = JSON.parse_string(socket.get_packet().get_string_from_utf8())
 		if message is Dictionary: _lobby_message(message)
 	if socket == null or state == WebSocketPeer.STATE_OPEN: return
+	if (state == WebSocketPeer.STATE_CLOSED or Time.get_ticks_msec() > connect_deadline) and _retry_rejoin(): return
 	if state == WebSocketPeer.STATE_CLOSED:
 		_become_idle("Could not reach that host. Check the IP, and that the host's port is open." if role == "connecting" else "The connection to the host was lost.")
 	elif role == "connecting" and Time.get_ticks_msec() > connect_deadline:
 		_become_idle("Could not reach that host. Check the IP, and that the host's port is open.")
 
+## While rejoining after a match, a refused or dropped connection means the host's lobby isn't
+## open yet: try again shortly instead of giving up, until the window closes.
+func _retry_rejoin() -> bool:
+	if role != "connecting" or rejoin_until <= 0 or Time.get_ticks_msec() > rejoin_until: return false
+	if socket != null: socket.close()
+	socket = null
+	join_message = _rejoin_message()
+	retry_at = Time.get_ticks_msec() + REJOIN_RETRY_MS
+	return true
+
+func _rejoin_message() -> Dictionary:
+	var profile: Dictionary = rejoin_info.get("profile", {})
+	var message := {"type": "join", "version": NET_VERSION, "name": profile.get("name", ""), "avatar": profile.get("avatar", 0), "portrait": profile.get("portrait", "")}
+	message.deckData = rejoin_info.get("deckData", "")
+	return message
+
 func _lobby_message(message: Dictionary) -> void:
 	match message.get("type", ""):
 		"lobby":
+			rejoin_until = 0
 			role = "joined"
 			roster = message.get("roster", [])
 			open_seats = int(message.get("open", 0))
@@ -234,7 +280,9 @@ func _lobby_message(message: Dictionary) -> void:
 				error = message.get("message", "The host refused that request.")
 				notice.emit(error)
 				changed.emit()
-			else: _become_idle(message.get("message", "The host refused to seat you."))
+			else:
+				rejoin_until = 0
+				_become_idle(message.get("message", "The host refused to seat you."))
 		"closed":
 			_become_idle(message.get("message", "The host closed the session."))
 		"start":
@@ -246,6 +294,8 @@ func _lobby_message(message: Dictionary) -> void:
 			match_started.emit(url, token)
 
 func _become_idle(message: String) -> void:
+	retry_at = 0
+	rejoin_until = 0
 	if socket != null: socket.close()
 	socket = null
 	role = OFFLINE_ROLE

@@ -26,6 +26,9 @@ func step() -> bool:
 	if ui.incoming_effect.panel.visible and not state.stack.is_empty() and int(ui.incoming_effect.active.get("stackId", -1)) == int(state.stack[0].id):
 		ui.incoming_effect.resolve_button.pressed.emit()
 		return true
+	if ui.interaction_panel.optional_gate:
+		ui.interaction_panel.callout.yes_button.pressed.emit()
+		return true
 	if press_card_tether(): return true
 	if ui.interaction_panel.panel.visible and not ui.interaction_panel.confirm_button.disabled:
 		ui.interaction_panel.confirm_button.pressed.emit()
@@ -39,7 +42,7 @@ func prepared() -> bool:
 	while Time.get_ticks_msec() < deadline:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
-		if scenario in ["blocking", "combat-reasons"] and state.prompt.get("inputKind", "") == "InputBlock": return true
+		if scenario in ["blocking", "combat-reasons", "maze"] and state.prompt.get("inputKind", "") == "InputBlock": return true
 		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
 		# the scenario driver answers it.
 		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty() and not (ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd")): return true
@@ -48,7 +51,7 @@ func prepared() -> bool:
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
 			ui._present_card_selection() # A choice already waiting behind the coin (Manifold Insights) opens now.
-		if scenario not in ["blocking", "combat-reasons"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
+		if scenario not in ["blocking", "combat-reasons", "maze"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
 			else: return true
@@ -80,8 +83,16 @@ func cast(name: String) -> bool:
 	if not await wait_ready(): return false
 	return check(not (ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority" and zone("Hand").any(func(value): return value.id == card.id)), "Cast was rejected: " + name + " / " + str(ui.snapshot.prompt))
 
+## A "you may" trigger's yes/no comes before its targets: answer Yes (use it) like Forge's own confirm did.
+func use_optional_trigger() -> bool:
+	if not ui.interaction_panel.optional_gate: return true
+	ui.interaction_panel.callout.yes_button.pressed.emit()
+	for index in range(10): await ui.get_tree().process_frame
+	return check(not ui.interaction_panel.optional_gate, "Yes leaves the optional trigger's yes/no")
+
 func select_named(name: String) -> bool:
 	if not ui.snapshot.asks.is_empty(): return await choose_named(name)
+	if not await use_optional_trigger(): return false
 	# A permanent's targets are a tether: click the card (staged), then the tether's Confirm.
 	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.target_tether:
 		var legal: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
@@ -266,6 +277,8 @@ func panther_claws() -> bool:
 		if not check(not ui.incoming_effect.panel.visible, "Our Claws target must not produce a second spell/ability preview"): return false
 		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets":
 			targeted = true
+			# The optional "attach it?" is now asked before the target (and Forge's own confirm is answered from it).
+			if ui.interaction_panel.optional_gate: decisions += 1
 			if not await select_named("T'Challa, the Black Panther"): return false
 			continue
 		if not ui.snapshot.asks.is_empty() or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm":
@@ -1254,7 +1267,9 @@ func phase_timing() -> bool:
 ## --- Probes for the next batch (print what Forge sends; replaced by real checks) ---
 func dump(tag: String) -> void:
 	var s: Dictionary = ui.snapshot
-	print("SCENARIO ", tag, " prompt: ", JSON.stringify(s.prompt).left(700))
+	var shown_prompt: Dictionary = s.prompt.duplicate()
+	shown_prompt.erase("cards")
+	print("SCENARIO ", tag, " prompt: ", JSON.stringify(shown_prompt).left(900))
 	print("SCENARIO ", tag, " asks: ", JSON.stringify(s.asks).left(1200))
 	print("SCENARIO ", tag, " stack: ", JSON.stringify(s.stack).left(600))
 	print("SCENARIO ", tag, " ui: modal=", (ui.modal_panel.get_script().resource_path.get_file() if ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), " rail=", ui.interaction_panel.panel.visible, " tether=", ui.interaction_panel.callout.visible, " effect=", ui.incoming_effect.showing())
@@ -1483,3 +1498,108 @@ func courtyard() -> bool:
 	panel.info_tether.yes_button.pressed.emit()
 	for index in range(5): await ui.get_tree().process_frame
 	return check(not panel.info_tether.visible, "OK clears it")
+
+## Maze of Ith clicked while declaring blockers is not a refused block: it queues with a note, the
+## seat keeps the priority after blocks (even on a bot's turn) and Maze activates there, so the
+## flying Angel's damage to Jace is prevented.
+func maze() -> bool:
+	ui._click_card(find_card("Maze of Ith", "Battlefield").id)
+	for index in range(10): await ui.get_tree().process_frame
+	if not await wait_ready(): return false
+	await capture("queued")
+	if not check(ui.deferred_activation == int(find_card("Maze of Ith", "Battlefield").id) and ui.explain_note.visible and not ui.explain_label.text.begins_with("✕"), "Clicking Maze of Ith while declaring blockers queues it with a note instead of a refused block: %s deferred=%s note=%s" % [ui.explain_label.text, ui.deferred_activation, ui.explain_note.visible]): return false
+	ui._intent("ok")
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 80): return check(false, "Maze of Ith activates once blockers are declared: %s phase=%s deferred=%s log=%s" % [ui.snapshot.prompt.get("inputKind", ""), ui.snapshot.game.phase, ui.deferred_activation, ui.snapshot.log.slice(0, 6)])
+	for index in range(10): await ui.get_tree().process_frame
+	if not await select_named("Serra Angel"): return false
+	if not await pass_until(func(): return ui.snapshot.log.any(func(line): return str(line).contains("Combat Damage") or str(line).contains("End of Combat")), 120): return check(false, "Combat ends")
+	var jace: Dictionary = find_card("Jace Beleren", "Battlefield")
+	return check(not jace.is_empty() and int(jace.get("counters", {}).get("LOYALTY", 0)) == 3, "Maze of Ith prevents the flying Angel's damage to Jace: " + str(jace.get("counters", {})))
+
+## Duelist's Heritage ("you may have target attacking creature gain double strike") asks yes/no on
+## its card before any target. No: nothing to pick and nothing gains double strike. Yes (heritage-yes):
+## the target tether follows and Forge's own later "use it?" is answered from that Yes.
+func heritage() -> bool:
+	return await _heritage(false)
+
+func heritage_yes() -> bool:
+	return await _heritage(true)
+
+func _heritage(use: bool) -> bool:
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputAttack", 100): return check(false, "Reach declare attackers")
+	for name in ["Grizzly Bears", "Craw Wurm"]:
+		ui._click_card(find_card(name, "Battlefield").id)
+		ui._choose_player(1)
+		if not await wait_ready(): return false
+	ui._intent("ok")
+	if not await pass_until(func(): return ui.snapshot.prompt.get("optionalTrigger", false), 60): return check(false, "Duelist's Heritage's target prompt is marked optional: " + str(ui.snapshot.prompt.get("inputKind", "")))
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(panel.optional_gate and panel.callout.visible and panel.callout.line.text.to_lower().contains("double strike") and panel.target_staged.is_empty(), "A yes/no tether comes first: " + panel.callout.line.text): return false
+	ui._click_card(find_card("Craw Wurm", "Battlefield").id)
+	for index in range(5): await ui.get_tree().process_frame
+	if not check(panel.target_staged.is_empty(), "Table clicks don't stage a target before the yes/no"): return false
+	await capture("ask")
+	if use:
+		panel.callout.yes_button.pressed.emit()
+		for index in range(10): await ui.get_tree().process_frame
+		if not check(panel.target_tether and not panel.optional_gate, "Yes opens the target tether"): return false
+		if not await select_named("Craw Wurm"): return false
+	else:
+		panel.callout.no_button.pressed.emit()
+	var saw_confirm := [false]
+	if not await pass_until(func():
+		if ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and ui.interaction_panel.callout.visible: saw_confirm[0] = true
+		return ui.snapshot.stack.is_empty() and ui.snapshot.log.any(func(line): return str(line).contains("Duelist's Heritage")) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "The trigger resolves without further questions")
+	if not check(not saw_confirm[0], "Forge's own \"use it?\" never shows"): return false
+	var wurm := find_card("Craw Wurm", "Battlefield")
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	var strikers := [wurm, bears].filter(func(card): return card.get("keywords", []).has("DOUBLE_STRIKE")).map(func(card): return card.name)
+	return check(strikers == (["Craw Wurm"] if use else []), "Double strike went to %s" % [strikers])
+func skate() -> bool:
+	if not await tap("Island", 5) or not await cast("Deepglow Skate"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 100): return check(false, "Deepglow Skate's trigger asks for targets")
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(ui.interaction_panel.target_tether, "The targets are a tether off the Skate"): return false
+	for name in ["Grizzly Bears", "Jace Beleren"]:
+		ui._click_card(find_card(name, "Battlefield").id)
+		for index in range(5): await ui.get_tree().process_frame
+	if not check(ui.interaction_panel.target_staged.size() == 2, "Both permanents are staged"): return false
+	ui.interaction_panel.callout.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "Confirm sends both targets and the trigger resolves: " + str(ui.snapshot.prompt.get("chosen", [])))
+	var bears := int(find_card("Grizzly Bears", "Battlefield").get("counters", {}).get("P1P1", 0))
+	var jace := int(find_card("Jace Beleren", "Battlefield").get("counters", {}).get("LOYALTY", 0))
+	return check(bears == 4 and jace == 6, "Counters doubled: Bears %d (want 4), Jace %d (want 6)" % [bears, jace])
+
+## Chaos Warp puts Outpost Siege onto the battlefield: its "Khans or Dragons" choice shows the
+## Siege (not a blank card) and what each mode does, and picking Dragons lands the Siege.
+func outpost() -> bool:
+	if not await tap("Mountain", 3) or not await cast("Chaos Warp"): return false
+	if not await select_named("Treasure Token"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty(), 100): return check(false, "Chaos Warp reveals the top card")
+	if ui.snapshot.asks[0].kind == "message" and not press_card_tether(): submit_choice()
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "choose", 100): return check(false, "Outpost Siege asks Khans or Dragons")
+	for index in range(20): await ui.get_tree().process_frame
+	var ask: Dictionary = ui.snapshot.asks[0]
+	var labels: Array = ask.options.map(func(option): return str(option.get("label", "")))
+	if not check(ask.options.all(func(option): return str(option.get("card", {}).get("name", "")) == "Outpost Siege"), "Both options show Outpost Siege, not a hidden card"): return false
+	if not check(labels[0].begins_with("Khans —") and labels[0].contains("upkeep") and labels[1].begins_with("Dragons —") and labels[1].contains("damage"), "Each option says what it does: " + str(labels)): return false
+	if not check(ui.modal.visible and str(ui.modal_panel.ask.get("sourceCard", {}).get("name", "")) == "Outpost Siege", "The popup shows the Siege beside its modes"): return false
+	await capture("modes")
+	ui.modal_panel._toggle(1)
+	ui.modal_panel._submit()
+	if not await pass_until(func(): return not find_card("Outpost Siege", "Battlefield").is_empty() and ui.snapshot.asks.is_empty(), 100): return check(false, "Outpost Siege enters with Dragons")
+	return true
+func monument() -> bool:
+	if not await tap("Mountain", 2): return false
+	for index in range(10): await ui.get_tree().process_frame
+	var ogre := find_card("Gray Ogre")
+	var giant := find_card("Hill Giant")
+	var krenko := find_card("Krenko, Mob Boss", "Command")
+	if not check(str(ogre.get("effectiveCost", "")) == "{1}{R}", "The bridge reports the Monument's reduction: " + str(ogre.get("effectiveCost"))): return false
+	if not check(str(krenko.get("effectiveCost", "")) == "{1}{R}{R}", "The commander's cost carries the reduction too: " + str(krenko.get("effectiveCost"))): return false
+	if not check(ui._ready_now(ogre, "Hand") and not ui._ready_now(giant, "Hand"), "Floating RR pays the reduced Ogre but not the Giant"): return false
+	ui.ui_layout.mana_overlay = 1.0
+	ui._apply_table_style()
+	await capture("ready")
+	return true

@@ -676,6 +676,7 @@ func _build_shell() -> void:
 	interaction_panel.target_player_clicked.connect(func(seat): _stage_target("player", seat))
 	interaction_panel.targets_confirmed.connect(_commit_targets)
 	interaction_panel.targets_cancelled.connect(func(): _intent("cancel"))
+	interaction_panel.optional_trigger_answered.connect(_answer_optional_trigger)
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -700,10 +701,12 @@ func _build_shell() -> void:
 func _present_interaction() -> void:
 	if not is_instance_valid(interaction_panel): return
 	_sync_targets()
+	_run_deferred_activation()
+	var answering_optional := _run_optional_trigger()
 	var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
-	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible, cards, avatars)
+	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible or answering_optional, cards, avatars)
 	var rail_decision: bool = interaction_panel.uses_stack_rail() or board_choice.visible
 	decision_scroll.visible = rail_decision
 	rail_space.visible = not rail_decision and stack_box.entries.is_empty()
@@ -1997,6 +2000,7 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 		if targeting:
 			return
 		if _stage_hand_pick(data): return
+		if interaction_panel.optional_gate: return # Answer "use it?" first; the targets follow on Yes.
 		if interaction_panel.target_tether and _stage_target("card", int(data.id)): return
 		_select_card(data)
 		if data.get("zone", "") == "Stack":
@@ -2004,6 +2008,7 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 		if data.get("tapped", false) and data.get("availableActions", {}).get("undoTap", false) and snapshot.prompt.get("inputKind", "") == "InputPassPriority":
 			_intent("undo_tap", {"id": data.id})
 			return
+		if _defer_combat_activation(data): return
 		_intent("card", {"id": data.id})
 		return
 	if targeting:
@@ -2727,10 +2732,10 @@ func _ready_now(card: Dictionary, zone: String) -> bool:
 	var pool: Dictionary = snapshot.get("players", [{}])[0].get("mana", {})
 	if pool.values().all(func(amount): return int(amount) <= 0): return false
 	if str(card.get("typeLine", "")).contains("Land") and not str(card.get("typeLine", "")).contains("//"): return false
-	var cost := str(card.get("manaCost", ""))
 	var ManaPips = preload("res://scripts/ui/ManaPips.gd")
+	var cost: String = ManaPips.current_cost(card, zone)
 	if ManaPips.parse(cost).is_empty(): return false
-	return ManaPips.pool_covers(cost, pool, int(card.get("commanderTax", 0)) if zone == "Command" else 0)
+	return ManaPips.pool_covers(cost, pool)
 
 ## A land you played that bounced straight back (Dimir Aqueduct with no other land) looks like a
 ## rejected play; Forge's log says it was accepted, so explain that the land drop is spent.
@@ -2751,13 +2756,87 @@ func _announce_returned_lands() -> void:
 		if me.get("zones", {}).get("Hand", []).any(func(card): return int(card.get("id", -1)) == id):
 			_show_toast("%s returned to your hand. Your land drop for this turn is used." % card_name, 5.0)
 
+## "You may have target attacking creature…" (Duelist's Heritage): Forge wants the target first and
+## asks "Use triggered ability?" only on resolution. The tether asks yes/no first; the answer is kept
+## for that card in this step and given to Forge's later question. No picks a legal target quietly
+## (Forge requires one) and then declines, so nothing happens.
+var optional_decisions: Dictionary = {}
+
+func _optional_step_key() -> String:
+	return str(snapshot.get("game", {}).get("turn", -1)) + "|" + str(snapshot.get("game", {}).get("phase", ""))
+
+func _answer_optional_trigger(use: bool) -> void:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	var source := int(prompt.get("sourceCard", {}).get("id", -1))
+	if source < 0 or prompt.get("inputKind", "") != "InputSelectTargets": return
+	optional_decisions[source] = {"use": use, "key": _optional_step_key()}
+	if not use:
+		var legal: Array = prompt.get("selectable", [])
+		var players: Array = prompt.get("entities", []).filter(func(entity): return entity.get("kind", "") == "player")
+		if not legal.is_empty(): _stage_target("card", int(legal[0]))
+		elif not players.is_empty(): _stage_target("player", int(players[0].id))
+		_commit_targets()
+	_present_interaction()
+
+## True while it answers Forge's own "Use triggered ability of X?" from the earlier yes/no.
+func _run_optional_trigger() -> bool:
+	var prompt: Dictionary = snapshot.get("prompt", {})
+	for source in optional_decisions.keys():
+		if optional_decisions[source].key != _optional_step_key(): optional_decisions.erase(source)
+	var source := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
+	interaction_panel.optional_pending = prompt.get("optionalTrigger", false) and not optional_decisions.has(source)
+	if not live or prompt.get("inputKind", "") != "InputConfirm" or not optional_decisions.has(source): return false
+	if not str(prompt.get("message", "")).begins_with("Use triggered ability"): return false
+	if not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty(): return true
+	if str(adapter.get("pending")) != "" or adapter.get("syncing") == true: return true
+	var use: bool = optional_decisions[source].use
+	optional_decisions.erase(source)
+	_intent("ok" if use else "cancel")
+	return true
+
+## Forge's attacker/blocker declarations accept only creature picks: abilities wait for the
+## priority that follows. A click on one of your non-creature permanents then (Maze of Ith during
+## Declare blockers) is not a block; it is remembered and activated as soon as you get priority.
+var deferred_activation := -1
+
+func _defer_combat_activation(data: Dictionary) -> bool:
+	var kind := str(snapshot.get("prompt", {}).get("inputKind", ""))
+	if kind not in ["InputBlock", "InputAttack"]: return false
+	if data.get("zone", "") != "Battlefield" or int(data.get("controller", data.get("owner", -1))) != 0: return false
+	if str(data.get("typeLine", "")).contains("Creature"): return false
+	if deferred_activation == int(data.id):
+		deferred_activation = -1
+		_explain_card(int(data.id), "%s won't activate after all." % data.get("name", "This card"), true)
+		return true
+	deferred_activation = int(data.id)
+	var step := "blockers" if kind == "InputBlock" else "attackers"
+	# Keep the priority after the declaration even where it is normally skipped (another player's turn).
+	_intent("hold_phase", {"phase": "COMBAT_DECLARE_BLOCKERS" if kind == "InputBlock" else "COMBAT_DECLARE_ATTACKERS"})
+	_explain_card(int(data.id), "%s will activate right after %s are declared. Confirm %s to use it (click it again to cancel)." % [data.get("name", "This card"), step, step], true)
+	return true
+
+func _run_deferred_activation() -> void:
+	if deferred_activation < 0 or not live or not snapshot.get("connectionReady", false): return
+	var phase := str(snapshot.get("game", {}).get("phase", "")).to_lower()
+	var in_combat := ["combat", "attack", "block", "damage"].any(func(word): return phase.contains(word))
+	if not in_combat or not cards.has(deferred_activation) or cards[deferred_activation].data.get("zone", "") != "Battlefield":
+		deferred_activation = -1
+		return
+	if snapshot.get("prompt", {}).get("inputKind", "") != "InputPassPriority" or not snapshot.get("asks", []).is_empty(): return
+	# The adapter drops an intent while another is in flight (the declaration's own Confirm).
+	if str(adapter.get("pending")) != "" or adapter.get("syncing") == true: return
+	var id := deferred_activation
+	deferred_activation = -1
+	_intent("card", {"id": id})
+
 ## A short note pinned above the card Forge refused, saying why; it fades after a few seconds.
+## Informational notes (a deferred activation) use the accent border and no ✕.
 var explain_note: PanelContainer
 var explain_label: Label
 var explain_card := -1
 var explain_until := 0
 
-func _explain_card(id: int, reason: String) -> void:
+func _explain_card(id: int, reason: String, info: bool = false) -> void:
 	if explain_note == null:
 		explain_note = PanelContainer.new()
 		var Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -2778,7 +2857,9 @@ func _explain_card(id: int, reason: String) -> void:
 		explain_note.add_child(explain_label)
 		add_child(explain_note)
 	explain_card = id
-	explain_label.text = "✕ " + reason
+	(explain_note.get_theme_stylebox("panel") as StyleBoxFlat).border_color = Color("b48cff") if info else Color("ff8a6b")
+	explain_label.add_theme_color_override("font_color", Color("e6dcff") if info else Color("ffd9cf"))
+	explain_label.text = ("▸ " if info else "✕ ") + reason
 	explain_until = Time.get_ticks_msec() + 6000
 	explain_note.reset_size()
 	explain_note.show()
@@ -3131,7 +3212,7 @@ func _advance_targets() -> void:
 ## A new targeting prompt starts with nothing staged; a finished one clears the commit.
 func _sync_targets() -> void:
 	var prompt: Dictionary = snapshot.get("prompt", {})
-	var key := str(prompt.get("inputKind", "")) + "|" + str(prompt.get("message", "")) + "|" + str(prompt.get("sourceCard", {}).get("id", -1))
+	var key := str(prompt.get("inputKind", "")) + "|" + _target_prompt_text(str(prompt.get("message", ""))) + "|" + str(prompt.get("sourceCard", {}).get("id", -1))
 	if key != target_prompt_key:
 		target_prompt_key = key
 		target_staged.clear()
@@ -3140,6 +3221,15 @@ func _sync_targets() -> void:
 		target_committing = false
 		interaction_panel.target_staged = []
 	_advance_targets()
+
+## Forge rewrites a multi-target prompt after each pick ("Targeted: Grizzly Bears (322)",
+## "(7 more can be targeted)"); that progress is the same prompt, so it must not reset a commit
+## in flight (Deepglow Skate's "any number of target permanents").
+static func _target_prompt_text(message: String) -> String:
+	var cut := message.find("\nTargeted:")
+	if cut >= 0: message = message.left(cut)
+	var lines := Array(message.split("\n")).filter(func(line): return not str(line).contains("more can be targeted"))
+	return "\n".join(PackedStringArray(lines)).strip_edges()
 
 ## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
 func _stage_hand_pick(data: Dictionary) -> bool:

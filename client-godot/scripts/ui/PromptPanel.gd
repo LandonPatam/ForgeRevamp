@@ -452,6 +452,12 @@ func _with_modes_as_text(value: Dictionary) -> Dictionary:
 	for option in options:
 		if not option.has("card") or option.has("cardId") or option.has("stackId") or not option.card.has("id"): return value
 		if int(option.card.id) != int(options[0].card.id) or str(option.get("label", "")) == str(option.card.get("name", "")): return value
+	if int(value.get("sourceCard", {}).get("id", -1)) != int(options[0].card.id):
+		# The modes belong to another card than the resolving effect (Outpost Siege entering from
+		# Chaos Warp): explain the choice with that card's own lead line, not the effect's text.
+		value.erase("effectText")
+		var lead := str(options[0].card.get("text", "")).strip_edges().get_slice("\n", 0).strip_edges()
+		if str(value.get("message", "")).strip_edges() in ["", "Choose"] and not lead.is_empty() and not lead.begins_with("•"): value.message = lead
 	value.sourceCard = options[0].card
 	value.abilityChoice = true
 	value.modesAsText = true # Modes still use select-then-Confirm.

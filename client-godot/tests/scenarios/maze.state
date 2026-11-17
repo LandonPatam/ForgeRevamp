@@ -1,0 +1,13 @@
+# Serra Angel attacks Jace while you declare blockers: click Maze of Ith (it queues), Confirm blocks, then target the Angel; Jace takes no damage
+activeplayer=p1
+activephase=COMBAT_DECLARE_BLOCKERS
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Maze of Ith;Giant Spider;Forest;Jace Beleren|Id:99|Counters:LOYALTY=3
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Serra Angel|Attacking:99;Plains
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

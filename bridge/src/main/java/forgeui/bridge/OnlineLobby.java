@@ -51,6 +51,11 @@ final class OnlineLobby implements AutoCloseable {
     private boolean hostReady;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> { var t = new Thread(r, "online-lobby"); t.setDaemon(true); return t; });
     private BridgeServer server;
+    /** The lobby's port is lent to a running match; the session (address, router port, settings)
+     *  stays hosted and the lobby reopens when that match ends, so friends can rejoin it. */
+    private boolean inMatch;
+    /** Hosting was stopped during the match: keep its router port until it ends, then close. */
+    private boolean closeAfterMatch;
     private Channel owner;
     private JsonObject config = new JsonObject();
     private Path deckDirectory;
@@ -74,7 +79,7 @@ final class OnlineLobby implements AutoCloseable {
     }
 
     private synchronized JsonObject host(JsonObject request, Channel caller) throws Exception {
-        BridgeProtocol.require(server == null, "You are already hosting a session");
+        BridgeProtocol.require(server == null && !inMatch, "You are already hosting a session");
         config = readConfig(request.getAsJsonObject("config"));
         port = FModel.getNetPreferences().getPrefInt(ForgeNetPreferences.FNetPref.NET_PORT);
         var candidate = BridgeServer.exposed(port, this::onMessage, this::onConnect, this::onDisconnect);
@@ -146,8 +151,9 @@ final class OnlineLobby implements AutoCloseable {
 
     synchronized JsonObject status() {
         JsonObject result = new JsonObject();
-        result.addProperty("hosting", server != null);
-        if (server == null) return result;
+        result.addProperty("hosting", server != null || (inMatch && !closeAfterMatch));
+        result.addProperty("inMatch", inMatch);
+        if (server == null && !(inMatch && !closeAfterMatch)) return result;
         result.addProperty("port", port);
         result.addProperty("defaultPort", port == Integer.parseInt(ForgeNetPreferences.FNetPref.NET_PORT.getDefault()));
         result.addProperty("lan", lanAddress);
@@ -202,6 +208,8 @@ final class OnlineLobby implements AutoCloseable {
             setup.addProperty("remotePort", port);
             closing = server;
             server = null;
+            inMatch = true;
+            closeAfterMatch = false;
             joined.clear();
             waiting.clear();
             resetReady();
@@ -230,9 +238,62 @@ final class OnlineLobby implements AutoCloseable {
         });
     }
 
+    /**
+     * The match that borrowed the port has ended (its process has exited): reopen the same lobby on
+     * the same port so joined players can come back. Nobody is seated or ready until they rejoin.
+     * If the port can't be bound again the session ends as before.
+     */
+    void matchEnded() {
+        synchronized (this) {
+            if (!inMatch) { release(); return; }
+            if (closeAfterMatch) {
+                inMatch = false;
+                closeAfterMatch = false;
+                release();
+                return;
+            }
+            if (deckDirectory != null) {
+                // The finished match's deck copies; returning players send theirs again.
+                try (var files = Files.list(deckDirectory)) { files.forEach(file -> file.toFile().delete()); }
+                catch (Exception e) { System.err.println("[online] Could not clear received decks: " + e.getMessage()); }
+            }
+        }
+        BridgeServer reopened = null;
+        for (int attempt = 0; attempt < 25 && reopened == null; attempt++) {
+            var candidate = BridgeServer.exposed(port, this::onMessage, this::onConnect, this::onDisconnect);
+            try { candidate.start(); reopened = candidate; }
+            catch (Exception e) {
+                try { Thread.sleep(200); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+        boolean lost;
+        synchronized (this) {
+            lost = !inMatch || closeAfterMatch; // Hosting was stopped while the port was being reopened.
+            if (!lost && reopened != null) {
+                server = reopened;
+                joined.clear();
+                waiting.clear();
+                resetReady();
+                nextId = 0;
+            }
+            inMatch = false;
+            closeAfterMatch = false;
+        }
+        if (lost && reopened != null) reopened.close();
+        if (lost || reopened == null) {
+            if (reopened == null) System.err.println("[online] Could not reopen the lobby on port " + port + " after the match");
+            release();
+        }
+    }
+
     private void stop() {
         BridgeServer closing;
         synchronized (this) {
+            if (inMatch) {
+                // The running match still uses the port and router mapping; close when it ends.
+                closeAfterMatch = true;
+                return;
+            }
             closing = server;
             server = null;
             JsonObject closed = new JsonObject();
@@ -249,7 +310,7 @@ final class OnlineLobby implements AutoCloseable {
 
     /** The online session is over, so close the router port and remove the received deck copies. */
     synchronized void release() {
-        if (server != null) return;
+        if (server != null || inMatch) return;
         if (upnp != null) {
             UpnpService service = upnp;
             upnp = null;

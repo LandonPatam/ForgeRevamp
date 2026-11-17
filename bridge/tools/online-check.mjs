@@ -270,7 +270,8 @@ try {
   const start = await friend.wait(m => m.type === 'start', 'start message');
   const fourthStart = await fourth.wait(m => m.type === 'start', 'fourth seat start');
   check(start.token?.length === 64 && start.port === hosted.port, 'The joined player receives a seat token');
-  check((await call('lobby.status')).hosting === false, 'The lobby closes once the match starts');
+  const during = await call('lobby.status');
+  check(during.hosting === true && during.inMatch === true && (during.players ?? []).length === 0, 'The lobby lends its port to the match and stays hosted');
   let ready;
   for (let tries = 0; tries < 400 && !ready; tries++) {
     const state = await call('match.status', {owner});
@@ -402,9 +403,10 @@ try {
 
   await call('match.stop', {owner, session: ready.session});
   check((await call('match.status', {owner})).state === 'stopped', 'Stopping the match ends it for the host');
-  await pause(500);
-  const rehosted = await call('lobby.host', {discover: false, config: {human, bots: [bot]}}).catch(() => null);
-  check(rehosted?.hosting === true, 'The online port is free to host again afterwards');
+  let reopened;
+  for (let tries = 0; tries < 50 && !(reopened?.hosting && !reopened.inMatch); tries++) { reopened = await call('lobby.status'); if (reopened.inMatch) await pause(100); }
+  check(reopened?.hosting === true && reopened.inMatch === false && reopened.port === hosted.port && reopened.players.length === 0, 'The lobby reopens on the same port after the match, with nobody seated or ready');
+  check((await callRejected('lobby.host', {discover: false, config: {human, bots: [bot]}}))?.includes('already hosting'), 'The reopened lobby is the same session');
 
   // Leaving while the engine waits on that player's own decision must not freeze the table.
   const priorityData = await call('lobby.deckText', {id: priorityDeck.id});
@@ -480,7 +482,10 @@ try {
   const duelDone = await drive([secondHost], 3, 120000);
   check(duelDone, 'Leaving mid-decision frees the table');
   await call('match.stop', {owner, session: secondReady.session});
-  check((await call('lobby.status')).hosting === false, 'No lobby remains after the session ends');
+  let afterSecond;
+  for (let tries = 0; tries < 50 && !(afterSecond?.hosting && !afterSecond.inMatch); tries++) { afterSecond = await call('lobby.status'); if (afterSecond.inMatch) await pause(100); }
+  check(afterSecond?.hosting === true && afterSecond.inMatch === false, 'Players can return to the lobby after the session ends');
+  check((await call('lobby.stop')).hosting === false, 'Stopping hosting then closes it');
 
   // End a live match while a friend is still at Keep: the terminal notification
   // must arrive before socket teardown, including on Windows process stop.
@@ -515,7 +520,10 @@ try {
   await call('match.stop', {owner, session: live.session});
   const ended = await finalFriend.wait(m => m.type === 'sessionEnded', 'terminal session-ended notice', 5000);
   check(ended.sessionId === finalFriend.messages.findLast(isDuel).sessionId && ended.message.includes('host'), 'Host End Game delivers a session-scoped terminal event to the friend');
-  await call('lobby.host', {discover: false, config: {human, bots: []}});
+  // The reopened lobby (same session) is the one being cancelled below.
+  let rejoinable;
+  for (let tries = 0; tries < 50 && !(rejoinable?.hosting && !rejoinable.inMatch); tries++) { rejoinable = await call('lobby.status'); if (rejoinable.inMatch) await pause(100); }
+  check(rejoinable?.hosting === true && rejoinable.inMatch === false, 'After Host End Game the friend can rejoin the same lobby');
   const cancelWaiting = await open(onlineUrl);
   cancelWaiting.send(joinMessage('Waiting friend'));
   await cancelWaiting.wait(m => m.type === 'lobby', 'cancelled lobby');

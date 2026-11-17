@@ -16,9 +16,24 @@ static func parse(cost: String) -> PackedStringArray:
 		symbols.append(code)
 	return symbols
 
-## Whether the floating pool alone pays this printed cost plus `extra_generic` (commander tax).
-## X counts as 0 and Phyrexian symbols as payable with life. Cost changes from other cards
-## (reductions, taxes) aren't in the text, so this is a close reading, not Forge's payment check.
+## What a hand or command-zone card costs right now: the bridge's `effectiveCost` (Forge's own
+## adjustment: Hazoret's Monument's reduction, commander tax) when it has one, else the printed
+## cost plus commander tax for a commander in the command zone.
+static func current_cost(card: Dictionary, zone: String) -> String:
+	if card.has("effectiveCost"): return str(card.effectiveCost)
+	var cost := str(card.get("manaCost", ""))
+	var tax := int(card.get("commanderTax", 0)) if zone == "Command" else 0
+	if tax <= 0 or parse(cost).is_empty(): return cost
+	var generic := tax
+	var rest := ""
+	for code in parse(cost):
+		if code.is_valid_int(): generic += int(code)
+		else: rest += "{%s}" % code
+	return "{%d}" % generic + rest
+
+## Whether the floating pool alone pays `cost` plus `extra_generic`. Pass `current_cost()` so
+## reductions and commander tax count. X counts as 0 and Phyrexian symbols as payable with life;
+## this is a close reading, not Forge's payment check.
 static func pool_covers(cost: String, pool: Dictionary, extra_generic: int = 0) -> bool:
 	var left := {}
 	for key in ManaCounter.KEYS: left[key] = int(pool.get(key, 0))

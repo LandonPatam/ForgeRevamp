@@ -212,6 +212,11 @@ final class GameStateJson {
                 prompt.addProperty("cardId", leaving.getId());
             }
         }
+        if (currentPrompt && input instanceof forge.gamemodes.match.input.InputSelectTargets targeting && optionalTrigger(targeting)) {
+            // "You may have target…" (Duelist's Heritage): Forge asks for the target first and whether
+            // to use it only on resolution; the table asks yes/no first.
+            prompt.addProperty("optionalTrigger", true);
+        }
         if (prompt.has("cardId")) {
             CardView source = cards.get(prompt.get("cardId").getAsInt());
             if (source != null) prompt.add("sourceCard", describeCard(source, gui.mayView(source)));
@@ -315,6 +320,23 @@ final class GameStateJson {
             // Keep Forge's own source.
         }
         return null;
+    }
+
+    /** Whether these targets are for a trigger its controller may decline (OptionalDecider$ You). */
+    static boolean optionalTrigger(forge.gamemodes.match.input.InputSelectTargets targeting) {
+        try {
+            var field = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
+            field.setAccessible(true);
+            if (field.get(targeting) instanceof forge.game.spellability.SpellAbility ability) {
+                var root = ability.getRootAbility();
+                if (root.isOptionalTrigger()) return true;
+                var trigger = root.getTrigger();
+                return trigger != null && trigger.hasParam("OptionalDecider");
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Unknown: Forge's own order (target, then yes/no) stays.
+        }
+        return false;
     }
 
     static CardView confirmSource(forge.gamemodes.match.input.InputConfirm confirm) {
@@ -491,6 +513,8 @@ final class GameStateJson {
         JsonObject result = describeCard(c, gui.mayView(c));
         if (!result.has("hidden")) {
             result.addProperty("weakSelection", gui.getWeakSelectableStrength(c));
+            String effective = gui.effectiveCost(c.getId());
+            if (effective != null) result.addProperty("effectiveCost", effective);
             JsonObject actions = new JsonObject();
             actions.addProperty("returnToHand", gui.mayReturnToHand(c));
             actions.addProperty("undoTap", gui.mayUndoTap(c));

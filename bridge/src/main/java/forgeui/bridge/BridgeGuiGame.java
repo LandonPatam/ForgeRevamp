@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import forge.LobbyPlayer;
 import forge.deck.CardPool;
 import forge.game.GameEntityView;
+import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.event.GameEvent;
 import forge.game.event.GameEventTurnPhase;
@@ -220,6 +221,20 @@ final class BridgeGuiGame extends AbstractGuiGame {
             }
         }
         return selected;
+    }
+
+    /** One-shot stop ("turn:PHASE") for an ability the player queued during a declaration
+     *  (Maze of Ith clicked while declaring blockers): that step's priority is not skipped. */
+    private volatile String heldStop = "";
+
+    void holdStop(PhaseType phase) {
+        GameView view = getGameView();
+        heldStop = view == null ? "" : view.getTurn() + ":" + phase.name();
+    }
+
+    private boolean isHeldStop(PhaseType phase) {
+        GameView view = getGameView();
+        return view != null && heldStop.equals(view.getTurn() + ":" + phase.name());
     }
 
     void setPhaseStop(PlayerView player, PhaseType phase, boolean enabled) {
@@ -541,12 +556,52 @@ final class BridgeGuiGame extends AbstractGuiGame {
         return null;
     }
 
+    /**
+     * A card's named choice ("choose Khans or Dragons" as Outpost Siege enters) arrives as bare
+     * labels on a card that is still entering, so not yet viewable. When this effect already
+     * revealed that card, show it, and give each label its mode's text from the card
+     * ("• Khans — At the beginning of your upkeep…").
+     */
+    static void explainChoiceOptions(JsonObject ask) {
+        if (!ask.has("options") || !ask.get("options").isJsonArray()) return;
+        var revealed = new java.util.HashMap<Integer, JsonObject>();
+        if (ask.has("revealedCards") && ask.get("revealedCards").isJsonArray()) {
+            for (JsonElement element : ask.getAsJsonArray("revealedCards")) {
+                if (element.isJsonObject() && element.getAsJsonObject().has("id") && !element.getAsJsonObject().has("hidden"))
+                    revealed.put(element.getAsJsonObject().get("id").getAsInt(), element.getAsJsonObject());
+            }
+        }
+        for (JsonElement element : ask.getAsJsonArray("options")) {
+            if (!element.isJsonObject()) continue;
+            JsonObject option = element.getAsJsonObject();
+            if (!option.has("card") || !option.get("card").isJsonObject()) continue;
+            JsonObject card = option.getAsJsonObject("card");
+            if (card.has("hidden") && card.has("id") && revealed.containsKey(card.get("id").getAsInt())) {
+                card = revealed.get(card.get("id").getAsInt()).deepCopy();
+                option.add("card", card);
+            }
+            if (!card.has("text") || !option.has("label")) continue;
+            String label = option.get("label").getAsString().strip();
+            if (label.isEmpty()) continue;
+            for (String line : card.get("text").getAsString().split("\\R")) {
+                String mode = line.strip();
+                if (!mode.startsWith("•")) continue;
+                mode = mode.substring(1).strip();
+                if (mode.startsWith(label + " —") || mode.startsWith(label + " -")) {
+                    option.addProperty("label", mode);
+                    break;
+                }
+            }
+        }
+    }
+
     private JsonElement ask(JsonObject ask) {
         if (abandoned) return BridgeProtocol.fallbackAnswer(ask);
         if (ask.has("kind") && ask.get("kind").getAsString().equals("choose") && !ask.has("revealedCards")) {
             JsonArray context = effectRevealedCards();
             if (!context.isEmpty()) ask.add("revealedCards", context);
         }
+        if (ask.has("kind") && ask.get("kind").getAsString().equals("choose")) explainChoiceOptions(ask);
         if (!ask.has("sourceCard")) {
             CardView source = null;
             if (getGameController() instanceof PlayerControllerHuman human && human.getGame().getStack().isResolving()
@@ -1254,6 +1309,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     @Override
     public boolean isUiSetToSkipPhase(PlayerView playerTurn, PhaseType phase) {
+        if (isHeldStop(phase)) return false;
         // In solo games every checked phase is a stop, including bot turns.
         if (!onlineMatch) return !configuredPhaseStop(playerTurn, phase);
         Boolean enabled = phaseStopOverrides.get(playerTurn.getId() + ":" + phase.name());
@@ -1468,8 +1524,40 @@ final class BridgeGuiGame extends AbstractGuiGame {
                 respondScanCanTarget = StackInteractionPolicy.canTargetStackItem(human.getPlayer(), actionable, top.getSpellAbility());
                 respondScanStackId = top.getId();
             }
+            if (!(human.getInputQueue().getInput() instanceof forge.gamemodes.match.input.InputPayMana)) {
+                effectiveCosts = effectiveCosts(human.getPlayer());
+            }
         }
         listener.stateChanged();
+    }
+
+    /** What each of this seat's hand/command-zone spells costs right now, after Forge's own cost
+     *  adjustment (Hazoret's Monument's reduction, commander tax), keyed by card id. Recorded
+     *  with each priority-time scan; X spells and failures fall back to the printed cost. */
+    private volatile java.util.Map<Integer, String> effectiveCosts = java.util.Map.of();
+
+    String effectiveCost(int cardId) { return effectiveCosts.get(cardId); }
+
+    private static java.util.Map<Integer, String> effectiveCosts(forge.game.player.Player player) {
+        var result = new java.util.HashMap<Integer, String>();
+        for (ZoneType zone : List.of(ZoneType.Hand, ZoneType.Command)) {
+            for (forge.game.card.Card card : player.getCardsIn(zone).threadSafeIterable()) {
+                try {
+                    if (card.isLand() || card.getManaCost() == null || card.getManaCost().countX() > 0) continue;
+                    for (forge.game.spellability.SpellAbility spell : card.getSpells()) {
+                        if (!spell.isSpell() || spell.getPayCosts() == null || !spell.getPayCosts().hasManaCost()
+                                || spell.getAlternativeCost() != null) continue;
+                        spell.setActivatingPlayer(player);
+                        var cost = forge.ai.ComputerUtilMana.calculateManaCost(spell.getPayCosts(), spell, player, true, 0, false);
+                        result.put(card.getId(), cost.toString(false, null));
+                        break;
+                    }
+                } catch (RuntimeException e) {
+                    // A cost that cannot be predicted keeps showing the printed cost.
+                }
+            }
+        }
+        return result;
     }
     @Override public void clearWeaklySelectable() {
         super.clearWeaklySelectable();

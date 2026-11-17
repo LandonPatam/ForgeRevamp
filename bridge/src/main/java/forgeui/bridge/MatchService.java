@@ -144,7 +144,7 @@ final class MatchService implements AutoCloseable {
             catch (InterruptedException e) { process.destroyForcibly(); Thread.currentThread().interrupt(); }
         }
         stopped = true;
-        lobby.release();
+        lobby.matchEnded(); // An online session's lobby reopens for the same players; otherwise releases.
     }
 
     private void signalShutdown() {

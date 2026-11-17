@@ -812,14 +812,14 @@ public final class BridgeMain {
     private void dispatchAction(Seat seat, Channel channel, String requestId, JsonObject msg) {
         BridgeGuiGame gui = seat.gui; // This seat's own controller and permissions, never the host's.
         String action = BridgeProtocol.string(msg, "action");
-        BridgeProtocol.require(List.of("ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "concede", "pass_turn").contains(action), "Unknown action");
+        BridgeProtocol.require(List.of("ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "hold_phase", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "concede", "pass_turn").contains(action), "Unknown action");
         int id = msg.has("id") ? BridgeProtocol.integer(msg.get("id")) : -1;
         int target = List.of("attack", "equip").contains(action) ? BridgeProtocol.integer(msg.get("target")) : -1;
         long expectedRevision = BridgeProtocol.revision(msg.get("revision"));
         GuiBase.getInterface().invokeInEdtLater(() -> {
           try {
             Snapshot current = seat.snapshot;
-            if (current == null || (!action.equals("phase_stop") && (current.revision() != expectedRevision || seat.revision.get() != expectedRevision))) {
+            if (current == null || (!action.equals("phase_stop") && !action.equals("hold_phase") && (current.revision() != expectedRevision || seat.revision.get() != expectedRevision))) {
                 reply(seat, channel, "error", requestId, "stale_state", "State changed; review the latest snapshot before acting");
                 sendSnapshot(seat, channel);
                 return;
@@ -836,6 +836,15 @@ public final class BridgeMain {
                 gui.setPhaseStop(current.players().get(id), phase, enabled.getAsBoolean());
                 changed();
                 reply(seat, channel, "ack", requestId, "configured", "Phase stop updated");
+                return;
+            }
+            if (action.equals("hold_phase")) {
+                var phase = forge.game.phase.PhaseType.valueOf(BridgeProtocol.string(msg, "phase"));
+                BridgeProtocol.require(phase == forge.game.phase.PhaseType.COMBAT_DECLARE_ATTACKERS
+                        || phase == forge.game.phase.PhaseType.COMBAT_DECLARE_BLOCKERS, "Only a declaration step can be held");
+                gui.holdStop(phase);
+                changed();
+                reply(seat, channel, "ack", requestId, "configured", "Priority will stop after the declaration");
                 return;
             }
             BridgeProtocol.require(gui.openAsks().isEmpty(), "Answer the pending decision first");

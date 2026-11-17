@@ -496,6 +496,7 @@ func _table_size() -> int:
 	return 1 + match_preferences.bots.size() + net.players().size()
 
 func _net_changed() -> void:
+	if status_message == net.REJOIN_NOTICE and not net.rejoining(): status_message = ""
 	_update_status()
 	_render_deck()
 	if net.all_ready(): _launch_ready_online_match.call_deferred()
@@ -894,6 +895,8 @@ func _remote_session_ended(message: String) -> void:
 		confirm.queue_free()
 	await _end_confirmed_session()
 	status_message = message
+	# The host's lobby reopens after its match: go back in with the same deck (press PLAY to ready).
+	net.rejoin_after_match()
 	_update_status()
 
 func _end_confirmed_session() -> void:

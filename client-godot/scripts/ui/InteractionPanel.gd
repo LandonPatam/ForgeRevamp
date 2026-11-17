@@ -10,6 +10,8 @@ signal card_chosen(card_id: int)
 signal target_player_clicked(seat: int)
 signal targets_confirmed
 signal targets_cancelled
+## A "you may" trigger's yes/no, asked before its target (Duelist's Heritage); Main answers Forge.
+signal optional_trigger_answered(use: bool)
 const P = preload("res://scripts/ui/Palette.gd")
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -41,6 +43,9 @@ var floating := false
 ## Targets of an effect from a permanent (or a card in your zones) tether to it; Main stages the
 ## picks in `target_staged` ({kind, id, name}) and sends them on Confirm.
 var target_tether := false
+## Set by Main: the current target prompt is an optional trigger not yet answered yes/no.
+var optional_pending := false
+var optional_gate := false
 var target_staged: Array = []
 ## Another player's choice ("Bot 1 chose Human" for Secluded Courtyard): an information-only tether off
 ## that card, shown once the card is on the table; OK only clears it locally.
@@ -102,7 +107,9 @@ func _ready() -> void:
 	info_tether.answered.connect(func(_action): _next_info(true))
 	add_child(info_tether)
 	callout = preload("res://scripts/ui/CardCallout.gd").new()
-	callout.answered.connect(func(action): action_requested.emit(action))
+	callout.answered.connect(func(action):
+		if optional_gate: optional_trigger_answered.emit(action == "ok")
+		else: action_requested.emit(action))
 	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
 	callout.ask_answered.connect(func(id, value): modes_answered.emit(id, value))
 	callout.card_chosen.connect(func(card_id): card_chosen.emit(card_id))
@@ -159,6 +166,17 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		return
 	var target_anchor := _target_anchor()
 	target_tether = target_anchor != null
+	optional_gate = target_tether and optional_pending and state.prompt.get("optionalTrigger", false)
+	if optional_gate:
+		# Forge asks the target first and "use it?" on resolution; ask whether to use it first.
+		panel.hide()
+		callout_card = target_anchor
+		callout.visible = true
+		var gate_ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
+		callout.present(str(state.prompt.sourceCard.get("name", "Card")), _optional_question(state.prompt), "Yes", "No", gate_ready, gate_ready, {})
+		_place_callout()
+		queue_redraw()
+		return
 	if target_tether:
 		panel.hide()
 		callout_card = target_anchor
@@ -354,12 +372,20 @@ static func _target_question(prompt: Dictionary) -> String:
 	var lines: Array = Array(str(prompt.get("message", "")).split("\n")).map(func(line): return str(line).strip_edges()).filter(func(line): return not line.is_empty())
 	if lines.is_empty(): return "choose a target"
 	var ids := RegEx.create_from_string(" \\(\\d+\\)")
-	var bookkeeping := RegEx.create_from_string("\\s*\\[[^\\]]*\\]\\s*$")
+	# Trailing Forge bookkeeping, nested too: "[Number Attackers: [Grizzly Bears, Craw Wurm]]".
+	var bookkeeping := RegEx.create_from_string("\\s*\\[.*\\]\\s*$")
 	var effect: String = bookkeeping.sub(ids.sub(str(lines[0]), "", true), "").strip_edges()
 	var card_name := str(prompt.get("sourceCard", {}).get("name", ""))
 	if not card_name.is_empty() and effect.begins_with(card_name + " - "): effect = effect.substr(card_name.length() + 3)
 	var instruction: String = ids.sub(str(lines.back()), "", true)
 	return effect if lines.size() == 1 else effect + "\n" + instruction
+
+## "Use Duelist's Heritage?" worded from the trigger's own "you may …" clause.
+static func _optional_question(prompt: Dictionary) -> String:
+	var effect := _target_question(prompt).get_slice("\n", 0)
+	var at := effect.to_lower().find("you may ")
+	if at < 0: return "use %s?" % str(prompt.get("sourceCard", {}).get("name", "this card"))
+	return effect.substr(at + 8).strip_edges().trim_suffix(".") + "?"
 
 ## Main's staged picks changed: redraw the box and its lines.
 func set_target_staged(value: Array) -> void:

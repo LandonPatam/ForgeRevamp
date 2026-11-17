@@ -1,0 +1,13 @@
+# Tap the Mountains, cast Chaos Warp on your Treasure: Outpost Siege enters from the top and asks Khans or Dragons, showing what each does
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Mountain;Mountain;Mountain;T:c_a_treasure_sac
+p0hand=Chaos Warp
+p0library=Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege;Outpost Siege
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

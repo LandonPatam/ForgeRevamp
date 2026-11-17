@@ -339,7 +339,7 @@ func send_intent(intent: Dictionary) -> void:
 		request.merge({"type": "answer", "id": int(intent.id), "value": intent.get("value")})
 		pending_answer = int(intent.id)
 	else:
-		if (not state.asks.is_empty() and action != "phase_stop") or not action in ["ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "pass_turn"]:
+		if (not state.asks.is_empty() and action != "phase_stop") or not action in ["ok", "cancel", "card", "equip", "player", "attack", "undeclare", "phase_stop", "hold_phase", "stack", "mana", "undo", "undo_card", "undo_tap", "draw_ack", "pass_turn"]:
 			return
 		if action in ["ok", "cancel"] and not state.prompt.get(action + "Enabled", false):
 			return
@@ -355,6 +355,8 @@ func send_intent(intent: Dictionary) -> void:
 			equip_target = -1
 		if action == "card" and equip_source >= 0 and state.prompt.get("inputKind", "") == "InputPayManaOfCostPayment":
 			prepaid_tried.clear()
+		if action == "hold_phase":
+			request.phase = str(intent.get("phase", ""))
 		if action == "phase_stop":
 			request.phase = str(intent.get("phase", ""))
 			request.enabled = bool(intent.get("enabled", true))

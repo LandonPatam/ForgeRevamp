@@ -183,9 +183,9 @@ func _draw_hand_overlays() -> void:
 			box.set_corner_radius_all(int((7 + ring * 2) * unit))
 			box.anti_aliasing = true
 			trait_layer.draw_style_box(box, body.grow(grow))
-	if mana_overlay and data.get("zone", "") == "Hand":
+	if mana_overlay and data.get("zone", "") in ["Hand", "Command"]:
 		var margin := 6.0 * unit
-		ManaPips.draw(trait_layer, str(data.get("manaCost", "")), Vector2(margin, 24.0 * unit), 13.0 * unit, size.x - margin * 2.0)
+		ManaPips.draw(trait_layer, ManaPips.current_cost(data, str(data.get("zone", ""))), Vector2(margin, 24.0 * unit), 13.0 * unit, size.x - margin * 2.0)
 
 func _borderless_box(radius: int) -> StyleBoxFlat:
 	var box := P.box(Color("11171e"), Color.TRANSPARENT, radius, 0)
