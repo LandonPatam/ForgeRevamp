@@ -14,6 +14,8 @@ var shown_life := 0.0:
 		shown_life = value
 		queue_redraw()
 var life_roll: Tween
+## While this player's elimination is still playing, the OUT mark waits (TableFx).
+var out_held := false
 ## Presentation-only jolt when this player is hit (TableFx).
 var shake := Vector2.ZERO:
 	set(value):
@@ -48,7 +50,7 @@ func set_player(value: Dictionary, active: bool) -> void:
 
 ## Whether this player has lost and is out of the game (Forge's per-player loss).
 func out() -> bool:
-	return not player.is_empty() and not player.get("loss", {}).is_empty()
+	return not player.is_empty() and not player.get("loss", {}).is_empty() and not out_held
 
 ## How a player was eliminated, in a few words: "Commander damage: Atraxa (24)".
 static func elimination(loss: Dictionary) -> String:

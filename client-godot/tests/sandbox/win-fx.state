@@ -1,0 +1,15 @@
+# Winning in order: both opponents are at 3 life. Tap your Mountains and cast Flame Rift (4 damage to each player): the hits land, their HP rolls below 0, each board breaks apart from its owner's portrait, OUT appears, and only then YOU WIN (gold).
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears;Mountain;Mountain
+p0hand=Flame Rift
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=3
+p1battlefield=Hill Giant;Gray Ogre;Mountain;Mountain
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=3
+p2battlefield=White Knight;Serra Angel;Plains
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

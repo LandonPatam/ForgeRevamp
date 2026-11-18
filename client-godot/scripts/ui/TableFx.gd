@@ -1,4 +1,6 @@
 extends Control
+## A player's elimination finished playing (their board broke apart): show their OUT mark now.
+signal elimination_finished(seat: int)
 ## Table animation director. Plays public happenings over the already-updated board:
 ## attack and block declarations, combat strikes, damage impacts and cards leaving the
 ## battlefield. Presentation only: it never answers Forge, never holds a decision back and
@@ -55,6 +57,9 @@ var previous_mana: Dictionary = {}
 ## The last labels shown (damage numbers, counters, life), newest last: for checks and reports.
 var shown_labels: Array = []
 var played: Dictionary = {}
+## Seats already shown as out, and seats whose elimination is still playing.
+var eliminated: Dictionary = {}
+var holding: Dictionary = {}
 ## Worst cost of this director's own work in microseconds, for performance checks.
 var cost := {"draw": 0, "present": 0}
 ## Turn banner: the last turn/active seat shown, so reconnects and snapshots never repeat it.
@@ -89,6 +94,9 @@ func reset() -> void:
 	previous_life.clear()
 	previous_mana.clear()
 	banner_key = ""
+	eliminated.clear()
+	for seat in holding.keys(): _finish_elimination(seat)
+	holding.clear()
 	primed = false
 	last_fx_id = 0
 	next_free = 0.0
@@ -160,6 +168,11 @@ func _present(snapshot: Dictionary) -> void:
 	banner_key = turn_key
 	_remember_board(snapshot)
 	_remember_stack(stack)
+	var losers: Array = []
+	for seat in range(snapshot.get("players", []).size()):
+		if snapshot.players[seat].get("loss", {}).is_empty() or eliminated.has(seat): continue
+		eliminated[seat] = true
+		if primed: losers.append(seat)
 	if not primed:
 		primed = true
 		return
@@ -170,9 +183,10 @@ func _present(snapshot: Dictionary) -> void:
 		return
 	_aim_locks(stack)
 	if new_turn and speed >= 1.0: _turn_banner(snapshot)
-	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty() and changes.is_empty():
-		return
-	_play_beat(snapshot, attacks, blocks, fresh, casts, changes)
+	if not (attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty() and changes.is_empty()):
+		_play_beat(snapshot, attacks, blocks, fresh, casts, changes)
+	# Who lost goes last: the killing beat (hit, number, HP to 0) plays first, then their board.
+	for seat in losers: _eliminate(seat, snapshot)
 
 func _board_cards(snapshot: Dictionary) -> Dictionary:
 	var result := {}
@@ -473,6 +487,55 @@ func _board_life(changes: Dictionary, fresh: Array, casts: Array, at: float, imp
 	if changes.has("mana") and speed >= 1.0:
 		length = maxf(length, _mana_flow(changes.mana, casts, at, pace))
 	return length
+
+## Whether nothing is playing or about to play: the outcome screen waits for this.
+func settled() -> bool:
+	return not enabled() or (ghosts.is_empty() and holding.is_empty() and _now() >= next_free and not items.any(func(item): return item.kind != "banner"))
+
+## A player is out: after the current beat, every card still on their board breaks into glyphs,
+## from their portrait outward, then their OUT mark appears. Cards Forge already removed are
+## ghosts that dissolve in place in the same beat.
+func _eliminate(seat: int, snapshot: Dictionary) -> void:
+	var avatar = portrait_view.call(seat) if portrait_view.is_valid() else null
+	var origin: Vector2 = avatar.get_global_rect().get_center() if is_instance_valid(avatar) else get_global_rect().get_center()
+	var views: Array = []
+	for card in snapshot.players[seat].get("zones", {}).get("Battlefield", []):
+		var view := view_for(int(card.id))
+		if view != null and view.fx_alpha > 0.0: views.append(view)
+	views.sort_custom(func(a, b): return _center(a).distance_to(origin) < _center(b).distance_to(origin))
+	var now := _now()
+	var at := maxf(0.0, next_free - now) + 0.15 * speed
+	holding[seat] = true
+	if is_instance_valid(avatar) and "out_held" in avatar: avatar.out_held = true
+	var step := minf(0.06, 0.8 / maxf(1.0, views.size())) * speed
+	for index in range(views.size()):
+		var view: Control = views[index]
+		var tween := view.create_tween()
+		tween.tween_interval(at + index * step)
+		var glitch := func(t: float):
+			var phase := floori(t * 7.0)
+			view.fx_offset = Vector2((float(phase % 3) - 1.0) * 5.0 * (1.0 - t), 0)
+			view.modulate = Color(1.0, 0.55, 0.5, 1.0) if phase % 2 == 0 else Color(0.6, 1.1, 1.05, 1.0)
+		tween.tween_method(glitch, 0.0, 1.0, 0.2 * speed)
+		tween.tween_callback(func(): _burst(_center(view), view.size, HIT.lerp(VIOLET, 0.4), Vector2(0, 70), 10, speed))
+		tween.tween_property(view, "fx_alpha", 0.0, 0.15 * speed).set_ease(Tween.EASE_IN)
+		tween.tween_callback(func():
+			view.fx_offset = Vector2.ZERO
+			view.modulate = Color.WHITE)
+	var length := at + views.size() * step + 0.5 * speed
+	next_free = maxf(next_free, now + length)
+	get_tree().create_timer(length).timeout.connect(func():
+		_pulse_ring(origin, 0.0, HIT, 0.4 * speed)
+		_finish_elimination(seat))
+	set_process(true)
+
+func _finish_elimination(seat: int) -> void:
+	holding.erase(seat)
+	var avatar = portrait_view.call(seat) if portrait_view.is_valid() else null
+	if is_instance_valid(avatar) and "out_held" in avatar:
+		avatar.out_held = false
+		avatar.queue_redraw()
+	elimination_finished.emit(seat)
 
 ## The sweep starts on the side of whoever resolved the wipe (their portrait), else the left.
 func _sweep_origin(fresh: Array, area: Rect2) -> float:

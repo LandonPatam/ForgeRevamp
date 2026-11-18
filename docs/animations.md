@@ -68,6 +68,12 @@ Phase 4 (polish) is done, without sounds as decided:
   - The flash style box is reused.
   - Once every effect ends, the director stops processing (asserted by `wipe-fx`).
 
+**Endings:**
+- A player who loses doesn't vanish. After the killing beat (the hit, its number, HP rolling to 0), their board breaks into glyphs card by card, from their portrait outward. That happens both when Forge removes their cards and when the game ends with the cards still down.
+- Their OUT mark and ELIMINATED line appear only after that.
+- YOU WIN (gold) and YOU LOSE (purple) wait for `TableFx.settled()`, then a short pause, at most 6 s.
+- Checked by `lose-fx` and `win-fx`.
+
 Remaining: the Mac run of the effect scenarios and sandbox boards, then two-seat online checks.
 
 ## Checks

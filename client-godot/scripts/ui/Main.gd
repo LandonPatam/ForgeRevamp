@@ -593,6 +593,8 @@ func _build_shell() -> void:
 	table_fx.card_view = func(id: int): return cards.get(id)
 	table_fx.portrait_view = func(seat: int): return hud_values[seat].portrait if hud_values.has(seat) else null
 	table_fx.zone_point = _fx_zone_point
+	table_fx.elimination_finished.connect(func(seat: int):
+		if not snapshot.is_empty() and seat < snapshot.players.size(): _mark_elimination(seat, snapshot.players[seat].get("loss", {})))
 	table_fx.table_rect = func(): return board_scroller.get_global_rect()
 	table_fx.banner_point = func(): return Vector2(board_scroller.get_global_rect().get_center().x, local_divider.get_global_rect().end.y + 10.0)
 	table_fx.mana_point = func(key: String):
@@ -1014,7 +1016,6 @@ func _apply_state(value: Dictionary) -> void:
 	for p in snapshot.players:
 		var values: Dictionary = hud_values[p.id]
 		values.portrait.set_player(p, p.id == snapshot.game.activePlayer)
-		_mark_elimination(int(p.id), p.get("loss", {}))
 		values.name.text = p.name
 		values.name.tooltip_text = p.name
 		values.info.text = ""
@@ -1058,6 +1059,7 @@ func _apply_state(value: Dictionary) -> void:
 		targeting = false
 	_layout_board()
 	table_fx.present(snapshot)
+	for p in snapshot.players: _mark_elimination(int(p.id), p.get("loss", {}))
 	_update_actions()
 	if inspection_card.data.is_empty() and snapshot.players[0].zones.Battlefield.size() > 1:
 		_inspect(snapshot.players[0].zones.Battlefield[1])
@@ -1443,7 +1445,7 @@ func _layout_board() -> void:
 				play_positions[id] = {"position": Vector2(center.x / board.size.x, center.y), "age": 0.0}
 			# Presentation only: while Forge is still mid-cast (payment, targets, a cost/mode
 			# choice), the card sits provisionally in its Stack zone without a stack item yet.
-			var cast_in_progress: bool = live and (not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty() or snapshot.prompt.get("inputKind", "") != "InputPassPriority")
+			var cast_in_progress: bool = live and not snapshot.game.get("gameOver", false) and (not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty() or snapshot.prompt.get("inputKind", "") != "InputPassPriority")
 			if play_positions.has(id) and (cast_in_progress or snapshot.stack.any(func(item): return item.sourceId == id)):
 				retiring.data.zone = "Stack"
 				retiring.data.pendingCast = true
@@ -1470,7 +1472,7 @@ func _layout_board() -> void:
 ## An opponent who lost stays on the table, struck out, with how they went out across their field.
 func _mark_elimination(seat: int, loss: Dictionary) -> void:
 	if seat == 0 or not player_areas.has(seat): return
-	if loss.is_empty():
+	if loss.is_empty() or table_fx.holding.has(seat):
 		if elimination_labels.has(seat): elimination_labels[seat].hide()
 		return
 	if not elimination_labels.has(seat):
@@ -1495,7 +1497,8 @@ func _card_destination(id: int, owner: int, token: bool) -> Array:
 	for p in snapshot.players:
 		for zone in p.zones:
 			if p.zones[zone].any(func(card): return int(card.id) == id): return [int(p.id), zone]
-	return [owner, "" if token else "Hand"]
+	var gone_with_owner: bool = owner >= 0 and owner < snapshot.players.size() and not snapshot.players[owner].get("loss", {}).is_empty()
+	return [owner, "" if token or gone_with_owner else "Hand"]
 
 ## The global point a departing card travels to: its zone icon, the local hand or library,
 ## or an opponent's portrait for their hidden zones.
@@ -2630,10 +2633,10 @@ func _update_live_actions() -> void:
 	var outcome := _match_outcome()
 	if outcome.get("title", "") == "Victory" and not victory_announced:
 		victory_announced = true
-		_announce_victory.call_deferred()
+		_after_table_settles(_announce_victory)
 	elif outcome.get("title", "") == "Defeated" and not defeat_announced:
 		defeat_announced = true
-		_show_outcome_screen.call_deferred(false, snapshot.players[0].get("loss", {}))
+		_after_table_settles(_show_outcome_screen.bind(false, snapshot.players[0].get("loss", {})))
 	if not outcome.is_empty():
 		# Forge sends no prompt once this seat is out, so offer a clear way to finish.
 		phase_title.text = outcome.title
@@ -2654,6 +2657,16 @@ func _update_live_actions() -> void:
 	if open_ask >= 0 and is_instance_valid(modal_panel):
 		modal_panel.set_submission_enabled(ready)
 	_update_turn_steps()
+
+## YOU WIN / YOU LOSE come after what ended the game has played on the table: the final hit,
+## HP to 0 and the loser's board breaking apart. Never longer than a few seconds.
+func _after_table_settles(show: Callable) -> void:
+	var deadline := Time.get_ticks_msec() + 6000
+	await get_tree().process_frame
+	while not table_fx.settled() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	if Fx.enabled(): await get_tree().create_timer(0.45).timeout
+	if live and not snapshot.is_empty(): show.call()
 
 ## A win shows the YOU WIN screen once; I WON continues straight into the usual end-of-game wipe.
 func _announce_victory() -> void:

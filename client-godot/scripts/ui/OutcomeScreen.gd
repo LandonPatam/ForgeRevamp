@@ -56,8 +56,17 @@ func present(won: bool, loss: Dictionary = {}) -> void:
 	button.text = "I WON" if won else "I lost"
 	status = "> ALL OPPONENTS ELIMINATED. RETURNING TO THE COMPUTER." if won else "> SEAT ELIMINATED. YOU CAN KEEP WATCHING THE TABLE."
 	var cause := "" if won else loss_cause(loss)
-	if not cause.is_empty(): status = "> " + cause + "
-" + status
+	if not cause.is_empty(): status = "> " + cause + "\n" + status
+	# The button wears the outcome's color: gold for a win, purple for a loss.
+	for state in ["normal", "hover", "pressed", "focus"]:
+		var style = button.get_theme_stylebox(state)
+		if style is StyleBoxFlat:
+			var tinted: StyleBoxFlat = style.duplicate()
+			tinted.border_color = accent()
+			tinted.bg_color = accent().darkened(0.82 if state == "normal" else 0.7)
+			button.add_theme_stylebox_override(state, tinted)
+	for role in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		button.add_theme_color_override(role, accent().lightened(0.45))
 	clock = 0.0
 	built_size = Vector2.ZERO
 	_build()
@@ -86,7 +95,7 @@ static func loss_cause(loss: Dictionary) -> String:
 	return ""
 
 func accent() -> Color:
-	return Color("bd9bf2") if victory else Color("ff765e")
+	return Color("f2c14e") if victory else Color("bd9bf2") # Gold win, purple loss.
 
 ## Lay out the rain columns and the falling message cells for the current size.
 func _build() -> void:

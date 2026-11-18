@@ -507,6 +507,63 @@ func wipe_fx() -> bool:
 	await ui.get_tree().create_timer(2.0).timeout
 	return check(fx.items.is_empty() and not fx.is_processing(), "Once every effect ends the director stops running (no idle cost): %d items, processing=%s" % [fx.items.size(), fx.is_processing()])
 
+## Losing in order: the Bolt's hit and your board breaking apart play before YOU LOSE appears.
+func lose_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var fx: Control = ui.table_fx
+	if not await wait_for(func(): return not ui.snapshot.stack.is_empty(), 20.0): return check(false, "Lightning Bolt waits on the stack")
+	fx.present(ui.snapshot)
+	if ui.incoming_effect.showing(): ui.incoming_effect.resolve_button.pressed.emit()
+	elif ui.snapshot.prompt.get("okEnabled", false): ui._intent("ok")
+	var lost_at := -1
+	for index in range(900):
+		await ui.get_tree().process_frame
+		if lost_at < 0 and not ui.snapshot.players[0].get("loss", {}).is_empty(): lost_at = Time.get_ticks_msec()
+		if is_instance_valid(ui.outcome_screen) and ui.outcome_screen.visible: break
+	if not check(is_instance_valid(ui.outcome_screen) and ui.outcome_screen.visible, "YOU LOSE appears"): return false
+	var waited := Time.get_ticks_msec() - lost_at
+	print("SCENARIO lose fx: screen after %d ms, played=%s" % [waited, fx.played])
+	if not check(fx.settled() and waited > 500, "YOU LOSE waits for the hit and your board to break apart (%d ms)" % waited): return false
+	if not check(fx.played.has("number") and fx.played.has("glyph"), "The hit and the board's break-up played first: " + str(fx.played)): return false
+	if not check(ui.outcome_screen.accent() == Color("bd9bf2"), "YOU LOSE is purple"): return false
+	await ui.get_tree().create_timer(2.0).timeout
+	await capture("screen")
+	return true
+
+## Winning in order: Flame Rift's hits, both opponents' boards breaking apart and their OUT marks
+## come before the game ends on YOU WIN.
+func win_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var fx: Control = ui.table_fx
+	fx.present(ui.snapshot)
+	if not await tap("Mountain", 2) or not await cast("Flame Rift"): return false
+	var captured := false
+	var over_at := -1
+	for index in range(900):
+		await ui.get_tree().process_frame
+		if over_at < 0 and ui.snapshot.game.get("gameOver", false): over_at = Time.get_ticks_msec()
+		if not captured and not fx.holding.is_empty() and fx.played.has("glyph"):
+			captured = true
+			await capture("breaking")
+		if over_at >= 0 and fx.settled() and Time.get_ticks_msec() - over_at > 600: break
+	if not check(over_at >= 0, "Flame Rift ends the game: " + str(ui.snapshot.players.map(func(p): return p.life))): return false
+	var hidden := true
+	for seat in [1, 2]:
+		for card in ui.snapshot.players[seat].zones.Battlefield:
+			if ui.cards.has(card.id) and ui.cards[card.id].fx_alpha > 0.0: hidden = false
+	print("SCENARIO win fx: played=%s holding=%s" % [fx.played, fx.holding])
+	if not check(hidden, "Both opponents' boards broke apart before the end"): return false
+	if not check(ui.hud_values[1].portrait.out() and ui.hud_values[2].portrait.out(), "Both opponents are marked OUT once their boards are gone"): return false
+	await capture("ended")
+	var screen = preload("res://scripts/ui/OutcomeScreen.gd").new()
+	ui.add_child(screen)
+	screen.present(true)
+	var gold: bool = screen.accent() == Color("f2c14e")
+	screen.queue_free()
+	return check(gold, "YOU WIN is gold")
+
 func equipment() -> bool:
 	var host := find_card("Grizzly Bears", "Battlefield")
 	var gear := [find_card("Bonesplitter", "Battlefield"), find_card("Basilisk Collar", "Battlefield")]

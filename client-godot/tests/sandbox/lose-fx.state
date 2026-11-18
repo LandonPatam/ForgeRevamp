@@ -1,0 +1,14 @@
+# Losing in order: AI 1's Lightning Bolt finishes you at 2 life. The hit lands, your HP rolls to -1, your board breaks apart from your portrait outward, and only then YOU LOSE (purple) appears.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=2
+p0battlefield=Grizzly Bears;Hill Giant;Forest;Forest;Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Mountain
+p1putonstack=Lightning Bolt->human
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
