@@ -390,13 +390,14 @@ func open_editor() -> void:
 			if is_instance_valid(editor_surface): editor_surface.visible = editor.visible)
 		var sync_editor_popup := func():
 			if is_instance_valid(editor_surface):
-				var popup_open: bool = editor.overlay.visible or editor.context_menu.visible
+				var popup_open: bool = editor.popup_open()
 				editor_surface.full_input = popup_open
 				# Embedded popup menus also need the whole outer surface to own
 				# input, including where it overlaps the carousel/header.
 				editor_surface.z_index = 80 if popup_open else 0
 		editor.overlay.visibility_changed.connect(sync_editor_popup)
 		editor.context_menu.visibility_changed.connect(sync_editor_popup)
+		editor.popups_changed.connect(sync_editor_popup)
 		computer.editor_surface = editor
 	else:
 		if editor.online: editor._request("list")

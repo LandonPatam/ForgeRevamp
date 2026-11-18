@@ -134,6 +134,19 @@ func run(root: Control) -> void:
 	await app.get_tree().process_frame
 	await capture("import")
 	app.editor.close_transient_ui()
+	# Export Forge deck file closes the overlay, then opens a save dialog: the editor surface must
+	# rise above the carousel and own every click while it is open, or the modal dialog freezes the app.
+	await app.get_tree().process_frame
+	if not check(app.editor_surface.z_index == 0 and not app.editor_surface.full_input, "No popup: the editor surface sits at its normal depth"): return
+	app.editor.export_text = "[metadata]\nName=Check\n"
+	app.editor._ensure_file_dialogs()
+	app.editor.export_dialog.popup_centered_ratio(0.7)
+	await app.get_tree().process_frame
+	if not check(app.editor_surface.z_index == 80 and app.editor_surface.full_input, "The export save dialog raises the editor surface and gives it all input"): return
+	await capture("export-dialog")
+	app.editor.export_dialog.hide()
+	await app.get_tree().process_frame
+	if not check(app.editor_surface.z_index == 0 and not app.editor_surface.full_input, "Closing the save dialog restores the editor surface"): return
 	app.get_window().size = Vector2i(1600, 1000)
 	await app.get_tree().create_timer(0.5).timeout
 	if not check(app.editor.get_viewport_rect().size == (Vector2(1600, 1000) / active_scale).floor(), "Resizing preserves the selected editor scale"): return

@@ -1,4 +1,7 @@
 extends Control
+## Any editor popup opened or closed (overlay, context menu, file dialogs): the host raises the
+## editor's scaled surface above the carousel and gives it the whole screen's input while one is open.
+signal popups_changed
 var app_host: Node
 const P = preload("res://scripts/ui/Palette.gd")
 const Backdrop = preload("res://scripts/ui/TableBackdrop.gd")
@@ -371,16 +374,23 @@ func _ensure_file_dialogs() -> void:
 		import_text.text = FileAccess.get_file_as_string(path)
 		import_status.text = "Loaded " + path.get_file())
 	add_child(file_dialog)
+	file_dialog.visibility_changed.connect(func(): popups_changed.emit())
 	export_dialog = FileDialog.new()
 	export_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	export_dialog.filters = PackedStringArray(["*.dck;Forge deck"])
+	export_dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
 	export_dialog.file_selected.connect(func(path):
 		var file := FileAccess.open(path, FileAccess.WRITE)
 		if file == null: _notice("Could not write the exported deck.", true); return
 		file.store_string(export_text)
 		_notice("Exported " + path.get_file()))
 	add_child(export_dialog)
+	export_dialog.visibility_changed.connect(func(): popups_changed.emit())
+
+## Whether any editor popup is open, file dialogs included.
+func popup_open() -> bool:
+	return (overlay != null and overlay.visible) or (context_menu != null and context_menu.visible) 		or (file_dialog != null and file_dialog.visible) or (export_dialog != null and export_dialog.visible)
 
 func _density_path() -> String:
 	# Integration runs keep preferences inside their isolated fixture directory.
