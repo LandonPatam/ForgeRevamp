@@ -11,6 +11,17 @@ func run(ui: Control, directory: String = "") -> void:
 	assert(Option.colors_for("Add {W}, {U}, or {G}.") == [0, 1, 4])
 	assert(Option.colors_for("Destroy target green creature").is_empty(), "Rules text must not become a mana choice")
 	var saved: Dictionary = ui.snapshot.duplicate(true)
+	# An opponent knocked out by commander damage at 16 life is struck out, with how, across their field.
+	var knocked: Dictionary = saved.duplicate(true)
+	knocked.players[1].life = 16
+	knocked.players[1].loss = {"reason": "commanderDamage", "sources": [{"name": "Atraxa, Praetors' Voice", "amount": 24}]}
+	knocked.players[1].zones.Battlefield = []
+	ui._apply_state(knocked)
+	await ui.get_tree().process_frame
+	assert(ui.hud_values[1].portrait.out() and ui.elimination_labels[1].visible and ui.elimination_labels[1].text.contains("Commander damage: Atraxa, Praetors' Voice (24)"), "An eliminated opponent is marked with how they went out")
+	if not directory.is_empty(): await ui._save_frame(directory.path_join("eliminated-opponent.png"))
+	ui._apply_state(saved)
+	assert(not ui.hud_values[1].portrait.out() and not ui.elimination_labels[1].visible, "The mark clears with the loss")
 	var fixture: Dictionary = saved.duplicate(true)
 	var creature: Dictionary = fixture.players[0].zones.Battlefield[0]
 	creature.merge({"name": "Atraxa, Praetors' Voice", "power": 6, "toughness": 6, "stats": "6 / 6", "sick": true, "damage": 2, "counters": {"+1/+1": 2}}, true)

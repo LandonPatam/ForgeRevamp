@@ -216,6 +216,8 @@ var inspection_traits_panel: Panel
 var targeting_overlay: Control
 ## Combat strikes, impacts and departures drawn over the table (presentation only).
 var table_fx: Control
+## Seat -> label across an eliminated opponent's empty field saying how they went out.
+var elimination_labels: Dictionary = {}
 var modal: Control
 var zone_panel: PanelContainer
 var zone_title: Label
@@ -1010,6 +1012,7 @@ func _apply_state(value: Dictionary) -> void:
 	for p in snapshot.players:
 		var values: Dictionary = hud_values[p.id]
 		values.portrait.set_player(p, p.id == snapshot.game.activePlayer)
+		_mark_elimination(int(p.id), p.get("loss", {}))
 		values.name.text = p.name
 		values.name.tooltip_text = p.name
 		values.info.text = ""
@@ -1461,6 +1464,27 @@ func _layout_board() -> void:
 				retiring.queue_free()
 	_update_lines()
 	_layout_inspection()
+
+## An opponent who lost stays on the table, struck out, with how they went out across their field.
+func _mark_elimination(seat: int, loss: Dictionary) -> void:
+	if seat == 0 or not player_areas.has(seat): return
+	if loss.is_empty():
+		if elimination_labels.has(seat): elimination_labels[seat].hide()
+		return
+	if not elimination_labels.has(seat):
+		var label := Label.new()
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.add_theme_font_override("font", preload("res://scripts/ui/TerminalStyle.gd").font())
+		label.add_theme_font_size_override("font_size", 18)
+		label.add_theme_color_override("font_color", Color("ff765e"))
+		player_areas[seat].add_child(label)
+		elimination_labels[seat] = label
+	elimination_labels[seat].text = "> ELIMINATED\n" + Avatar.elimination(loss)
+	elimination_labels[seat].show()
 
 ## Where a card that left the battlefield went: [seat, zone]. A token that is gone ceased to
 ## exist ([owner, ""]); any other card not in a visible zone went to a hidden one, shown as its

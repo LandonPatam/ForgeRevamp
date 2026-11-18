@@ -42,8 +42,28 @@ func set_player(value: Dictionary, active: bool) -> void:
 	portrait = preload("res://scripts/ui/Portraits.gd").texture(player)
 	priority = active
 	tooltip_text = player.name + " / " + str(player.life) + " life. Click to select this player."
+	if out(): tooltip_text = player.name + " is out of the game: " + elimination(player.get("loss", {})) + "."
 	set_process(priority or damage_flash > 0.0)
 	queue_redraw()
+
+## Whether this player has lost and is out of the game (Forge's per-player loss).
+func out() -> bool:
+	return not player.is_empty() and not player.get("loss", {}).is_empty()
+
+## How a player was eliminated, in a few words: "Commander damage: Atraxa (24)".
+static func elimination(loss: Dictionary) -> String:
+	var sources: Array = loss.get("sources", [])
+	var named := ", ".join(sources.map(func(source): return "%s (%d)" % [str(source.get("name", "?")), int(source.get("amount", 0))]))
+	var card := str(loss.get("card", ""))
+	match str(loss.get("reason", "")):
+		"commanderDamage": return "Commander damage" + (": " + named if not named.is_empty() else "")
+		"life": return "Life reached 0" + (", final hit " + named if not named.is_empty() else (" from " + card if not card.is_empty() else ""))
+		"poison": return "%d poison counters" % int(loss.get("amount", 10))
+		"milled": return "Drew from an empty library"
+		"effect": return (card + " made them lose") if not card.is_empty() else "A card made them lose"
+		"opponentWon": return (card + " won the game for an opponent") if not card.is_empty() else "An opponent won"
+		"conceded": return "Conceded"
+	return "Lost the game"
 
 func _process(delta: float) -> void:
 	clock += delta
@@ -59,9 +79,10 @@ func _draw() -> void:
 		var face := Rect2((size - Vector2.ONE * side) * 0.5 + shake, Vector2.ONE * side)
 		draw_style_box(P.box(Color("11191b"), Color("538c91"), 3, 0), face.grow(2))
 		if portrait != null:
-			draw_texture_rect(portrait, face, false)
+			draw_texture_rect(portrait, face, false, Color(0.45, 0.45, 0.45) if out() else Color.WHITE)
 		else:
 			draw_string(terminal_font, face.position + Vector2(0, side * 0.5 + 11), player.get("initials", "P"), HORIZONTAL_ALIGNMENT_CENTER, side, 30, Color("a6dfdf"))
+		if out(): draw_line(face.position + Vector2(4, side - 4), face.position + Vector2(side - 4, 4), Color("ff5a4a"), 3, true)
 		return
 	var factor := minf(size.x / 136.0, size.y / 62.0)
 	var origin := (size - Vector2(136, 62) * factor) * 0.5 + shake
@@ -86,7 +107,13 @@ func _draw() -> void:
 		led.a = 0.8 + sin(clock * 2) * 0.15
 		draw_circle(Vector2(121, 12), 4, Color(led, led.a * 0.14))
 	draw_circle(Vector2(121, 12), 2, led)
-	_draw_digits(str(int(round(shown_life))), Rect2(59, 20, 67, 29), ink)
+	if out():
+		# Out of the game: the life total no longer matters (commander damage can kill at any life).
+		draw_rect(Rect2(6, 6, 44, 44), Color(0.04, 0.05, 0.05, 0.6))
+		draw_line(Vector2(8, 48), Vector2(48, 8), Color("ff5a4a"), 3, true)
+		draw_string(terminal_font, Vector2(57, 42), "OUT", HORIZONTAL_ALIGNMENT_CENTER, 71, 24, Color("ff5a4a"))
+	else:
+		_draw_digits(str(int(round(shown_life))), Rect2(59, 20, 67, 29), ink)
 	if has_focus(): draw_rect(Rect2(0, 0, 136, 58), ink, false, 1)
 	draw_set_transform(Vector2.ZERO)
 
