@@ -1,0 +1,14 @@
+# Cast Fiery Confluence. Choose damage to each opponent twice and destroy an artifact once. Target Sol Ring.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Mountain;Mountain;Mountain;Mountain
+p0hand=Fiery Confluence
+p0library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p1life=40
+p1battlefield=Sol Ring
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

@@ -102,7 +102,8 @@ final class BridgeProtocol {
                     JsonElement picks = value.getAsJsonObject().get(side);
                     if (picks == null) continue;
                     require(picks.isJsonArray(), "Scry sides must be arrays");
-                    require(side.equals("top") ? ask.get("canTop").getAsBoolean() : ask.get("canBottom").getAsBoolean() || picks.getAsJsonArray().isEmpty(), "That side is not allowed");
+                    boolean allowed = ask.get(side.equals("top") ? "canTop" : "canBottom").getAsBoolean();
+                    require(allowed || picks.getAsJsonArray().isEmpty(), "That side is not allowed");
                     for (JsonElement item : picks.getAsJsonArray()) {
                         int index = integer(item);
                         require(index >= 0 && index < count, "Invalid option index");
@@ -136,10 +137,11 @@ final class BridgeProtocol {
             case "input" -> { return JsonNull.INSTANCE; }
             case "scry" -> {
                 JsonObject keep = new JsonObject();
-                JsonArray top = new JsonArray();
-                for (int i = 0; i < ask.getAsJsonArray("options").size(); i++) top.add(i);
-                keep.add("top", top);
-                keep.add("bottom", new JsonArray());
+                JsonArray offered = new JsonArray();
+                for (int i = 0; i < ask.getAsJsonArray("options").size(); i++) offered.add(i);
+                boolean canTop = ask.get("canTop").getAsBoolean();
+                keep.add("top", canTop ? offered : new JsonArray());
+                keep.add("bottom", canTop ? new JsonArray() : offered);
                 return keep;
             }
             default -> { return new JsonPrimitive(true); }

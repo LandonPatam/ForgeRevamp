@@ -1,0 +1,12 @@
+# Same board as concord-counters, with tethers off: the generic popup takes the mode choice (Spirit and the counter, then the Bears).
+activeplayer=p0
+activephase=MAIN2
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Concord with the Kami;Grizzly Bears|Id:1|Counters:P1P1=1;Llanowar Elves|Id:2;Ethereal Armor|AttachedTo:2;Bonesplitter|AttachedTo:1
+p0library=Forest;Island;Swamp;Mountain;Plains;Forest;Island;Swamp;Mountain;Plains;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

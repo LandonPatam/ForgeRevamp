@@ -1,7 +1,67 @@
 extends RefCounted
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 
+func check_library_placement(ui: Control) -> void:
+	var tether := preload("res://scripts/ui/CardCallout.gd").new()
+	ui.add_child(tether)
+	tether.show()
+	var answers: Array = []
+	tether.ask_answered.connect(func(_id, value): answers.append(value))
+	var options := [
+		{"card": {"id": 101, "name": "Grizzly Bears"}},
+		{"card": {"id": 102, "name": "Craw Wurm"}},
+	]
+	for top in [true, false]:
+		tether.present_scry({"id": 1 if top else 2, "options": options, "canTop": top, "canBottom": not top}, true)
+		var order_list: Control = tether.scry_order if top else tether.scry_bottom_order
+		assert(order_list.is_visible_in_tree() and tether.scry_toggles[0].disabled, "The only permitted destination is set before confirmation")
+		order_list.move(1, 0)
+		tether.yes_button.pressed.emit()
+		assert(answers.back() == ({"top": [1, 0], "bottom": []} if top else {"top": [], "bottom": [1, 0]}), "Send the selected order at the permitted end")
+	tether.queue_free()
+
+func check_replaced_target_prompt(ui: Control) -> void:
+	var saved: Dictionary = ui.snapshot
+	var saved_send_revision: int = ui.commit_sent_revision
+	ui.snapshot = {"revision": 989, "connectionReady": false, "prompt": {
+		"inputKind": "InputSelectTargets", "inputId": 1, "cardId": 30,
+		"selectable": [31, 32], "selMin": 1, "selMax": 1,
+	}}
+	ui._sync_targets()
+	var staged := {"kind": "card", "id": 31, "name": "Grizzly Bears"}
+	ui.target_staged = [staged]
+	ui.target_queue = [staged]
+	ui.target_committing = true
+	ui.snapshot.prompt.message = "Reworded question for the same input"
+	ui._sync_targets()
+	assert(ui.target_staged == [staged], "A prompt refresh must preserve the existing pick")
+	ui.snapshot.revision = 990
+	ui.snapshot.connectionReady = true
+	ui.snapshot.prompt.inputId = 2
+	ui._sync_targets()
+	assert(ui.target_staged.is_empty() and ui.target_queue.is_empty() and not ui.target_committing and ui.commit_sent_revision == saved_send_revision,
+		"A replacement with the same source, legal targets and bounds must discard a pending pick before sending")
+	ui.target_staged = [staged]
+	ui.target_queue = [staged]
+	ui.target_committing = true
+	ui.hand_pick_queue = [42]
+	ui.hand_pick_committing = true
+	var adapter := preload("res://scripts/bridge/LiveAdapter.gd").new()
+	adapter.connection_interrupted.connect(ui._clear_interrupted_actions)
+	adapter.connected = true
+	adapter.retry_in = 60
+	adapter.poll(0.0) # Its WebSocket is closed.
+	ui.snapshot.revision = 991
+	ui._sync_targets()
+	assert(ui.target_queue.is_empty() and not ui.target_committing and ui.hand_pick_queue.is_empty()
+		and not ui.hand_pick_committing and ui.commit_sent_revision == saved_send_revision,
+		"A disconnected table discards pending picks even when the same prompt returns")
+	ui.snapshot = saved
+	ui._sync_targets()
+
 func run(ui: Control, directory: String = "") -> void:
+	check_library_placement(ui)
+	check_replaced_target_prompt(ui)
 	var state := {"connectionReady": true, "game": {}, "asks": [], "pendingDraws": [], "stack": [], "autoPassStackId": -1, "prompt": {"inputKind": "InputSelectTargets", "message": "Choose up to two creatures to return to their owners' hands.", "okEnabled": false, "cancelEnabled": true, "cancelLabel": "Cancel", "cards": [{"id": 91}], "entities": [{"id": 1, "kind": "player", "name": "Opponent"}]}}
 	var panel = preload("res://scripts/ui/InteractionPanel.gd").new()
 	ui.add_child(panel)

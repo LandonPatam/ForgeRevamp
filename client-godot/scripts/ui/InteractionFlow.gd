@@ -1,4 +1,11 @@
 extends RefCounted
+
+static func payment_message(prompt: Dictionary) -> String:
+	var message: String = prompt.get("message", "")
+	if not prompt.has("wardContext"): return message
+	if prompt.has("wardMana"): message = "Mana to pay · " + str(prompt.wardMana)
+	return str(prompt.wardContext) + "\n\n" + message
+
 ## One presentation policy for native engine inputs; engine flags own legality.
 static func describe(state: Dictionary) -> Dictionary:
 	var prompt: Dictionary = state.get("prompt", {})
@@ -25,6 +32,10 @@ static func describe(state: Dictionary) -> Dictionary:
 			title = "Choose blockers"
 			confirm = "Confirm blocks"
 			help = "Click an attacker, then your blocker. Click the blocker again to remove it."
+			if prompt.get("noLegalBlocks", false):
+				title = "No legal blocks"
+				confirm = "Continue without blockers"
+				help = "Review the attackers before continuing."
 		"InputPayMana", "InputPayManaOfCostPayment":
 			title = "Pay the cost"
 			help = "Use mana from your pool or activate a source on the board."

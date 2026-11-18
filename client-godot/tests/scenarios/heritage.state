@@ -1,4 +1,4 @@
-# Attack with the Bears and the Wurm: Duelist's Heritage first asks yes/no on its card; No skips picking a target and nothing gains double strike
+# Attack with the Bears and the Wurm. Target the Wurm with Duelist's Heritage, then say No on resolution to decline double strike.
 activeplayer=p0
 activephase=MAIN1
 turn=5

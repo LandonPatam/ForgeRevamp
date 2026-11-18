@@ -1,0 +1,14 @@
+# Stack responses matrix: AI 1's Vision Skeins (each player draws two) while you hold Giant Growth. It is an instant, so Everything and Smart wait (with a draw notice); Only threats passes.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p0battlefield=Forest;Grizzly Bears
+p0hand=Giant Growth
+p1putonstack=Vision Skeins

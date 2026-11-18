@@ -1,0 +1,13 @@
+# Stack responses matrix: AI 1's Lightning Bolt at your Grizzly Bears. Every level waits.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p0battlefield=Forest;Grizzly Bears|Id:1
+p1putonstack=Lightning Bolt->1

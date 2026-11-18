@@ -1,0 +1,122 @@
+diff --git a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+index 3d61c77c..cc73df83 100644
+--- a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
++++ b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+@@ -678,6 +678,8 @@ public class PhaseHandler implements java.io.Serializable, IHasForgeLog {
+                         // If not replaced, run normal declare blockers
+                         whoDeclaresBlockers.getController().declareBlockers(p, combat);
+                     }
++                } else {
++                    whoDeclaresBlockers.getController().confirmNoBlockers(p, combat);
+                 }
+             }
+             else { continue; }
+diff --git a/forge-game/src/main/java/forge/game/player/PlayerController.java b/forge-game/src/main/java/forge/game/player/PlayerController.java
+index c3073392..6ddbfa21 100644
+--- a/forge-game/src/main/java/forge/game/player/PlayerController.java
++++ b/forge-game/src/main/java/forge/game/player/PlayerController.java
+@@ -157,6 +157,10 @@ public abstract class PlayerController {
+     public abstract void declareAttackers(Player attacker, Combat combat);
+     public abstract void declareBlockers(Player defender, Combat combat);
+ 
++    /** Optional presentation for a defender whose legal declaration is empty. */
++    public void confirmNoBlockers(Player defender, Combat combat) {
++    }
++
+     public abstract CardCollection orderBlockers(Card attacker, CardCollection blockers);
+ 
+     /**
+diff --git a/forge-gui/src/main/java/forge/gamemodes/match/input/InputBlock.java b/forge-gui/src/main/java/forge/gamemodes/match/input/InputBlock.java
+index 9064f741..4d50a7d1 100644
+--- a/forge-gui/src/main/java/forge/gamemodes/match/input/InputBlock.java
++++ b/forge-gui/src/main/java/forge/gamemodes/match/input/InputBlock.java
+@@ -51,11 +51,18 @@ public class InputBlock extends InputSyncronizedBase {
+     // some cards may block several creatures at a time. (ex:  Two-Headed Dragon, Vanguard's Shield)
+     private final Combat combat;
+     private final Player defender;
++    private final boolean noLegalBlocks;
+ 
+     public InputBlock(final PlayerControllerHuman controller, final Player defender0, final Combat combat0) {
++        this(controller, defender0, combat0, false);
++    }
++
++    public InputBlock(final PlayerControllerHuman controller, final Player defender0, final Combat combat0, final boolean noLegalBlocks) {
+         super(controller);
+         defender = defender0;
+         combat = combat0;
++        this.noLegalBlocks = noLegalBlocks;
++        if (noLegalBlocks) return;
+ 
+         //auto-select first attacker to declare blockers for
+         for (final Card attacker : combat.getAttackers()) {
+@@ -69,6 +76,10 @@ public class InputBlock extends InputSyncronizedBase {
+         }
+     }
+ 
++    public boolean hasNoLegalBlocks() {
++        return noLegalBlocks;
++    }
++
+     /** {@inheritDoc} */
+     @Override
+     protected final void showMessage() {
+@@ -105,7 +116,7 @@ public class InputBlock extends InputSyncronizedBase {
+     /** {@inheritDoc} */
+     @Override
+     public final void onOk() {
+-        final String blockErrors = CombatUtil.validateBlocks(combat, defender);
++        final String blockErrors = noLegalBlocks ? null : CombatUtil.validateBlocks(combat, defender);
+         if (blockErrors == null) {
+             // Done blocking
+             stop();
+@@ -118,6 +129,7 @@ public class InputBlock extends InputSyncronizedBase {
+     /** {@inheritDoc} */
+     @Override
+     public final boolean onCardSelected(final Card card, final List<Card> otherCardsToSelect, final ITriggerEvent triggerEvent) {
++        if (noLegalBlocks) return false;
+         boolean isCorrectAction = false;
+         if (triggerEvent != null && triggerEvent.getButton() == 3 && card.getController() == defender) {
+             combat.removeFromCombat(card);
+diff --git a/forge-gui/src/main/java/forge/player/TargetSelection.java b/forge-gui/src/main/java/forge/player/TargetSelection.java
+index 4452c2cb..f516b6b6 100644
+--- a/forge-gui/src/main/java/forge/player/TargetSelection.java
++++ b/forge-gui/src/main/java/forge/player/TargetSelection.java
+@@ -168,7 +168,8 @@ public class TargetSelection {
+                 }
+             }
+         }
+-        else if (validTargets.size() == 1 && minTargets != 0 && ability.isTrigger() && !tgt.canTgtPlayer()) {
++        else if (validTargets.size() == 1 && minTargets != 0 && ability.isTrigger() && !tgt.canTgtPlayer()
++                && !controller.confirmsForcedDecisions()) {
+             //if only one valid target card for triggered ability, auto-target that card
+             //only do this for triggered abilities to prevent auto-targeting when user chooses
+             //to play a spell or activate an ability
+diff --git a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+index 62623dc4..3059b183 100644
+--- a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
++++ b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+@@ -1584,6 +1587,23 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
+         getGui().updateAutoPassPrompt();
+     }
+ 
++    private boolean confirmForcedDecisions;
++
++    public void setConfirmForcedDecisions(final boolean enabled) {
++        confirmForcedDecisions = enabled;
++    }
++
++    public boolean confirmsForcedDecisions() {
++        return confirmForcedDecisions;
++    }
++
++    @Override
++    public void confirmNoBlockers(final Player defender, final Combat combat) {
++        if (!confirmForcedDecisions) return;
++        new InputBlock(this, defender, combat, true).showAndWait();
++        getGui().updateAutoPassPrompt();
++    }
++
+     private static final ZoneType[] ACTIONABLE_PAYMENT_ZONES = new ZoneType[] {
+         ZoneType.Hand, ZoneType.Battlefield, ZoneType.Graveyard, ZoneType.Exile, ZoneType.Command
+     };
+

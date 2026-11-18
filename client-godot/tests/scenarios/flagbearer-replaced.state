@@ -1,0 +1,13 @@
+# Activate Bane's Invoker (tap eight Plains when asked). AI 1's two Standard Bearers must be targeted first: stage both, Confirm. Forge takes the first and asks again; pick the second Bearer again and Confirm.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Bane's Invoker;Grizzly Bears
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Standard Bearer;Standard Bearer
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

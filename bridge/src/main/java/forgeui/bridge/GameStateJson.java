@@ -12,10 +12,15 @@ import forge.game.player.PlayerView;
 import forge.game.spellability.StackItemView;
 import forge.game.spellability.SpellAbility;
 import forge.game.ability.ApiType;
+import forge.game.ability.AbilityKey;
+import forge.game.keyword.Keyword;
+import forge.gamemodes.match.input.InputPayManaOfCostPayment;
 import forge.game.zone.ZoneType;
 import forge.gamemodes.match.Selection;
 import forge.trackable.TrackableObject;
 import forge.player.PlayerControllerHuman;
+import forge.game.GameLogEntry;
+import forge.game.GameLogEntryType;
 
 import java.util.List;
 import java.util.Map;
@@ -164,10 +169,11 @@ final class GameStateJson {
         root.add("revealed", revealed);
 
         JsonObject prompt;
+        boolean currentPrompt;
         synchronized (gui.prompt) {
             prompt = gui.prompt.deepCopy();
+            currentPrompt = gui.hasCurrentPrompt(input);
         }
-        boolean currentPrompt = gui.hasCurrentPrompt(input);
         if (!currentPrompt) {
             // A waiting seat must not inherit the last turn's enabled buttons or
             // declaration text while another player owns Forge's live input.
@@ -179,16 +185,58 @@ final class GameStateJson {
                     ? "Waiting for " + waiting.getName() + "." : "Waiting for Forge.");
         }
         prompt.addProperty("inputKind", input == null ? "InputLockUI" : inputKind(input.getClass()));
-        if (currentPrompt && !prompt.has("cardId") && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
+        if (currentPrompt && input instanceof InputPayManaOfCostPayment
+                && gui.getGameController() instanceof PlayerControllerHuman payer) {
+            SpellAbility payment = payer.getPlayer().getPaidForSA();
+            if (payment != null && payment.getApi() == ApiType.Counter && payment.hasParam("UnlessCost")) {
+                if ((payment.isKeyword(Keyword.WARD) || payment.getRootAbility().isKeyword(Keyword.WARD))
+                        && payment.getTriggeringObject(AbilityKey.SourceSA) instanceof SpellAbility targetedBy) {
+                    CardView protectedCard = payment.getHostCard().getView();
+                    CardView source = targetedBy.getHostCard().getView();
+                    String protectedName = gui.mayView(protectedCard) ? protectedCard.getName() : "a face-down permanent";
+                    String action = targetedBy.isSpell() ? "Your spell" : "Your ability";
+                    if (gui.mayView(source)) {
+                        action = targetedBy.isSpell() ? source.getName() : "The ability from " + source.getName();
+                    }
+                    String consequence = targetedBy.isSpell() && !targetedBy.isCounterableBy(payment)
+                            ? "Ward can't counter that spell."
+                            : "If you skip payment, ward counters it.";
+                    prompt.addProperty("wardContext", action + " targeted " + protectedName + ". " + consequence);
+                    var mana = payment.getManaCostBeingPaid();
+                    if (mana != null && !mana.containsPhyrexianMana() && payment.getSpendPhyrexianMana() == 0
+                            && !payer.getPlayer().hasKeyword("PayLifeInsteadOf:B")) {
+                        prompt.addProperty("wardMana", mana.toString(false, payer.getPlayer().getManaPool()));
+                    }
+                }
+            }
+        }
+        if (currentPrompt && input instanceof forge.gamemodes.match.input.InputConfirm confirm) {
             // Cost confirmations ("Sacrifice Evolving Wilds?") omit their card; the table attaches them to it.
-            CardView host = confirmSource(confirm);
-            if (host != null) {
+            SpellAbility ability = confirmAbility(confirm);
+            if (!prompt.has("cardId") && ability != null && ability.getHostCard() != null) {
+                CardView host = ability.getHostCard().getView();
                 cards.put(host.getId(), host);
                 prompt.addProperty("cardId", host.getId());
+            }
+            if (ability instanceof forge.game.trigger.WrappedAbility trigger && trigger.getDecider() != null) {
+                JsonArray names = new JsonArray();
+                for (var choice : trigger.getWrappedAbility().getAllTargetChoices()) {
+                    for (var target : choice.getTargetEntities()) {
+                        if (target instanceof forge.game.card.Card card) {
+                            CardView view = card.getView();
+                            names.add(gui.mayView(view) ? view.getName() : "Face-down card");
+                        } else if (target instanceof forge.game.player.Player player) {
+                            names.add(player.getName());
+                        }
+                    }
+                }
+                if (!names.isEmpty()) prompt.add("triggerTargetNames", names);
             }
         }
         if (currentPrompt && gui.getGameController() instanceof PlayerControllerHuman combatant
                 && (input instanceof forge.gamemodes.match.input.InputBlock || input instanceof forge.gamemodes.match.input.InputAttack)) {
+            boolean noLegalBlocks = input instanceof forge.gamemodes.match.input.InputBlock blockers && blockers.hasNoLegalBlocks();
+            if (noLegalBlocks) prompt.addProperty("noLegalBlocks", true);
             // Your creatures that can't block / attack this combat, with the reason, so the table can
             // mark them before you try (Taunt from the Rampart, summoning sickness, defender...).
             boolean blocking = input instanceof forge.gamemodes.match.input.InputBlock;
@@ -198,6 +246,14 @@ final class GameStateJson {
                 for (var creature : combatant.getPlayer().getCreaturesInPlay()) {
                     if (!blocking && combatGame.getCombat() != null && combatGame.getCombat().isAttacking(creature)) continue;
                     String reason = blocking ? CombatReasons.cantBlock(creature, combatGame.getCombat()) : CombatReasons.cantAttack(creature);
+                    if (reason == null && noLegalBlocks && combatGame.getCombat() != null) {
+                        var liveCombat = combatGame.getCombat();
+                        for (var attacker : liveCombat.getAttackers()) {
+                            if (liveCombat.getDefenderPlayerByAttacker(attacker) != combatant.getPlayer()) continue;
+                            reason = CombatReasons.cantBlock(attacker, creature, liveCombat);
+                            if (reason != null) break;
+                        }
+                    }
                     if (reason != null) unable.addProperty(String.valueOf(creature.getId()), reason);
                 }
             } catch (RuntimeException unreadable) {
@@ -220,11 +276,6 @@ final class GameStateJson {
                 cards.put(host.getId(), host);
                 prompt.addProperty("cardId", host.getId());
             }
-        }
-        if (currentPrompt && input instanceof forge.gamemodes.match.input.InputSelectTargets targeting && optionalTrigger(targeting)) {
-            // "You may have target…" (Duelist's Heritage): Forge asks for the target first and whether
-            // to use it only on resolution; the table asks yes/no first.
-            prompt.addProperty("optionalTrigger", true);
         }
         if (prompt.has("cardId")) {
             CardView source = cards.get(prompt.get("cardId").getAsInt());
@@ -346,30 +397,11 @@ final class GameStateJson {
         return null;
     }
 
-    /** Whether these targets are for a trigger its controller may decline (OptionalDecider$ You). */
-    static boolean optionalTrigger(forge.gamemodes.match.input.InputSelectTargets targeting) {
-        try {
-            var field = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
-            field.setAccessible(true);
-            if (field.get(targeting) instanceof forge.game.spellability.SpellAbility ability) {
-                var root = ability.getRootAbility();
-                if (root.isOptionalTrigger()) return true;
-                var trigger = root.getTrigger();
-                return trigger != null && trigger.hasParam("OptionalDecider");
-            }
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            // Unknown: Forge's own order (target, then yes/no) stays.
-        }
-        return false;
-    }
-
-    static CardView confirmSource(forge.gamemodes.match.input.InputConfirm confirm) {
+    private static SpellAbility confirmAbility(forge.gamemodes.match.input.InputConfirm confirm) {
         try {
             var field = forge.gamemodes.match.input.InputConfirm.class.getDeclaredField("sa");
             field.setAccessible(true);
-            if (field.get(confirm) instanceof forge.game.spellability.SpellAbility ability && ability.getHostCard() != null) {
-                return ability.getHostCard().getView();
-            }
+            if (field.get(confirm) instanceof SpellAbility ability) return ability;
         } catch (ReflectiveOperationException | RuntimeException e) {
             // A Forge update renamed the field: fall back to the unattached prompt.
         }
@@ -478,6 +510,90 @@ final class GameStateJson {
         return type.getSimpleName();
     }
 
+    private static final java.util.regex.Pattern DAMAGE_LINE =
+            java.util.regex.Pattern.compile("^(.+?)(?: \\(\\d+\\))? deals (\\d+) (?:combat |non-combat )?damage to (.+?)(?: \\(\\d+\\))?\\.?$");
+    private static final java.util.regex.Pattern LIFE_LINE =
+            java.util.regex.Pattern.compile("^(?:Life: )?(.+) (-?\\d+) > (-?\\d+)$");
+
+    /**
+     * Why this player lost, from Forge's own outcome: reason plus what did it where Forge knows.
+     * Life losses name the damage of the final hit from the full game log (newest first): every
+     * damage line to this player logged since their previous life change before the one that
+     * reached 0. A loss with no damage there (life loss, "pay life") names the effect that resolved it.
+     */
+    private JsonObject loss(PlayerView view, GameView gv) {
+        if (gui.game == null) return null;
+        forge.game.player.Player player = null;
+        for (var candidate : gui.game.getRegisteredPlayers()) {
+            if (candidate.getId() == view.getId()) player = candidate;
+        }
+        if (player == null || player.getOutcome() == null || player.getOutcome().lossState == null) return null;
+        var outcome = player.getOutcome();
+        JsonObject loss = new JsonObject();
+        JsonArray sources = new JsonArray();
+        switch (outcome.lossState) {
+            case CommanderDamage -> {
+                loss.addProperty("reason", "commanderDamage");
+                for (var entry : player.getCommanderDamage()) {
+                    if (entry.getValue() < 21) continue;
+                    JsonObject source = new JsonObject();
+                    source.addProperty("name", entry.getKey().getName());
+                    source.addProperty("amount", entry.getValue());
+                    sources.add(source);
+                }
+            }
+            case LifeReachedZero -> {
+                loss.addProperty("reason", "life");
+                finalHit(player.getName(), gv, sources, loss);
+            }
+            case Poisoned -> {
+                loss.addProperty("reason", "poison");
+                loss.addProperty("amount", player.getCounters(forge.game.card.CounterEnumType.POISON));
+            }
+            case Milled -> loss.addProperty("reason", "milled");
+            case SpellEffect -> loss.addProperty("reason", "effect");
+            case OpponentWon -> loss.addProperty("reason", "opponentWon");
+            case Conceded -> loss.addProperty("reason", "conceded");
+            default -> loss.addProperty("reason", "other");
+        }
+        if (outcome.loseConditionSpell != null) loss.addProperty("card", outcome.loseConditionSpell);
+        loss.add("sources", sources);
+        return loss;
+    }
+
+    private static void finalHit(String name, GameView gv, JsonArray sources, JsonObject loss) {
+        if (gv.getGameLog() == null) return;
+        boolean found = false;
+        String lastEffect = null;
+        java.util.Map<String, Integer> totals = new java.util.LinkedHashMap<>();
+        for (GameLogEntry entry : gv.getGameLog().getLogEntries(null)) {
+            String message = entry.message();
+            if (entry.type() == GameLogEntryType.LIFE) {
+                var life = LIFE_LINE.matcher(message);
+                if (!life.matches() || !life.group(1).equals(name)) continue;
+                if (!found) { if (Integer.parseInt(life.group(3)) <= 0) found = true; continue; }
+                break; // The previous life change: the final hit is complete.
+            }
+            if (!found) {
+                // Forge logs a resolution after its effects: the nearest one newer than the fatal
+                // life change is the effect that caused it.
+                if (entry.type() == GameLogEntryType.STACK_RESOLVE && entry.sourceCard() != null) lastEffect = entry.sourceCard().getName();
+                continue;
+            }
+            if (entry.type() == GameLogEntryType.DAMAGE) {
+                var damage = DAMAGE_LINE.matcher(message);
+                if (damage.matches() && damage.group(3).equals(name)) totals.merge(damage.group(1), Integer.parseInt(damage.group(2)), Integer::sum);
+            }
+        }
+        for (var total : totals.entrySet()) {
+            JsonObject source = new JsonObject();
+            source.addProperty("name", total.getKey());
+            source.addProperty("amount", total.getValue());
+            sources.add(source);
+        }
+        if (totals.isEmpty() && lastEffect != null) loss.addProperty("card", lastEffect);
+    }
+
     private JsonObject player(PlayerView p, GameView gv) {
         JsonObject o = new JsonObject();
         o.addProperty("id", p.getId());
@@ -517,6 +633,10 @@ final class GameStateJson {
             }
         }
         o.add("commanderDamage", cmdDmg);
+        if (p.getHasLost()) {
+            JsonObject loss = loss(p, gv);
+            if (loss != null) o.add("loss", loss);
+        }
 
         JsonObject zones = new JsonObject();
         for (ZoneType z : VISIBLE_ZONES) {

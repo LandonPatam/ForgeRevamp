@@ -11,7 +11,6 @@ signal target_player_clicked(seat: int)
 signal targets_confirmed
 signal targets_cancelled
 ## A "you may" trigger's yes/no, asked before its target (Duelist's Heritage); Main answers Forge.
-signal optional_trigger_answered(use: bool)
 const P = preload("res://scripts/ui/Palette.gd")
 const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
@@ -43,9 +42,9 @@ var floating := false
 ## Targets of an effect from a permanent (or a card in your zones) tether to it; Main stages the
 ## picks in `target_staged` ({kind, id, name}) and sends them on Confirm.
 var target_tether := false
+## Test-only: false leaves target and mode decisions to the generic rail or popup, so a check can compare the two.
+var tethers_enabled := true
 ## Set by Main: the current target prompt is an optional trigger not yet answered yes/no.
-var optional_pending := false
-var optional_gate := false
 var target_staged: Array = []
 ## Another player's choice ("Bot 1 chose Human" for Secluded Courtyard): an information-only tether off
 ## that card, shown once the card is on the table; OK only clears it locally.
@@ -107,9 +106,7 @@ func _ready() -> void:
 	info_tether.answered.connect(func(_action): _next_info(true))
 	add_child(info_tether)
 	callout = preload("res://scripts/ui/CardCallout.gd").new()
-	callout.answered.connect(func(action):
-		if optional_gate: optional_trigger_answered.emit(action == "ok")
-		else: action_requested.emit(action))
+	callout.answered.connect(func(action): action_requested.emit(action))
 	callout.modes_answered.connect(func(id, picks): modes_answered.emit(id, picks))
 	callout.ask_answered.connect(func(id, value): modes_answered.emit(id, value))
 	callout.card_chosen.connect(func(card_id): card_chosen.emit(card_id))
@@ -166,17 +163,6 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		return
 	var target_anchor := _target_anchor()
 	target_tether = target_anchor != null
-	optional_gate = target_tether and optional_pending and state.prompt.get("optionalTrigger", false)
-	if optional_gate:
-		# Forge asks the target first and "use it?" on resolution; ask whether to use it first.
-		panel.hide()
-		callout_card = target_anchor
-		callout.visible = true
-		var gate_ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
-		callout.present(str(state.prompt.sourceCard.get("name", "Card")), _optional_question(state.prompt), "Yes", "No", gate_ready, gate_ready, {})
-		_place_callout()
-		queue_redraw()
-		return
 	if target_tether:
 		panel.hide()
 		callout_card = target_anchor
@@ -211,6 +197,8 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 		var source: Dictionary = ask.get("sourceCard", {})
 		var in_zone: bool = callout_card != cards.get(int(source.get("id", -1)))
 		var question := str(ask.get("message", ""))
+		var trigger_targets: Array = ask.get("triggerTargetNames", [])
+		if not trigger_targets.is_empty(): question += "\n" + ("Target · " if trigger_targets.size() == 1 else "Targets · ") + ", ".join(trigger_targets)
 		var ok_label := str(ask.get("okLabel", "Yes"))
 		var cancel_label := str(ask.get("cancelLabel", "No"))
 		# Forge words the commander choice as its rule text; ask it plainly.
@@ -229,6 +217,7 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	var ready: bool = state.get("connectionReady", false) and state.get("asks", []).is_empty() and state.get("pendingDraws", []).is_empty()
 	heading.text = description.title
 	message.text = state.stack[0].get("text", "") if response else prompt.get("message", "")
+	if prompt.get("noLegalBlocks", false): message.text = "Forge found no legal blocks for this attack."
 	if prompt.get("inputKind", "") == "InputSelectCardsForConvokeOrImprovise": message.text = _helper_payment_text(prompt)
 	help.text = description.help
 	help.visible = not help.text.is_empty()
@@ -238,6 +227,10 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	confirm_button.text = description.confirm
 	confirm_button.disabled = not ready or not prompt.get("okEnabled", false)
 	cancel_button.text = prompt.get("cancelLabel", "Cancel")
+	if prompt.has("wardContext"):
+		heading.text = "Pay for ward?"
+		message.text = Flow.payment_message(prompt)
+		cancel_button.text = "Skip ward payment"
 	match prompt.get("selectionShortcut", ""):
 		"MINE": cancel_button.text = "Select my permanents"
 		"ALL": cancel_button.text = "Select all eligible"
@@ -262,7 +255,8 @@ func present(value: Dictionary, blocked: bool, board_cards: Dictionary = {}, ava
 	choices.visible = choices.get_child_count() > 0
 	if prompt.has("selectionShortcut") or description.get("kind", "") in ["InputAttack", "InputBlock"]:
 		choices.hide()
-		help.text += "\n%d selected" % prompt.get("chosen", []).size()
+		if not prompt.get("noLegalBlocks", false):
+			help.text += "\n%d selected" % prompt.get("chosen", []).size()
 	_layout()
 	queue_redraw()
 
@@ -356,7 +350,9 @@ func show_modes(ask: Dictionary) -> void:
 ## your zones (a trigger or ability). Targets for a spell being cast from hand keep the rail.
 func _target_anchor() -> Control:
 	var prompt: Dictionary = state.get("prompt", {})
-	if prompt.get("inputKind", "") != "InputSelectTargets" or not state.get("asks", []).is_empty(): return null
+	if not tethers_enabled or prompt.get("inputKind", "") != "InputSelectTargets" or not state.get("asks", []).is_empty(): return null
+	# A reconnect can restore picks Forge already accepted. The native rail can edit them directly.
+	if target_staged.is_empty() and not prompt.get("chosen", []).is_empty(): return null
 	var source: Dictionary = prompt.get("sourceCard", {})
 	if source.is_empty() or source.get("hidden", false): return null
 	# Only when every legal target can be clicked on the table (players are rows in the box). A target
@@ -386,12 +382,6 @@ static func _target_question(prompt: Dictionary) -> String:
 	return effect if lines.size() == 1 else effect + "\n" + instruction
 
 ## "Use Duelist's Heritage?" worded from the trigger's own "you may …" clause.
-static func _optional_question(prompt: Dictionary) -> String:
-	var effect := _target_question(prompt).get_slice("\n", 0)
-	var at := effect.to_lower().find("you may ")
-	if at < 0: return "use %s?" % str(prompt.get("sourceCard", {}).get("name", "this card"))
-	return effect.substr(at + 8).strip_edges().trim_suffix(".") + "?"
-
 ## Main's staged picks changed: redraw the box and its lines.
 func set_target_staged(value: Array) -> void:
 	target_staged = value.duplicate(true)

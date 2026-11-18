@@ -114,6 +114,17 @@ public final class BridgeChecks {
         for (String value : List.of("[]", "[0,0]", "[2]", "[-1]", "[0.5]", "[\"0\"]", "null", "{}", "[true]")) invalid(choose, value);
         JsonObject order = choose.deepCopy(); order.addProperty("kind", "order"); order.addProperty("min", 2);
         valid(order, "[1,0]"); invalid(order, "[0]");
+        JsonObject placement = object("{\"kind\":\"scry\",\"canTop\":false,\"canBottom\":true,\"options\":[{},{}]}");
+        valid(placement, "{\"top\":[],\"bottom\":[1,0]}");
+        invalid(placement, "{\"top\":[0],\"bottom\":[1]}");
+        BridgeProtocol.validateAnswer(placement, BridgeProtocol.fallbackAnswer(placement));
+        placement.addProperty("canTop", true);
+        valid(placement, "{\"top\":[1],\"bottom\":[0]}");
+        invalid(placement, "{\"top\":[0],\"bottom\":[0]}");
+        invalid(placement, "{\"top\":[1],\"bottom\":[]}");
+        placement.addProperty("canBottom", false);
+        valid(placement, "{\"top\":[1,0],\"bottom\":[]}");
+        invalid(placement, "{\"top\":[0],\"bottom\":[1]}");
         JsonObject distribution = object("{\"kind\":\"distribute\",\"amount\":4,\"atLeastOne\":false,\"options\":[{},{}]}");
         valid(distribution, "[0,4]");
         for (String value : List.of("[4]", "[1,1]", "[-1,5]", "[1.5,2.5]", "[2147483647,2147483647]", "null")) invalid(distribution, value);
@@ -208,6 +219,34 @@ public final class BridgeChecks {
             gui.answer(ask.get("id").getAsInt(), json("true"));
             reveal.get(3, TimeUnit.SECONDS); next(events, "askClosed");
             CardView other = new CardView(124, null, "Another viewed card");
+            CardView unseen = new CardView(125, null, "Unseen library card");
+            CardView unseenNext = new CardView(126, null, "Another unseen library card");
+            for (int variant = 0; variant < 3; variant++) {
+                boolean top = variant != 0;
+                boolean bottom = variant != 1;
+                Future<List<CardView>> arranged = engine.submit(() -> gui.manipulateCardList("Arrange", List.of(card, other, unseen, unseenNext),
+                        List.of(card, other), top, bottom, false));
+                ask = next(events, "ask");
+                check(ask.get("canTop").getAsBoolean() == top && ask.get("canBottom").getAsBoolean() == bottom,
+                        "Placement must preserve the directions supplied by Forge");
+                var options = ask.getAsJsonArray("options");
+                check(options.size() == 2 && options.get(0).getAsJsonObject().get("cardId").getAsInt() == 123
+                        && options.get(1).getAsJsonObject().get("cardId").getAsInt() == 124
+                        && !ask.toString().contains("unseen library card") && !ask.toString().contains("Unseen library card"),
+                        "Only the two offered card instances may be disclosed");
+                gui.answer(ask.get("id").getAsInt(), json(switch (variant) {
+                    case 0 -> "{\"top\":[],\"bottom\":[1,0]}";
+                    case 1 -> "{\"top\":[1,0],\"bottom\":[]}";
+                    default -> "{\"top\":[1],\"bottom\":[0]}";
+                }));
+                List<CardView> expected = switch (variant) {
+                    case 0 -> List.of(unseen, unseenNext, other, card);
+                    case 1 -> List.of(other, card, unseen, unseenNext);
+                    default -> List.of(other, unseen, unseenNext, card);
+                };
+                check(arranged.get(3, TimeUnit.SECONDS).equals(expected), "Placement must preserve exact instances and hidden order");
+                next(events, "askClosed");
+            }
             var delayed = new forge.game.player.DelayedReveal(List.of(), forge.game.zone.ZoneType.Library, null);
             delayed.getCards().add(card); delayed.getCards().add(other);
             Future<forge.game.GameEntityView> pickRevealed = engine.submit(() -> gui.chooseSingleEntityForEffect("Choose artifact", List.of(card), delayed, true));
@@ -559,8 +598,14 @@ public final class BridgeChecks {
         }
         var first = new FixtureInput();
         var next = new FixtureInput();
+        long[] firstId = {-1};
         checkedEdt(() -> controller.getInputQueue().setInput(first));
-        checkedEdt(() -> check(gui.hasCurrentPrompt(first), "A presented input owns its buttons"));
+        checkedEdt(() -> {
+            check(gui.hasCurrentPrompt(first), "A presented input owns its buttons");
+            firstId[0] = gui.prompt.get("inputId").getAsLong();
+            gui.updateButtons(first.getOwner(), "Proceed", "Cancel", true, false, true);
+            check(gui.prompt.get("inputId").getAsLong() == firstId[0], "Refreshing the same input preserves its identity");
+        });
         checkedEdt(() -> {
             controller.getInputQueue().removeInput(first);
             check(gui.currentInput() == null && !gui.hasCurrentPrompt(first) && !gui.hasCurrentPrompt(null),
@@ -570,6 +615,7 @@ public final class BridgeChecks {
         });
         checkedEdt(() -> {
             check(gui.hasCurrentPrompt(next) && !gui.hasCurrentPrompt(first), "Only the presented replacement accepts actions");
+            check(gui.prompt.get("inputId").getAsLong() != firstId[0], "Identical decisions still have different input identities");
             controller.getInputQueue().removeInput(next);
         });
     }

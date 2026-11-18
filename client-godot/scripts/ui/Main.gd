@@ -86,6 +86,7 @@ var hand_pick_staged: Array = []
 var hand_pick_queue: Array = []
 var hand_pick_awaiting := -1
 var hand_pick_committing := false
+var hand_pick_input_id := -1
 ## Targets of a tethered effect: picked locally, sent on the tether's Confirm (Forge would finish a
 ## one-target choice on the first click). {kind: "card"|"player", id, name}; player ids are seats.
 var target_staged: Array = []
@@ -274,6 +275,7 @@ func _ready() -> void:
 	if adapter.has_signal("action_explained"): adapter.action_explained.connect(_explain_card)
 	adapter.status_changed.connect(func(message): status_label.text = message)
 	adapter.session_reset.connect(_clear_live_session)
+	if live: adapter.connection_interrupted.connect(_clear_interrupted_actions)
 	if not verification_mode and ProjectSettings.get_setting("application/config/client_diagnostics", false):
 		client_diagnostics = preload("res://scripts/app/ClientDiagnostics.gd").new()
 		client_diagnostics.start(self)
@@ -678,7 +680,6 @@ func _build_shell() -> void:
 	interaction_panel.target_player_clicked.connect(func(seat): _stage_target("player", seat))
 	interaction_panel.targets_confirmed.connect(_commit_targets)
 	interaction_panel.targets_cancelled.connect(func(): _intent("cancel"))
-	interaction_panel.optional_trigger_answered.connect(_answer_optional_trigger)
 	interaction_panel.resolve_requested.connect(func(id):
 		if int(incoming_effect.active.get("stackId", -1)) == id: incoming_effect.dismiss()
 		else: adapter.acknowledge_effect(id))
@@ -708,11 +709,10 @@ func _present_interaction() -> void:
 	if not is_instance_valid(interaction_panel): return
 	_sync_targets()
 	_run_deferred_activation()
-	var answering_optional := _run_optional_trigger()
 	var popup_showing: bool = incoming_effect.showing() and snapshot.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not incoming_effect.responding.has(int(incoming_effect.active.get("stackId", -1)))
 	var avatars := {}
 	for seat in hud_values: avatars[seat] = hud_values[seat].portrait
-	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible or answering_optional, cards, avatars)
+	interaction_panel.present(snapshot, not live or modal.visible or opening_hand.visible or popup_showing or board_choice.visible or hand_pick_panel.visible, cards, avatars)
 	var rail_decision: bool = interaction_panel.uses_stack_rail() or board_choice.visible
 	decision_scroll.visible = rail_decision
 	rail_space.visible = not rail_decision and stack_box.entries.is_empty()
@@ -1039,6 +1039,7 @@ func _apply_state(value: Dictionary) -> void:
 		var ask: Dictionary = snapshot.asks[0]
 		var mode_id: int = interaction_panel.mode_source(ask)
 		if mode_id < 0: mode_id = interaction_panel.look_source(ask)
+		if not interaction_panel.tethers_enabled: mode_id = -1
 		var mode_card: Control = cards.get(mode_id) if live else null
 		var answering: bool = live and response_target.accepts(ask)
 		var scrying: bool = live and ask.get("kind", "") == "scry"
@@ -1095,7 +1096,7 @@ func _row(key: String, at: Vector2, dimensions: Vector2, values: Array, spacing:
 		if zone != "Battlefield":
 			split_pile_cards.erase(card.id)
 			local_pile_members.erase(card.id)
-		card.separate = (owner == 0 and not local_pile_members.has(card.id)) or split_pile_cards.has(card.id) or (dragged_source != null and cards.get(card.id) == dragged_source) or snapshot.get("combat", []).any(func(entry): return int(entry.attacker) == int(card.id) or entry.get("blockers", []).has(card.id)) or values.any(func(other): return int(other.get("attachedTo", -1)) == int(card.id))
+		card.separate = (owner == 0 and not local_pile_members.has(card.id)) or split_pile_cards.has(card.id) or (dragged_source != null and cards.get(card.id) == dragged_source) or snapshot.get("combat", []).any(func(entry): return int(entry.attacker) == int(card.id) or entry.get("blockers", []).has(card.id)) or values.any(func(other): return int(other.get("attachedTo", -1)) == int(card.id)) or _picked_target(int(card.id))
 	if zone == "Battlefield":
 		for group in FieldLayout.groups(pack_values, true):
 			if group.cards.size() < 2 or group.cards.any(func(card): return pending_returns.has(card.id) or (dragged_source != null and cards.get(card.id) == dragged_source)): continue
@@ -1976,6 +1977,8 @@ func _sync_raised_card() -> void:
 	raised_card.table_angle = hovered_source.table_angle
 	if raised_card.data != hovered_source.data:
 		raised_card.update_card(hovered_source.data)
+		# This runs just before drawing, too late for this frame's face repaint; render it again next frame.
+		raised_card.surface.set_deferred("render_target_update_mode", SubViewport.UPDATE_ONCE)
 	if raised_card.selected != hovered_source.selected:
 		raised_card.set_selected(hovered_source.selected)
 	raised_card.size = hovered_source.size
@@ -2009,7 +2012,6 @@ func _pick(data: Dictionary, double_click: bool) -> void:
 		if targeting:
 			return
 		if _stage_hand_pick(data): return
-		if interaction_panel.optional_gate: return # Answer "use it?" first; the targets follow on Yes.
 		if interaction_panel.target_tether and _stage_target("card", int(data.id)): return
 		_select_card(data)
 		if data.get("zone", "") == "Stack":
@@ -2518,7 +2520,10 @@ func _update_live_actions() -> void:
 	return_button.hide()
 	prompt_title.text = "Match complete" if snapshot.game.get("gameOver", false) else "Forge"
 	prompt_body.text = str(snapshot.game.get("winner", "")) if snapshot.game.get("gameOver", false) else snapshot.prompt.get("message", "Waiting for Forge")
-	if snapshot.prompt.get("inputKind", "") == "InputBlock":
+	if snapshot.prompt.get("noLegalBlocks", false):
+		primary.text = "Continue without blockers"
+		prompt_body.text = "Forge found no legal blocks for this attack."
+	elif snapshot.prompt.get("inputKind", "") == "InputBlock":
 		prompt_body.text += "\n\nClick an attacking creature, then your creature to block it. Click the blocker again to remove that assignment. Blue arrows show blocks. Press OK when finished."
 	if not snapshot.get("takebackCast", {}).is_empty():
 		prompt_body.text = "Cast accepted. Drag it back to hand to undo the card and mana, or Continue to commit."
@@ -2557,7 +2562,7 @@ func _update_live_actions() -> void:
 		_announce_victory.call_deferred()
 	elif outcome.get("title", "") == "Defeated" and not defeat_announced:
 		defeat_announced = true
-		_show_outcome_screen.call_deferred(false)
+		_show_outcome_screen.call_deferred(false, snapshot.players[0].get("loss", {}))
 	if not outcome.is_empty():
 		# Forge sends no prompt once this seat is out, so offer a clear way to finish.
 		phase_title.text = outcome.title
@@ -2584,13 +2589,13 @@ func _announce_victory() -> void:
 	if not live or not is_instance_valid(app_host) or not app_host.has_method("end_after_victory"): return
 	_show_outcome_screen(true)
 
-## Full-screen YOU WIN / YOU LOSE. "I lost" closes it so the player can keep spectating.
-func _show_outcome_screen(won: bool) -> void:
+## Full-screen YOU WIN / YOU LOSE (with Forge's cause of the loss). "I lost" closes it so the player can keep spectating.
+func _show_outcome_screen(won: bool, loss: Dictionary = {}) -> void:
 	if is_instance_valid(outcome_screen): outcome_screen.queue_free()
 	outcome_screen = preload("res://scripts/ui/OutcomeScreen.gd").new()
 	outcome_screen.z_index = 130
 	add_child(outcome_screen)
-	outcome_screen.present(won)
+	outcome_screen.present(won, loss)
 	outcome_screen.acknowledged.connect(func():
 		outcome_screen.queue_free()
 		outcome_screen = null
@@ -2614,6 +2619,7 @@ func _match_outcome() -> Dictionary:
 	return {}
 
 func _clear_live_session() -> void:
+	_clear_interrupted_actions()
 	coin_toss_seen.clear()
 	victory_announced = false
 	defeat_announced = false
@@ -2764,44 +2770,6 @@ func _announce_returned_lands() -> void:
 		var card_name := text.get_slice(" played ", 1).get_slice(" (", 0)
 		if me.get("zones", {}).get("Hand", []).any(func(card): return int(card.get("id", -1)) == id):
 			_show_toast("%s returned to your hand. Your land drop for this turn is used." % card_name, 5.0)
-
-## "You may have target attacking creature…" (Duelist's Heritage): Forge wants the target first and
-## asks "Use triggered ability?" only on resolution. The tether asks yes/no first; the answer is kept
-## for that card in this step and given to Forge's later question. No picks a legal target quietly
-## (Forge requires one) and then declines, so nothing happens.
-var optional_decisions: Dictionary = {}
-
-func _optional_step_key() -> String:
-	return str(snapshot.get("game", {}).get("turn", -1)) + "|" + str(snapshot.get("game", {}).get("phase", ""))
-
-func _answer_optional_trigger(use: bool) -> void:
-	var prompt: Dictionary = snapshot.get("prompt", {})
-	var source := int(prompt.get("sourceCard", {}).get("id", -1))
-	if source < 0 or prompt.get("inputKind", "") != "InputSelectTargets": return
-	optional_decisions[source] = {"use": use, "key": _optional_step_key()}
-	if not use:
-		var legal: Array = prompt.get("selectable", [])
-		var players: Array = prompt.get("entities", []).filter(func(entity): return entity.get("kind", "") == "player")
-		if not legal.is_empty(): _stage_target("card", int(legal[0]))
-		elif not players.is_empty(): _stage_target("player", int(players[0].id))
-		_commit_targets()
-	_present_interaction()
-
-## True while it answers Forge's own "Use triggered ability of X?" from the earlier yes/no.
-func _run_optional_trigger() -> bool:
-	var prompt: Dictionary = snapshot.get("prompt", {})
-	for source in optional_decisions.keys():
-		if optional_decisions[source].key != _optional_step_key(): optional_decisions.erase(source)
-	var source := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
-	interaction_panel.optional_pending = prompt.get("optionalTrigger", false) and not optional_decisions.has(source)
-	if not live or prompt.get("inputKind", "") != "InputConfirm" or not optional_decisions.has(source): return false
-	if not str(prompt.get("message", "")).begins_with("Use triggered ability"): return false
-	if not snapshot.get("connectionReady", false) or not snapshot.get("asks", []).is_empty(): return true
-	if str(adapter.get("pending")) != "" or adapter.get("syncing") == true: return true
-	var use: bool = optional_decisions[source].use
-	optional_decisions.erase(source)
-	_intent("ok" if use else "cancel")
-	return true
 
 ## Forge's attacker/blocker declarations accept only creature picks: abilities wait for the
 ## priority that follows. A click on one of your non-creature permanents then (Maze of Ith during
@@ -3031,6 +2999,7 @@ func _hand_pick_active() -> bool:
 	if not live or snapshot.is_empty() or not snapshot.get("asks", []).is_empty() or snapshot.get("players", []).is_empty(): return false
 	var prompt: Dictionary = snapshot.get("prompt", {})
 	if prompt.get("inputKind", "") != "InputSelectCardsFromList" or prompt.has("selectionShortcut"): return false
+	if not prompt.get("chosen", []).is_empty() and (hand_pick_staged.is_empty() or int(prompt.get("inputId", -1)) != hand_pick_input_id): return false
 	var offered: Array = prompt.get("cards", [])
 	if offered.is_empty(): return false
 	var hand_ids := {}
@@ -3086,12 +3055,13 @@ func _present_hand_pick() -> bool:
 	hand_pick_lines.visible = active
 	if not active:
 		hand_pick_since.clear()
-		hand_pick_staged.clear()
-		hand_pick_queue.clear()
-		hand_pick_awaiting = -1
-		hand_pick_committing = false
+		_clear_hand_picks()
 		return false
 	var prompt: Dictionary = snapshot.prompt
+	var input_id := int(prompt.get("inputId", -1))
+	if input_id != hand_pick_input_id:
+		_clear_hand_picks()
+		hand_pick_input_id = input_id
 	var discard := _hand_pick_is_discard()
 	_advance_hand_pick()
 	var chosen: int = hand_pick_staged.size()
@@ -3170,6 +3140,12 @@ func _draw_search_link() -> void:
 	search_link.draw_style_box(frame, Rect2(Vector2.ZERO, anchor.size).grow(5))
 	search_link.draw_set_transform_matrix(Transform2D.IDENTITY)
 
+## A card picked for the current target question, staged here or already accepted by Forge. It leaves
+## its pile, so the identical copies left behind stay clickable and the outline shows which one it is.
+func _picked_target(id: int) -> bool:
+	if not live or snapshot.get("prompt", {}).get("inputKind", "") != "InputSelectTargets": return false
+	return target_staged.any(func(ref): return ref.kind == "card" and int(ref.id) == id) or snapshot.prompt.get("chosen", []).has("card:%d" % id)
+
 ## Marks or unmarks a legal target for the tethered effect; true when it was a legal target.
 func _stage_target(kind: String, id: int) -> bool:
 	if target_committing: return true
@@ -3188,6 +3164,7 @@ func _stage_target(kind: String, id: int) -> bool:
 	elif int(prompt.get("selMax", 1)) == 1: target_staged = [{"kind": kind, "id": id, "name": name}]
 	elif target_staged.size() < int(prompt.get("selMax", 1)): target_staged.append({"kind": kind, "id": id, "name": name})
 	interaction_panel.set_target_staged(target_staged)
+	if kind == "card": _layout_board() # A staged copy leaves its pile.
 	return true
 
 ## Confirm: each pick in turn, each confirmed by Forge's chosen list, then OK if Forge still waits.
@@ -3250,24 +3227,40 @@ func _commit_refused() -> bool:
 ## A new targeting prompt starts with nothing staged; a finished one clears the commit.
 func _sync_targets() -> void:
 	var prompt: Dictionary = snapshot.get("prompt", {})
-	# The question's identity is structural (source, kind, legal targets), never its wording: Forge
-	# rewrites the text after each pick ("Targeted: …") and after a refused one ("Cannot target…").
+	# A different Forge input can ask about the same source and legal targets. Wording can also
+	# change within one input, after a pick or refusal, so it is never part of this key.
 	var legal: Array = prompt.get("selectable", []).map(func(id): return int(id))
 	legal.sort()
 	# Forge briefly drops the source while it explains a refused pick: that is still the same question,
 	# but a different source card asking (two triggers in a row) is a new one.
 	var source := int(prompt.get("sourceCard", {}).get("id", prompt.get("cardId", -1)))
-	var key := str(prompt.get("inputKind", "")) + "|" + str(legal) + "|" + str(prompt.get("selMin", 0)) + "-" + str(prompt.get("selMax", 0))
+	var key := str([snapshot.get("sessionId", ""), prompt.get("inputId", -1), prompt.get("inputKind", ""), legal, prompt.get("selMin", 0), prompt.get("selMax", 0)])
 	var new_source := source >= 0 and target_prompt_source >= 0 and source != target_prompt_source
 	if source >= 0: target_prompt_source = source
 	if key != target_prompt_key or new_source:
 		target_prompt_key = key
-		target_staged.clear()
-		target_queue.clear()
-		target_awaiting = {}
-		target_committing = false
-		interaction_panel.target_staged = []
+		_clear_target_picks()
 	_advance_targets()
+
+func _clear_target_picks() -> void:
+	target_staged.clear()
+	target_queue.clear()
+	target_awaiting = {}
+	target_committing = false
+	interaction_panel.target_staged = []
+
+func _clear_hand_picks() -> void:
+	hand_pick_staged.clear()
+	hand_pick_queue.clear()
+	hand_pick_awaiting = -1
+	hand_pick_committing = false
+
+func _clear_interrupted_actions() -> void:
+	_clear_target_picks()
+	_clear_hand_picks()
+	deferred_activation = -1
+	if is_instance_valid(modal_panel) and modal_panel is SelectionDialog:
+		_close_modal()
 
 ## A click on an offered hand card marks or unmarks it locally; true when the hand pick took it.
 func _stage_hand_pick(data: Dictionary) -> bool:

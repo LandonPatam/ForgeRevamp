@@ -30,6 +30,8 @@ func run(ui: Control) -> void:
 			ui.opening_hand.submit("ok")
 		elif kind == "InputLondonMulligan":
 			break
+		elif kind in ["InputBlock", "InputSelectTargets"]:
+			break # A prepared board can start directly at a combat or target decision.
 		elif StartingPlayerDialog.needs_selection(state):
 			if ui.modal.visible and ui.modal_panel is StartingPlayerDialog and not ui.modal_panel.buttons.is_empty():
 				ui.modal_panel.buttons[0].pressed.emit()

@@ -66,13 +66,35 @@ phase the player skips, the scan is skipped. Default (null) keeps upstream behav
 bridge opts in for solo games only; online keeps the scan, whose result also decides some stops.
 Measured with `tests/scenarios/phase-timing.state` (probe, not a check).
 
+## 2026-11-17: confirm forced combat decisions
+
+Patch [forced-decisions.patch](forge-patches/forced-decisions.patch). ForgeUI opts its
+human controllers in to two decisions. A triggered ability's sole legal creature
+goes through Forge's normal target input, so the player sees and confirms it before
+reactions such as ward. An attacked defender with no legal blocks gets an empty
+blocker declaration to acknowledge. Forge still computes legal targets, checks
+whether blocking is possible and applies combat damage. The empty declaration
+uses the branch where Forge already skipped blocker replacement handling.
+
+Apply after the existing patches with
+`git -C forge apply ../forge-patches/forced-decisions.patch`.
+
+## 2026-11-17: preserve scry placement when the whole library is revealed
+
+Patch [library-ends.patch](forge-patches/library-ends.patch). ForgeUI returns
+the top and bottom picks separately through an optional GUI callback. With no
+untouched cards between the two ends, a flat result list is ambiguous and Forge
+previously recorded all cards as staying on top. The controller retains Forge's
+temporary reveal, result recording, and physical card moves. Apply after the
+other patches with `git -C forge apply ../forge-patches/library-ends.patch`.
+
 ## Building
 
-Changes in `forge-gui` must be installed for the bridge and the desktop app to see them:
+Install the patched modules for the bridge and the desktop app to see them:
 
 ```sh
 cd forge
-../.tools/apache-maven-3.9.9/bin/mvn -o -DskipTests -pl forge-gui flatten:flatten install
+../.tools/apache-maven-3.9.9/bin/mvn -o -DskipTests -pl forge-game,forge-gui flatten:flatten install
 cd ../bridge && ../.tools/apache-maven-3.9.9/bin/mvn -o -DskipTests package
 ```
 
@@ -92,6 +114,7 @@ re-run the install command above, and rebuild the bridge.
 
 ## Updating Forge
 
-After changing `FORGE_COMMIT` and checking out the new upstream commit, re-apply with
-`git -C forge apply --3way ../forge-patches/netplay-fixes.patch`, resolve any conflicts, then
-rebuild and re-run the tests above. Check whether upstream fixed any of these first.
+After changing `FORGE_COMMIT` and checking out the new upstream commit, check which
+patches are still needed. Apply the patches in order: `netplay-fixes.patch`,
+`phase-scan.patch`, `forced-decisions.patch`, and `library-ends.patch`. Resolve any conflicts before
+rebuilding and rerunning the relevant tests.

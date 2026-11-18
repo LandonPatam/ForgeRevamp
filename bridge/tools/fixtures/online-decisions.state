@@ -1,0 +1,13 @@
+# Two-human fixture for simultaneous triggers, private scry and reconnect.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Soul Warden;Ajani's Welcome
+p0hand=Elvish Visionary
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Island;Essence Warden;Auriok Champion
+p1hand=Preordain
+p1library=Forest;Craw Wurm;Serra Angel;Island;Island;Island

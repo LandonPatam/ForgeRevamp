@@ -105,18 +105,31 @@ const commands = {
   visual: () => visual(names),
   scenario: () => scenarios(names),
   bridge,
-  online: () => node('online', 'bridge/tools/online-check.mjs'),
+  online: async () => {
+    const lobby = await node('online', 'bridge/tools/online-check.mjs');
+    const decisions = await node('online decisions', 'bridge/tools/online-decisions-check.mjs');
+    return lobby && decisions;
+  },
   solo: () => node('solo phases', 'bridge/tools/solo-phase-check.mjs'),
+  // Card-shape sweep: boards from tools/shape-sweep.mjs, each played through the real table.
+  // `shapes` runs all of them; `shapes any-number-targets,charm` only those shapes.
+  shapes: () => {
+    const boards = readdirSync(join(root, 'client-godot/tests/scenarios')).filter(f => /^shape-.*\.state$/.test(f)).map(f => f.slice(0, -6))
+      .filter(name => !names || names.split(',').some(shape => name.startsWith(`shape-${shape}-`)));
+    if (!boards.length) { console.log('No shape boards: run node client-godot/tools/shape-sweep.mjs first.'); return false; }
+    return scenarios(boards.join(','));
+  },
   // Serial on purpose: online suites share Forge's online port and Godot runs compete for the GPU.
   all: async () => {
     let ok = true;
-    const everyScenario = readdirSync(join(root, 'client-godot/tests/scenarios')).filter(f => f.endsWith('.state')).map(f => f.slice(0, -6)).join(',');
+    // Generated card-shape boards (shape-*.state) are a separate, opt-in sweep: `check.mjs shapes`.
+    const everyScenario = readdirSync(join(root, 'client-godot/tests/scenarios')).filter(f => f.endsWith('.state') && !f.startsWith('shape-')).map(f => f.slice(0, -6)).join(',');
     for (const run of [() => headless(''), () => visual(''), bridge, () => scenarios(everyScenario), commands.online, commands.solo]) ok = await run() && ok;
     return ok;
   },
 };
 if (!commands[command]) {
-  console.log('Usage: node client-godot/tools/check.mjs <ui|visual|scenario|bridge|online|solo|all> [Names,...] [--render]\nSee docs/testing.md.');
+  console.log('Usage: node client-godot/tools/check.mjs <ui|visual|scenario|bridge|online|solo|shapes|all> [Names,...] [--render]\nSee docs/testing.md.');
   process.exit(2);
 }
 process.exitCode = (await commands[command]()) ? 0 : 1;

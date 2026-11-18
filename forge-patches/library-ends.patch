@@ -1,0 +1,40 @@
+diff --git a/forge-gui/src/main/java/forge/gui/interfaces/IGuiGame.java b/forge-gui/src/main/java/forge/gui/interfaces/IGuiGame.java
+index f862faf2..08ddcbc3 100644
+--- a/forge-gui/src/main/java/forge/gui/interfaces/IGuiGame.java
++++ b/forge-gui/src/main/java/forge/gui/interfaces/IGuiGame.java
+@@ -258,6 +258,13 @@ public interface IGuiGame {
+     // show a list of cards and allow some of them to be moved around and return new list
+     List<CardView> manipulateCardList(String title, final Iterable<CardView> cards, final Iterable<CardView> manipulable, boolean toTop, boolean toBottom, boolean toAnywhere);
+ 
++    /** Explicit ends for frontends that support them. Lists are in library order, first to last. */
++    record LibraryEnds(List<CardView> top, List<CardView> bottom) {}
++
++    default LibraryEnds chooseLibraryEnds(String title, Iterable<CardView> revealed, boolean toTop, boolean toBottom) {
++        return null;
++    }
++
+     void setCard(CardView card);
+ 
+     void setPlayerAvatar(LobbyPlayer player, IHasIcon ihi);
+diff --git a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+index 62623dc4..24a83c93 100644
+--- a/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
++++ b/forge-gui/src/main/java/forge/player/PlayerControllerHuman.java
+@@ -986,6 +989,16 @@ public class PlayerControllerHuman extends PlayerController implements IGameCont
+     }
+ 
+     public ImmutablePair<CardCollection, CardCollection> arrangeForMove(final String title, final FCollectionView<Card> cards, final List<Card> manipulable, final boolean topOK, final boolean bottomOK) {
++        // A full-library look leaves no untouched card to separate the two ends.
++        final IGuiGame.LibraryEnds ends = getGui().chooseLibraryEnds(title, CardView.getCollection(manipulable), topOK, bottomOK);
++        if (ends != null) {
++            final GameEntityViewMap<Card, CardView> views = GameEntityView.getMap(manipulable);
++            final CardCollection top = new CardCollection();
++            final CardCollection bottom = new CardCollection();
++            views.addToList(ends.top(), top);
++            views.addToList(ends.bottom(), bottom);
++            return ImmutablePair.of(top, bottom);
++        }
+         List<Card> result = manipulateCardList(title, cards, manipulable, topOK, bottomOK, false);
+         CardCollection toBottom = new CardCollection();
+         CardCollection toTop = new CardCollection();
+

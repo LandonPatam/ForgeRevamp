@@ -1,22 +1,22 @@
-﻿# Session notes - 2026-11-17
+# Session notes - 2026-11-17
 
 ## Current state
 
-- `main` is still `cda06eb`. Work waits on `feature/stuck-guard-and-reports` (pushed; it contains `fix/playtest-issues-nov16`): `206e0f3` playtest fixes, `79831e3` stuck guard + F8 reports, `083ba8d` step-2 reliability, plus this wrap-up's docs commit. Windows: targeted checks pass; last full `check.mjs all` passed except `blink`, fixed and rerun 3/3.
-- Playtest fixes: Deepglow Skate targets, Maze of Ith during blocks (`hold_phase`), `effectiveCost` (Hazoret's Monument, commander tax, command-zone cost overlay), Outpost Siege modes, Duelist's Heritage yes/no first (`optionalTrigger`), online lobby reopens after a match and friends rejoin.
-- Reliability: `ui/DecisionGuard.gd` shows Forge's raw question when nothing on screen answers it and saves a report; F8 reports (host includes `board.state`); `tools/report-to-scenario.mjs`. Target tether declines what it can't fully handle, staged picks use checked senders, questions are keyed by structure. Rule recorded in AGENTS.md ("Reliability first").
-- Local only, deliberately uncommitted: card-shape sweep (`tools/shape-sweep.mjs`, `check.mjs shapes`, `shape_probe` in `ScenarioIntegration.gd`, `.gitignore` line). Last run: 55/72 resolved, 4 not castable, 13 failures, all in the test robot; the guard never fired. Leave these files out of commits.
+- Windows checkout is on `feature/stuck-guard-and-reports` at pushed commit `45eafa9`. Local `main` is `cda06eb`. This session's changes and new fixtures are uncommitted in `D:\ForgeUI`. Inspect Git status before switching or packaging.
+- ForgeUI now confirms a trigger's sole legal creature, pauses for Continue without blockers, explains ward and its remaining mana, and asks for Heritage's target before its Yes/No resolution choice. The existing Godot tethers and combat rail present these decisions.
+- Fixed zero-mode answers, order at both library ends, and whole-library scry counts. Distinct Forge input IDs invalidate staged picks on replacement. Disconnect clears unsent local actions, and Forge's accepted picks remain available through the ordinary controls.
+- Windows targeted checks passed. Coverage includes exact target identity, Heritage Yes/No, mode combinations/repeats/pawprints, both trigger orders, partial ward and cancel, optional targets under Auto-resolve, scry order/privacy, and two-seat ordering and reconnect. The isolated build is `bridge/target/verified-coverage`. See [coverage and remaining plan](docs/interaction-reliability.md).
+- The vendored checkout has the prior patches plus `forced-decisions.patch` and `library-ends.patch` applied locally. See [rebuild and apply order](FORGE_PATCHES.md). Rebuild Forge Game, Forge GUI and the bridge before validating on another machine.
 
 ## Known issues
 
-- Mac has not built or tested any of these branches. Online lobby rejoin is unverified between real machines (Windows-host/Mac-join and reverse).
-- Shape-sweep robot gaps: waits on AI/engine are treated as stuck; can't target a player from the rail; can't answer scry.
-- Resolving cleanly isn't proof of the right result: nothing yet compares what the player chose on screen with what Forge received.
-- Forge's board export omits the stack and triggers in flight: reports from mid-trigger moments need a step earlier or a recast in the driver.
-- Older items: red damage badge can sit under the phase strip on opponents' rows; spells cast from hand target from the rail; VS Code's Java extension can leave stale `bridge/target/classes` (use the direct `javac` in `docs/testing.md`).
+- The full suite and Mac/live cross-platform validation are pending for these changes. During this session the Windows game held the standard bridge JARs open. The verified build used separate output and did not restart that match.
+- The earlier local shape sweep is separate work. Preserve `client-godot/tools/shape-sweep.mjs`, the `check.mjs shapes` changes, `shape_probe`, and the ignore entry. Keep those hunks out of the reliability commits. Its last recorded full run was 55/72 resolved, 4 uncastable and 13 driver failures. The driver still needs better AI waits, rail player targets and scry answers.
+- Forge's board export omits the stack and triggers in flight. Reproduce mid-trigger F8 reports from an earlier step or recast in the driver. If Maven claims success but Forge throws an unresolved compilation error, check compilation directly as described in [testing.md](docs/testing.md).
 
 ## Next steps
 
-- Mac: `git fetch && git switch feature/stuck-guard-and-reports && git pull --ff-only`, rebuild the bridge, run `check.mjs bridge`, `ui OnlineRejoin`, `online`, and scenarios `maze,skate,monument,outpost,heritage,heritage-yes,guard,panther-claws,reanimate,blink`. Then cross-platform online play, then merge to `main`.
-- If wanted: choice log (bridge records what Forge received; compare with on-screen choices in tests and F8 reports).
-- Teach the shape robot the three gaps above, then add more cards per shape.
+1. Custom vs generic presentation pairs are done for targets, players, modes, trigger order and library search (see [reliability](docs/interaction-reliability.md); uncommitted). Add a pair for any new presentation.
+2. Interruptions and the Stack responses matrix are covered (`flagbearer-replaced`, `discard-interrupted`, `matrix-*`). Open: a notice-and-pass ability case for the matrix, then the same checks on a two-seat online table.
+3. Add a decision-variant inventory to the precon playtester report and map observed variants to named Godot checks. Keep discovery runs distinct from checks that verify the exact result.
+4. Coordinate the local handoff before publishing. Run `check.mjs all` before a push, review the mixed test-file hunks, and send the exact branch and commit for Mac rebuild and Windows–Mac play in both host directions.

@@ -1,0 +1,13 @@
+# Cast Foresee, keep two cards on top and put two on the bottom. Reorder both lists, then cast Index to see what remains.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Island;Island;Island;Island;Island
+p0hand=Foresee;Index
+p0library=Lightning Bolt;Grizzly Bears;Craw Wurm;Serra Angel;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

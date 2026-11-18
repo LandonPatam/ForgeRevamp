@@ -220,7 +220,7 @@ func _ui_state() -> Dictionary:
 	var panel: Control = main.interaction_panel
 	return {"modal": main.modal.visible, "modalPanel": (main.modal_panel.get_script().resource_path.get_file() if is_instance_valid(main.modal_panel) and main.modal_panel.get_script() != null else ""),
 		"railDecision": panel.panel.is_visible_in_tree(), "tether": panel.callout.is_visible_in_tree(), "targetTether": panel.target_tether,
-		"optionalGate": panel.optional_gate, "staged": main.target_staged, "targetCommitting": main.target_committing,
+		"staged": main.target_staged, "targetCommitting": main.target_committing,
 		"handPick": main.hand_pick_panel.visible, "handPickCommitting": main.hand_pick_committing, "boardChoice": main.board_choice.visible,
 		"incomingEffect": main.incoming_effect.showing(), "openingHand": main.opening_hand.visible, "targetingAttack": main.targeting,
 		"deferredActivation": main.deferred_activation, "optionalDecisions": main.optional_decisions,

@@ -6,7 +6,7 @@
 //   node client-godot/tools/sandbox.mjs <board> --shot  save a screenshot and exit (artifacts/sandbox-<board>.png)
 //
 // Options: --opponents=1..3 (default 2), --deck=<tests/*.dck> (default engine-commander.dck),
-//          --size=WxH (default 1600x1000), --no-watch.
+//          --size=WxH (default 1600x1000), --no-watch, --bridge-build=<directory>.
 // While running: saving a script/scene/shader relaunches the window on the SAME live board
 // (the engine keeps its state); saving the board file restarts the board. Keys: r relaunch window,
 // b restart board, q quit. Closing the window also quits. Boards live in client-godot/tests/sandbox/
@@ -34,6 +34,7 @@ const watching = !flag('no-watch') && !shot;
 const size = option('size') || '1600x1000';
 const opponents = Math.max(1, Math.min(3, Number(option('opponents') || 2)));
 const deck = option('deck') || 'engine-commander.dck';
+const bridgeBuild = resolve(root, option('bridge-build') || 'bridge/target');
 
 function describe(file) {
   const first = readFileSync(file, 'utf8').split(/\r?\n/).find(l => l.startsWith('#'));
@@ -73,7 +74,7 @@ if (!mock) {
   if (!home) { console.error('Cannot find a Java 17 JVM on PATH.'); process.exit(1); }
   // Launch the real JVM, not a PATH shim, so killing it never orphans the engine.
   javaPath = join(home, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-  if (!existsSync(join(root, 'bridge/target/classes/forgeui/bridge/BridgeMain.class'))) {
+  if (!existsSync(join(bridgeBuild, 'classes/forgeui/bridge/BridgeMain.class'))) {
     console.error('The bridge is not built. Run: node client-godot/tools/check.mjs bridge'); process.exit(1);
   }
 }
@@ -100,7 +101,7 @@ function preparedBoard() {
 
 async function startBridge() {
   port = await freePort();
-  const args = ['-Xmx4g', '-cp', ['target/classes', 'target/lib/*'].join(delimiter), 'forgeui.bridge.BridgeMain',
+  const args = ['-Xmx4g', '-cp', [join(bridgeBuild, 'classes'), join(bridgeBuild, 'lib', '*')].join(delimiter), 'forgeui.bridge.BridgeMain',
     '--assets', '../forge/forge-gui', '--port', String(port), '--opponents', String(opponents),
     '--deck-file', '../client-godot/tests/' + deck, '--test-state', preparedBoard()];
   const proc = spawn(javaPath, args, {cwd:join(root, 'bridge'), windowsHide:true});

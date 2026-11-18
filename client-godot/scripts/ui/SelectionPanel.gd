@@ -46,6 +46,8 @@ var preview_column: VBoxContainer
 var carousel: Control
 var carousel_caption: Label
 var carousel_mode := false
+## Test-only: false keeps library searches in the plain list, so a check can compare the two.
+static var carousel_enabled := true
 ## Library searches: the card that started the search, as large as the carousel's cards, on its left.
 var carousel_row: HBoxContainer
 var carousel_source_box: VBoxContainer
@@ -242,7 +244,7 @@ func present(snapshot: Dictionary) -> void:
 		entry.ref = str(entry.kind) + ":" + str(int(entry.get("engineId", entry.id)))
 		if entry.kind == "stack": entry.name = entry.get("sourceName", entry.get("card", {}).get("name", "Spell or ability"))
 		cards.append(entry)
-	_set_carousel_mode(_from_library(snapshot, cards))
+	_set_carousel_mode(carousel_enabled and _from_library(snapshot, cards))
 	if carousel_mode:
 		# The source sits large beside the carousel; the small corner copy would only repeat it.
 		carousel_source_box.visible = not source.is_empty()
@@ -252,7 +254,7 @@ func present(snapshot: Dictionary) -> void:
 		# keeps its width and can still slide clear of the card that started the search.
 		var Carousel = preload("res://scripts/ui/CardCarousel.gd")
 		carousel.custom_minimum_size.x = Carousel.SPACING * (2.6 if not source.is_empty() else 4.0) + Carousel.CARD_SIZE.x * 0.62 + 24.0
-	if cards != options: _rebuild(cards)
+	if cards != options or prompt.get("inputId", -1) != last_prompt.get("inputId", -1): _rebuild(cards)
 	var refs: Array = options.map(func(option): return str(option.ref))
 	chosen_refs = prompt.get("chosen", []).filter(func(ref): return refs.has(str(ref)))
 	last_prompt = prompt

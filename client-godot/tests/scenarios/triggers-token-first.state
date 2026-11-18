@@ -1,0 +1,12 @@
+# Pass to the end step, then drag Wedding Announcement to the top. Its Human token gets a counter when Brokers Ascendancy resolves.
+activeplayer=p0
+activephase=MAIN2
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Brokers Ascendancy;Wedding Announcement;Grizzly Bears
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

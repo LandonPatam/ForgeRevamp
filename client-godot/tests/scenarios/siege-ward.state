@@ -1,0 +1,15 @@
+# Cast Citadel Siege with four Plains, choose Dragons, and pass to the opponent's combat. Click Stella Lee and confirm before paying or skipping ward.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p0hand=Citadel Siege
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Stella Lee, Wild Card|Id:1;Winged Boots|AttachedTo:1
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Stella Lee, Wild Card|Id:2;Winged Boots|AttachedTo:2
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

@@ -3,6 +3,7 @@ signal mana_selected(code: int)
 signal cancel_requested
 signal sources_requested
 const P = preload("res://scripts/ui/Palette.gd")
+const Flow = preload("res://scripts/ui/InteractionFlow.gd")
 const KEYS := ["W", "U", "B", "R", "G", "C"]
 const CODES := [1, 2, 4, 8, 16, 0]
 const NAMES := ["White", "Blue", "Black", "Red", "Green", "Colorless"]
@@ -21,11 +22,13 @@ func present(state: Dictionary) -> void:
 	column.add_theme_constant_override("separation", 15)
 	add_child(column)
 	var title := Label.new()
-	title.text = "Choose mana to spend"
+	var ward: String = state.prompt.get("wardContext", "")
+	title.text = "Pay for ward?" if not ward.is_empty() else "Choose mana to spend"
 	title.add_theme_font_size_override("font_size", 32)
 	column.add_child(title)
 	var message := Label.new()
-	message.text = state.prompt.get("message", "Choose one mana from your pool.")
+	message.text = Flow.payment_message(state.prompt)
+	if message.text.is_empty(): message.text = "Choose one mana from your pool."
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	message.custom_minimum_size.x = 470
 	column.add_child(message)
@@ -56,7 +59,7 @@ func present(state: Dictionary) -> void:
 	sources.pressed.connect(func(): sources_requested.emit())
 	column.add_child(sources)
 	cancel_button = Button.new()
-	cancel_button.text = "Cancel activation"
+	cancel_button.text = "Skip ward payment" if not ward.is_empty() else "Cancel activation"
 	P.style_popup_button(cancel_button)
 	cancel_button.disabled = not ready or not state.prompt.get("cancelEnabled", false)
 	cancel_button.pressed.connect(func():

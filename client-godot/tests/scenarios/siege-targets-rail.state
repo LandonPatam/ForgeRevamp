@@ -1,0 +1,15 @@
+# Same board as siege-targets, with target tethers off: the generic rail takes the choice between two Bears.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Plains;Plains;Plains;Plains
+p0hand=Citadel Siege
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1battlefield=Blood Bairn|Id:1;Lightning Greaves|AttachedTo:1
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Grizzly Bears|Counters:P1P1=1;Grizzly Bears|Counters:P1P1=2
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

@@ -50,15 +50,40 @@ func _ready() -> void:
 	button.hide()
 	resized.connect(_build)
 
-func present(won: bool) -> void:
+## `loss` is the bridge's player `loss` ({reason, sources, card, amount}); its cause is typed first.
+func present(won: bool, loss: Dictionary = {}) -> void:
 	victory = won
 	button.text = "I WON" if won else "I lost"
 	status = "> ALL OPPONENTS ELIMINATED. RETURNING TO THE COMPUTER." if won else "> SEAT ELIMINATED. YOU CAN KEEP WATCHING THE TABLE."
+	var cause := "" if won else loss_cause(loss)
+	if not cause.is_empty(): status = "> " + cause + "
+" + status
 	clock = 0.0
 	built_size = Vector2.ZERO
 	_build()
 	show()
 	set_process(true)
+
+## How Forge says this seat lost, in one line: the reason and, where known, what did it.
+static func loss_cause(loss: Dictionary) -> String:
+	var sources: Array = loss.get("sources", [])
+	var named := ", ".join(sources.map(func(source): return "%s (%d)" % [str(source.get("name", "?")), int(source.get("amount", 0))]))
+	var card := str(loss.get("card", ""))
+	match str(loss.get("reason", "")):
+		"commanderDamage":
+			if sources.is_empty(): return "KILLED BY COMMANDER DAMAGE (21 FROM ONE COMMANDER)."
+			var source: Dictionary = sources[0]
+			return ("KILLED BY COMMANDER DAMAGE: %s DEALT YOU %d IN TOTAL (21 IS LETHAL)." % [str(source.get("name", "?")), int(source.get("amount", 0))]).to_upper()
+		"life":
+			if not sources.is_empty(): return ("LIFE REACHED 0. FINAL HIT: " + named + ".").to_upper()
+			if not card.is_empty(): return ("LIFE REACHED 0 FROM " + card + ".").to_upper()
+			return "LIFE REACHED 0."
+		"poison": return "KILLED BY POISON: %d POISON COUNTERS." % int(loss.get("amount", 10))
+		"milled": return "YOU HAD TO DRAW FROM AN EMPTY LIBRARY."
+		"effect": return ((card + " MADE YOU LOSE THE GAME.") if not card.is_empty() else "A CARD'S EFFECT MADE YOU LOSE THE GAME.").to_upper()
+		"opponentWon": return ((card + " WON THE GAME FOR AN OPPONENT.") if not card.is_empty() else "AN OPPONENT WON THE GAME.").to_upper()
+		"conceded": return "YOU CONCEDED."
+	return ""
 
 func accent() -> Color:
 	return Color("bd9bf2") if victory else Color("ff765e")
@@ -147,9 +172,21 @@ func _draw() -> void:
 	if clock > settle_time:
 		var typed := status.substr(0, int((clock - settle_time) * TYPE_RATE))
 		var cursor := "_" if int(clock * 2.5) % 2 == 0 else " "
+		var lines := status.split("
+")
 		var line_size := int(clampf(cell * 0.62, 13, 20))
-		var width := font.get_string_size(status, HORIZONTAL_ALIGNMENT_LEFT, -1, line_size).x
-		draw_string(font, Vector2((size.x - width) * 0.5, size.y * 0.36 + 3.5 * cell + 62), typed + cursor, HORIZONTAL_ALIGNMENT_LEFT, -1, line_size, Color(RAIN, 0.95))
+		# Long causes (several card names) shrink to fit rather than run off the screen.
+		for line in lines:
+			while line_size > 10 and font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, line_size).x > size.x * 0.92: line_size -= 1
+		var shown := typed.split("
+")
+		var top := size.y * 0.36 + 3.5 * cell + 62 - (lines.size() - 1) * line_size * 1.5
+		for index in range(shown.size()):
+			var width := font.get_string_size(lines[index], HORIZONTAL_ALIGNMENT_LEFT, -1, line_size).x
+			var text: String = shown[index] + (cursor if index == shown.size() - 1 else "")
+			# The cause reads in the result's own color; the status line keeps the terminal teal.
+			var color: Color = accent().lightened(0.35) if lines.size() > 1 and index == 0 else Color(RAIN, 0.95)
+			draw_string(font, Vector2((size.x - width) * 0.5, top + index * line_size * 1.5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, line_size, color)
 
 func _acknowledge() -> void:
 	if not button.visible: return

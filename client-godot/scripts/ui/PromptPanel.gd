@@ -464,8 +464,12 @@ func _with_modes_as_text(value: Dictionary) -> Dictionary:
 	for option in options: option.erase("card")
 	return value
 
+## Test-only: false keeps full orderings on plain click-in-sequence, so a check can compare the two.
+static var stack_builder_enabled := true
+
 ## A full ordering of simultaneous abilities (every option placed, nothing left to Forge).
 func _stack_builder() -> bool:
+	if not stack_builder_enabled: return false
 	var count: int = ask.get("options", []).size()
 	return ask.get("kind", "") == "order" and ask.get("abilityOrder", false) and count >= 2 and int(ask.get("min", -1)) == count and int(ask.get("max", -1)) == count
 

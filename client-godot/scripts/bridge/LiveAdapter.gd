@@ -20,6 +20,7 @@ var last_card_intent := -1
 var pending := ""
 ## A host bug report waiting for the bridge to write Forge's board export.
 signal report_saved(ok: bool, message: String)
+signal connection_interrupted
 var report_request := ""
 var pending_revision := -1
 var pending_answer := -1
@@ -42,6 +43,10 @@ var auto_priority_passes := 0
 var auto_priority_request := ""
 ## Table setting: pass priority on every stack item; Forge still asks for every required decision.
 var auto_resolve_all := false
+## Test-only: true stops automatic priority passes, so a check can look at an item before it resolves.
+var hold_auto_priority := false
+## Test-only: when not null, every request this adapter sends is appended here.
+var sent_requests = null
 ## Table setting "Stack responses": 0 Everything, 1 Smart (the bridge's policy), 2 Only threats.
 var stack_mode := 1
 var acknowledged_effects: Array[int] = []
@@ -119,6 +124,7 @@ func poll(delta: float) -> void:
 			_clear_pending()
 			prepaid_target = -1
 			draw_hint = false
+			connection_interrupted.emit()
 			status_changed.emit("FORGE OFFLINE / retrying")
 			_publish()
 		retry_in -= delta
@@ -407,6 +413,7 @@ func send_intent(intent: Dictionary) -> void:
 	pending_revision = revision
 	pending_age = 0
 	acknowledged = false
+	if sent_requests is Array: sent_requests.append(request.duplicate())
 	if socket.send_text(JSON.stringify(request)) != OK:
 		_clear_pending()
 		syncing = true
@@ -583,10 +590,21 @@ static func holds_for_response(state_value: Dictionary) -> bool:
 ## own just-cast spell's undo window (that keeps its existing commit behavior).
 ## Everything: an opponent's item the bridge would pass under Smart still waits when this seat can respond.
 func _apply_stack_mode() -> void:
-	state.autoPassStackId = int(state.get("bridgeAutoPassId", state.get("autoPassStackId", -1)))
-	var stack: Array = state.get("stack", [])
-	if stack_mode == 0 and state.get("canRespond", false) and not stack.is_empty() and int(stack[0].get("card", {}).get("owner", -1)) != 0:
-		state.autoPassStackId = -1
+	state.autoPassStackId = auto_pass_id(state, stack_mode)
+
+## The stack item this seat passes automatically under a Stack responses level (0 Everything,
+## 1 Smart, 2 Only threats): the bridge's Smart choice, withheld under Everything when it can respond.
+static func auto_pass_id(state_value: Dictionary, mode: int) -> int:
+	var stack: Array = state_value.get("stack", [])
+	if mode == 0 and state_value.get("canRespond", false) and not stack.is_empty() and int(stack[0].get("card", {}).get("owner", -1)) != 0:
+		return -1
+	return int(state_value.get("bridgeAutoPassId", state_value.get("autoPassStackId", -1)))
+
+## Whether this seat passes Forge's current priority on its own at that level; the adapter's own rule.
+static func passes_automatically(state_value: Dictionary, mode: int, resolve_all: bool) -> bool:
+	var at_level := state_value.duplicate()
+	at_level.autoPassStackId = auto_pass_id(state_value, mode)
+	return can_auto_pass(at_level) or (resolve_all and can_resolve_all(at_level))
 
 static func can_resolve_all(state_value: Dictionary) -> bool:
 	return not holds_for_response(state_value) and state_value.get("connectionReady", false) and not state_value.get("game", {}).get("gameOver", false) and state_value.get("asks", []).is_empty() and state_value.get("pendingDraws", []).is_empty() and state_value.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and state_value.get("prompt", {}).get("okEnabled", false) and not state_value.get("stack", []).is_empty() and state_value.get("takebackCast", {}).is_empty()
@@ -602,7 +620,7 @@ func _service_auto_priority() -> void:
 	elif int(state.stack[0].id) != auto_priority_sent:
 		# A response creates a new priority cycle for the original effect.
 		auto_priority_sent = -1
-	if prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not (can_auto_pass(state) or (auto_resolve_all and can_resolve_all(state))):
+	if hold_auto_priority or prepaid_target >= 0 or not connected or syncing or not pending.is_empty() or not passes_automatically(state, stack_mode, auto_resolve_all):
 		auto_priority_candidate = -1
 		return
 	var stack_id := int(state.stack[0].id)

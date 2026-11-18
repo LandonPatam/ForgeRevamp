@@ -1,0 +1,13 @@
+# You are at 2 life and AI 1's Lightning Bolt is aimed at you. Let it resolve: YOU LOSE names Lightning Bolt (3) as the final hit.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=2
+p0battlefield=Forest
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p1putonstack=Lightning Bolt->human
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

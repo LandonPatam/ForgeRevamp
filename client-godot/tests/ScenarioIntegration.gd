@@ -26,9 +26,6 @@ func step() -> bool:
 	if ui.incoming_effect.panel.visible and not state.stack.is_empty() and int(ui.incoming_effect.active.get("stackId", -1)) == int(state.stack[0].id):
 		ui.incoming_effect.resolve_button.pressed.emit()
 		return true
-	if ui.interaction_panel.optional_gate:
-		ui.interaction_panel.callout.yes_button.pressed.emit()
-		return true
 	if press_card_tether(): return true
 	if ui.interaction_panel.panel.visible and not ui.interaction_panel.confirm_button.disabled:
 		ui.interaction_panel.confirm_button.pressed.emit()
@@ -39,10 +36,11 @@ func step() -> bool:
 	return check(false, "No usable interaction control (modal=%s %s carousel=%s staged=%s committing=%s tether=%s): " % [ui.modal.visible, (ui.modal_panel.get_script().resource_path.get_file() if is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null else "none"), ui.modal_panel.get("carousel_mode") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("staged") if is_instance_valid(ui.modal_panel) else "-", ui.modal_panel.get("committing") if is_instance_valid(ui.modal_panel) else "-", ui.interaction_panel.callout.visible] + JSON.stringify(state.prompt).left(300))
 
 func prepared() -> bool:
+	if scenario.begins_with("matrix-"): ui.adapter.hold_auto_priority = true # The driver looks first.
 	while Time.get_ticks_msec() < deadline:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
-		if scenario in ["blocking", "combat-reasons", "maze"] and state.prompt.get("inputKind", "") == "InputBlock": return true
+		if scenario in ["blocking", "combat-reasons", "maze", "no-legal-blocks"] and state.prompt.get("inputKind", "") == "InputBlock": return true
 		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
 		# the scenario driver answers it.
 		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty() and not (ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd")): return true
@@ -51,7 +49,7 @@ func prepared() -> bool:
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
 			ui._present_card_selection() # A choice already waiting behind the coin (Manifold Insights) opens now.
-		if scenario not in ["blocking", "combat-reasons", "maze"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
+		if scenario not in ["blocking", "combat-reasons", "maze", "no-legal-blocks"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
 			else: return true
@@ -83,16 +81,8 @@ func cast(name: String) -> bool:
 	if not await wait_ready(): return false
 	return check(not (ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority" and zone("Hand").any(func(value): return value.id == card.id)), "Cast was rejected: " + name + " / " + str(ui.snapshot.prompt))
 
-## A "you may" trigger's yes/no comes before its targets: answer Yes (use it) like Forge's own confirm did.
-func use_optional_trigger() -> bool:
-	if not ui.interaction_panel.optional_gate: return true
-	ui.interaction_panel.callout.yes_button.pressed.emit()
-	for index in range(10): await ui.get_tree().process_frame
-	return check(not ui.interaction_panel.optional_gate, "Yes leaves the optional trigger's yes/no")
-
 func select_named(name: String) -> bool:
 	if not ui.snapshot.asks.is_empty(): return await choose_named(name)
-	if not await use_optional_trigger(): return false
 	# A permanent's targets are a tether: click the card (staged), then the tether's Confirm.
 	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.target_tether:
 		var legal: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
@@ -277,8 +267,6 @@ func panther_claws() -> bool:
 		if not check(not ui.incoming_effect.panel.visible, "Our Claws target must not produce a second spell/ability preview"): return false
 		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets":
 			targeted = true
-			# The optional "attach it?" is now asked before the target (and Forge's own confirm is answered from it).
-			if ui.interaction_panel.optional_gate: decisions += 1
 			if not await select_named("T'Challa, the Black Panther"): return false
 			continue
 		if not ui.snapshot.asks.is_empty() or ui.snapshot.prompt.get("inputKind", "") == "InputConfirm":
@@ -674,7 +662,8 @@ func run_scenario(table: Control, name: String) -> void:
 		_:
 			# New scenarios need no registration: tests/scenarios/<name>.state + func <name_with_underscores>().
 			var driver := name.replace("-", "_")
-			if has_method(driver): passed = await call(driver)
+			if name.begins_with("shape-"): passed = await shape_probe()
+			elif has_method(driver): passed = await call(driver)
 			else: passed = check(false, "Scenario driver not implemented: " + driver)
 	if not passed: return
 	print("PASS: Godot live integration (prepared ", name, " card-combination scenario; UI choices and exact resulting game state)")
@@ -865,37 +854,176 @@ func discard() -> bool:
 	if not check(graveyard.has(picks[0].id) and graveyard.has(picks[1].id), "Forge must discard the two clicked cards: " + str(zone("Graveyard").map(func(card): return card.name))): return false
 	return check(not ui.hand_pick_panel.visible and not ui.hand_pick_shade.visible, "The table must return to normal after discarding")
 
+## A real connection drop during a staged discard. Discard sends the first pick; the socket closes in
+## the same frame. After the reconnect the second pick is never sent on its own, nothing stays marked
+## and Forge holds at most the first. The player marks the rest again and both cards are discarded.
+func discard_interrupted() -> bool:
+	if not await tap("Mountain") or not await cast("Faithless Looting"): return false
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList": break
+		if not await step(): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList" and ui.hand_pick_panel.visible, "Faithless Looting asks for a discard from the hand"): return false
+	var picks: Array = zone("Hand").slice(0, 2).map(func(card): return int(card.id))
+	for id in picks:
+		ui._click_card(id)
+		if not await wait_ready(): return false
+	if not check(ui.hand_pick_staged == picks and not ui.hand_pick_confirm.disabled, "Both cards are marked locally"): return false
+	ui.adapter.sent_requests = []
+	ui.hand_pick_confirm.pressed.emit()
+	var in_flight: Array = ui.adapter.sent_requests.map(func(request): return [request.get("action", ""), int(request.get("id", -1))])
+	ui.adapter.socket.close()
+	if not check(in_flight == [["card", picks[0]]], "Discard sent only the first pick before the drop: " + str(in_flight)): return false
+	if not await wait_for(func(): return not ui.adapter.connected, 5.0): return check(false, "The client notices the dropped connection")
+	if not check(not ui.hand_pick_committing and ui.hand_pick_staged.is_empty(), "The drop ends the send and clears the marks"): return false
+	if not await wait_for(func(): return ui.adapter.connected and not ui.adapter.syncing and ui.snapshot.get("connectionReady", false), 20.0): return check(false, "The client reconnects to the same match")
+	await ui.get_tree().create_timer(2.0).timeout
+	if not await wait_ready(): return false
+	var after: Array = ui.adapter.sent_requests.slice(1).filter(func(request): return request.get("type", "") == "action").map(func(request): return [request.action, int(request.get("id", -1))])
+	var chosen: Array = ui.snapshot.prompt.get("chosen", [])
+	print("SCENARIO discard reconnect: input=", ui.snapshot.prompt.get("inputKind", ""), " chosen=", chosen, " sent after drop=", after)
+	if not check(not after.any(func(action): return action[1] == picks[1]), "The second pick never went out on its own: " + str(after)): return false
+	if not check(ui.snapshot.prompt.get("inputKind", "") == "InputSelectCardsFromList" and not chosen.has("card:%d" % picks[1]) and chosen.size() <= 1, "Forge still asks, holding at most the first pick: " + str(chosen)): return false
+	# Forge already holds the first pick, so the generic card window takes the question: it shows and
+	# can change what Forge holds (the hand view only shows its own local marks).
+	if not check(ui.hand_pick_staged.is_empty() and not ui.hand_pick_panel.visible and ui.modal.visible and ui.modal_panel is SelectionDialog, "The card window takes the question with Forge's pick, nothing marked locally"): return false
+	await capture("reconnected")
+	# The player picks what is still missing there and confirms.
+	var window = ui.modal_panel
+	for id in picks:
+		if chosen.has("card:%d" % id): continue
+		var row: int = window.options.map(func(option): return int(option.get("id", -1))).find(id)
+		if not check(row >= 0, "The window offers the second card"): return false
+		window.option_buttons[row].pressed.emit()
+		if not await wait_ready(): return false
+	if is_instance_valid(window) and ui.modal.visible and ui.modal_panel == window and not window.confirm_button.disabled: window.confirm_button.pressed.emit()
+	if not await settle(): return false
+	var graveyard: Array = zone("Graveyard").map(func(card): return int(card.id))
+	return check(graveyard.has(picks[0]) and graveyard.has(picks[1]), "Forge discards exactly the two marked cards: " + str(zone("Graveyard").map(func(card): return card.name)))
+
+## The YOU LOSE screen says how: Forge's loss reason and, for life, the damage of the final hit.
+func loss_cause() -> bool:
+	if not await wait_for(func(): return not ui.snapshot.stack.is_empty(), 20.0): return check(false, "Lightning Bolt waits on the stack")
+	if ui.incoming_effect.showing(): ui.incoming_effect.resolve_button.pressed.emit()
+	elif ui.snapshot.prompt.get("okEnabled", false): ui._intent("ok")
+	if not await wait_for(func(): return is_instance_valid(ui.outcome_screen) and ui.outcome_screen.visible, 20.0): return check(false, "The loss opens YOU LOSE: " + str(ui.snapshot.players[0].get("loss", {})))
+	var loss: Dictionary = ui.snapshot.players[0].get("loss", {})
+	var status: String = ui.outcome_screen.status
+	print("SCENARIO loss: ", loss, " / ", status)
+	if not check(loss.get("reason", "") == "life" and loss.get("sources", []).any(func(source): return str(source.name) == "Lightning Bolt" and int(source.amount) == 3), "Forge's loss names the life reason and the Bolt's 3 damage: " + str(loss)): return false
+	await ui.get_tree().create_timer(ui.outcome_screen.settle_time + 3.0).timeout
+	await capture("lose")
+	return check(status.contains("LIFE REACHED 0") and status.contains("LIGHTNING BOLT (3)"), "YOU LOSE says how: " + status)
+
+## Stack responses matrix. Each matrix-* board puts one opponent item on the stack at your priority.
+## For Everything, Smart and Only threats, the adapter's own rule is applied to Forge's real
+## snapshot and must match `waits` (true = keeps the window, false = passes on its own). Then the
+## seat really runs each waiting level (no pass reaches Forge), and the first passing level must
+## pass Forge's priority itself.
+const STACK_LEVELS := ["Everything", "Smart", "Only threats"]
+
+func matrix_creature() -> bool: return await _stack_matrix([false, false, false])
+func matrix_counter() -> bool: return await _stack_matrix([true, true, false])
+func matrix_instant() -> bool: return await _stack_matrix([true, true, false])
+func matrix_draw() -> bool: return await _stack_matrix([true, true, false]) # An instant: Smart keeps the window even for a draw notice.
+func matrix_targeted() -> bool: return await _stack_matrix([true, true, true])
+func matrix_wipe() -> bool: return await _stack_matrix([true, true, true])
+func matrix_wipe_misses() -> bool: return await _stack_matrix([false, false, false])
+
+func _stack_matrix(waits: Array) -> bool:
+	const Live = preload("res://scripts/bridge/LiveAdapter.gd")
+	var adapter = ui.adapter
+	adapter.hold_auto_priority = true
+	if not await wait_for(func(): return adapter.state.get("prompt", {}).get("inputKind", "") == "InputPassPriority" and not adapter.state.get("stack", []).is_empty() and int(adapter.state.stack[0].get("card", {}).get("owner", -1)) != 0 and adapter.state.get("connectionReady", false), 20.0):
+		return check(false, "An opponent's item waits on this seat's priority: " + str(adapter.state.get("prompt", {}).get("inputKind", "")))
+	var item: Dictionary = adapter.state.stack[0]
+	var item_id := int(item.id)
+	var row: Array = []
+	for level in range(3): row.append(not Live.passes_automatically(adapter.state, level, level == 2))
+	var facts := "canRespond=%s bridgeAutoPass=%s targetsLocal=%s effects=%s" % [adapter.state.get("canRespond", false), int(adapter.state.get("bridgeAutoPassId", -1)) == item_id, item.get("targetsLocal", false), adapter.state.get("targetedEffects", []).map(func(event): return event.get("kind", ""))]
+	print("SCENARIO matrix %s: %s waits=%s want=%s %s" % [scenario, item.get("sourceName", ""), row, waits, facts])
+	for level in range(3):
+		if not check(row[level] == waits[level], "%s: %s should %s under %s (%s)" % [scenario, item.get("sourceName", ""), "wait" if waits[level] else "pass", STACK_LEVELS[level], facts]): return false
+	# Real behavior: each waiting level holds Forge's priority, then a passing level passes it.
+	adapter.sent_requests = []
+	adapter.hold_auto_priority = false
+	for level in range(3):
+		if not waits[level]: continue
+		adapter.stack_mode = level
+		adapter.auto_resolve_all = level == 2
+		await ui.get_tree().create_timer(1.2).timeout
+		var passed: bool = adapter.sent_requests.any(func(request): return request.get("action", "") == "ok")
+		if not check(not passed and not adapter.state.get("stack", []).is_empty() and int(adapter.state.stack[0].id) == item_id, "%s holds Forge's priority on %s" % [STACK_LEVELS[level], item.get("sourceName", "")]): return false
+	var passing := waits.find(false)
+	if passing < 0: return true
+	adapter.stack_mode = passing
+	adapter.auto_resolve_all = passing == 2
+	if not await wait_for(func(): return adapter.sent_requests.any(func(request): return request.get("action", "") == "ok"), 3.0): return check(false, "%s passes Forge's priority on %s by itself" % [STACK_LEVELS[passing], item.get("sourceName", "")])
+	return check(await wait_for(func(): return not adapter.state.get("stack", []).any(func(entry): return int(entry.id) == item_id), 10.0), "%s resolves after the pass" % item.get("sourceName", ""))
+
 ## A two-card library search: marks stay local, OK sends each exact instance to Forge in turn.
+## cultivate-list makes the same picks in the plain list window; both must send the same instances.
 func cultivate() -> bool:
+	return await _cultivate(false)
+
+func cultivate_list() -> bool:
+	return await _cultivate(true)
+
+func _cultivate(list: bool) -> bool:
+	SelectionDialog.carousel_enabled = not list
 	if not await tap("Forest", 3) or not await cast("Cultivate"): return false
 	if not await resolve_to_choice(): return false
 	var search: Control = ui.modal_panel
-	if not check(search is SelectionDialog and search.carousel_mode, "Cultivate's search must open the carousel"): return false
+	if not check(search is SelectionDialog and search.carousel_mode != list, "Cultivate's search must open the %s" % ("plain list" if list else "carousel")): return false
 	for index in range(20): await ui.get_tree().process_frame
-	if not check(ui.search_link.visible and ui._search_anchor() != null, "The search is linked to Cultivate on the stack"): return false
+	if not check(list or (ui.search_link.visible and ui._search_anchor() != null), "The carousel is linked to Cultivate on the stack"): return false
+	# Forge's side: which exact copies the first Island and Swamp rows stand for.
+	var wanted: Array = []
+	var rows: Array = []
 	for name in ["Island", "Swamp"]:
 		for r in range(search.groups.size()):
-			if search.options[search.groups[r][0]].get("name", "") == name: search._stage_group(r)
-	if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
-	if not check(search.carousel.mark_labels.has("✓ 1 OF 2") and search.carousel.mark_labels.has("✓ 2 OF 2"), "Marks count your picks against the two allowed, not the copies: " + str(search.carousel.mark_labels)): return false
-	# Right-clicking the middle card (Swamp, focused by the last mark) removes its mark; left-click adds it back.
-	await ui.get_tree().create_timer(0.8).timeout
-	var click := InputEventMouseButton.new()
-	click.position = search.carousel.size * 0.5 + Vector2(0, 10)
-	click.button_index = MOUSE_BUTTON_RIGHT
-	click.pressed = true
-	search.carousel._gui_input(click)
-	if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Right-click must remove the Swamp mark: " + str(search.staged)): return false
-	click.button_index = MOUSE_BUTTON_LEFT
-	search.carousel._gui_input(click)
-	click.pressed = false
-	search.carousel._gui_input(click)
-	if not check(search.staged.size() == 2, "Left-click must mark the Swamp again"): return false
-	await capture("marked")
-	search.confirm_button.pressed.emit()
+			if search.options[search.groups[r][0]].get("name", "") == name:
+				rows.append(r)
+				wanted.append(int(search.options[search.groups[r][0]].id))
+	if not check(wanted.size() == 2, "The search offers an Island and a Swamp"): return false
+	var offered: Array = search.options.map(func(option): return int(option.get("id", -1)))
+	var search_id = ui.snapshot.prompt.get("inputId", -1)
+	ui.adapter.sent_requests = []
+	if list:
+		for r in rows:
+			search._pick_row(r)
+			if not await wait_ready(): return false
+		await capture("picked-list")
+		# Forge usually finishes at the second pick; press OK only if it is still waiting.
+		if is_instance_valid(search) and ui.modal.visible and ui.modal_panel == search and not search.confirm_button.disabled: search.confirm_button.pressed.emit()
+	else:
+		for r in rows: search._stage_group(r)
+		if not check(search.staged.size() == 2 and ui.snapshot.prompt.get("chosen", []).is_empty() and ui.adapter.sent_requests.is_empty(), "Two marks must stay local until OK: " + str(search.staged)): return false
+		if not check(search.carousel.mark_labels.has("✓ 1 OF 2") and search.carousel.mark_labels.has("✓ 2 OF 2"), "Marks count your picks against the two allowed, not the copies: " + str(search.carousel.mark_labels)): return false
+		# Right-clicking the middle card (Swamp, focused by the last mark) removes its mark; left-click adds it back.
+		await ui.get_tree().create_timer(0.8).timeout
+		var click := InputEventMouseButton.new()
+		click.position = search.carousel.size * 0.5 + Vector2(0, 10)
+		click.button_index = MOUSE_BUTTON_RIGHT
+		click.pressed = true
+		search.carousel._gui_input(click)
+		if not check(search.staged.size() == 1 and search.options[search.staged[0]].name == "Island", "Right-click must remove the Swamp mark: " + str(search.staged)): return false
+		click.button_index = MOUSE_BUTTON_LEFT
+		search.carousel._gui_input(click)
+		click.pressed = false
+		search.carousel._gui_input(click)
+		if not check(search.staged.size() == 2, "Left-click must mark the Swamp again"): return false
+		await capture("marked")
+		search.confirm_button.pressed.emit()
+	# The wire: the search's picks are exactly those instances, in the same order. Forge may finish
+	# the search itself at its maximum, so OK is not required.
+	var search_input = search_id
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputId", -1) != search_input or not ui.snapshot.asks.is_empty(), 40): return check(false, "The search finishes: " + str(ui.snapshot.prompt))
+	var actions: Array = ui.adapter.sent_requests.filter(func(request): return request.get("action", "") == "card" and offered.has(int(request.get("id", -1)))).map(func(request): return int(request.id))
+	if not check(actions == wanted, "Sent picks %s, want %s" % [actions, wanted]): return false
 	if not await settle(): return false
-	var found: Array = zone("Battlefield").map(func(card): return card.name) + zone("Hand").map(func(card): return card.name)
-	return check(found.has("Island") and found.has("Swamp") and ui.snapshot.players[0].libraryCount == 8, "Forge must fetch exactly the marked Island and Swamp: " + str(found))
+	var found: Array = (zone("Battlefield") + zone("Hand")).map(func(card): return int(card.id))
+	return check(found.has(wanted[0]) and found.has(wanted[1]) and ui.snapshot.players[0].libraryCount == 8, "Forge must fetch exactly the picked Island and Swamp instances: " + str(wanted))
 
 ## Four of your own abilities trigger at once: the stack builder orders them, nothing is sent until
 ## Confirm, and Forge stacks them so the top row resolves first.
@@ -922,30 +1050,226 @@ func triggers() -> bool:
 	if not await wait_ready(): return false
 	return check(not ui.snapshot.asks.any(func(ask): return ask.kind == "order"), "Forge must accept the order and close the question")
 
+func triggers_token_first() -> bool:
+	return await _test_trigger_resolution_order(true)
+
+func triggers_counter_first() -> bool:
+	return await _test_trigger_resolution_order(false)
+
+func _test_trigger_resolution_order(token_first: bool) -> bool:
+	if not await pass_until(func(): return ui.snapshot.asks.any(func(ask): return ask.get("abilityOrder", false)), 60):
+		return check(false, "The two end-step triggers must offer a simultaneous order")
+	var ask: Dictionary = ui.snapshot.asks[0]
+	var panel: Control = ui.modal_panel
+	if not check(ui.modal.visible and is_instance_valid(panel) and panel.order_stack != null, "Forge's order opens in the stack builder"): return false
+	var builder: Control = panel.order_stack
+	var sources: Array = ask.options.map(func(option): return option.card.name)
+	var wanted := ["Wedding Announcement", "Brokers Ascendancy"] if token_first else ["Brokers Ascendancy", "Wedding Announcement"]
+	if not check(sources.size() == 2 and sources.has(wanted[0]) and sources.has(wanted[1]), "The builder offers exactly the two expected triggers"): return false
+	ui.adapter.sent_requests = []
+	var requests: int = ui.adapter.request_counter
+	var first: int = builder.order[0]
+	_drag_top_trigger(builder)
+	if not check(builder.order[1] == first, "Dragging through the viewport moves the top trigger below the other one"): return false
+	if sources[builder.order[0]] != wanted[0]:
+		await ui.get_tree().process_frame
+		_drag_top_trigger(builder)
+	if not check(builder.order.map(func(index): return sources[index]) == wanted, "The chosen first trigger is the top row"): return false
+	if not check(ui.adapter.request_counter == requests and ui.snapshot.asks[0].id == ask.id, "Dragging keeps the order local until confirmation"): return false
+	await capture("ordered")
+	panel.confirm_button.pressed.emit()
+	return await _trigger_order_outcome(ask, wanted, token_first)
+
+## triggers-plain: the same order as triggers-token-first, clicked in sequence without the stack builder.
+func triggers_plain() -> bool:
+	const PromptPanel = preload("res://scripts/ui/PromptPanel.gd")
+	PromptPanel.stack_builder_enabled = false
+	if not await pass_until(func(): return ui.snapshot.asks.any(func(ask): return ask.get("abilityOrder", false)), 60):
+		return check(false, "The two end-step triggers must offer a simultaneous order")
+	var ask: Dictionary = ui.snapshot.asks[0]
+	var panel: Control = ui.modal_panel
+	if not check(ui.modal.visible and is_instance_valid(panel) and panel.order_stack == null, "Without the builder the order is plain click-in-sequence"): return false
+	var sources: Array = ask.options.map(func(option): return option.card.name)
+	var wanted := ["Wedding Announcement", "Brokers Ascendancy"]
+	ui.adapter.sent_requests = []
+	for name in wanted:
+		panel._toggle(sources.find(name))
+	if not check(ui.adapter.sent_requests.is_empty(), "Clicking keeps the order local until confirmation"): return false
+	await capture("ordered-plain")
+	panel._submit()
+	return await _trigger_order_outcome(ask, wanted, true)
+
+## Shared by the builder and plain runs: one answer listing the triggers in the wanted order, and the
+## token gets a counter exactly when Wedding Announcement resolved first.
+func _trigger_order_outcome(ask: Dictionary, wanted: Array, token_first: bool) -> bool:
+	if not await wait_ready(): return false
+	var sources: Array = ask.options.map(func(option): return option.card.name)
+	var answers: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "answer" and int(request.get("id", -1)) == int(ask.id))
+	var sent: Array = (answers[0].value if not answers.is_empty() and answers[0].value is Array else []).map(func(index): return sources[int(index)])
+	if not check(answers.size() == 1 and sent == wanted, "One answer with order %s, got %s" % [wanted, answers]): return false
+	if not await pass_until(func():
+		return (ui.snapshot.stack.is_empty() and not _wedding_token().is_empty()
+			and counter(find_card("Grizzly Bears", "Battlefield"), "P1P1") == 1)
+	, 80): return check(false, "Both abilities finish resolving and the existing Bears get a counter: " + JSON.stringify({
+		"phase": ui.snapshot.game.phase, "prompt": ui.snapshot.prompt.get("inputKind"), "asks": ui.snapshot.asks.map(func(other): return other.kind),
+		"board": zone("Battlefield").map(func(card): return [card.name, card.get("token"), card.get("counters")]),
+		"log": ui.snapshot.log.slice(0, 10),
+	}))
+	var token := _wedding_token()
+	return check(counter(token, "P1P1") == (1 if token_first else 0),
+		"The token has a counter exactly when Wedding Announcement resolved first")
+
+func _wedding_token() -> Dictionary:
+	for card in zone("Battlefield"):
+		if card.get("token", false) and str(card.name).begins_with("Human"): return card
+	return {}
+
+func _drag_top_trigger(builder: Control) -> void:
+	const OrderStack = preload("res://scripts/ui/OrderStack.gd")
+	var transform := builder.get_global_transform_with_canvas()
+	var from := transform * Vector2(builder.size.x * 0.5, OrderStack.ROW_H * 0.5)
+	var to := transform * Vector2(builder.size.x * 0.5, OrderStack.ROW_H * 1.5 + OrderStack.GAP)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = from
+	press.global_position = from
+	ui.get_viewport().push_input(press, true)
+	var motion := InputEventMouseMotion.new()
+	motion.position = to
+	motion.global_position = to
+	motion.relative = to - from
+	motion.button_mask = MOUSE_BUTTON_MASK_LEFT
+	ui.get_viewport().push_input(motion, true)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.position = to
+	release.global_position = to
+	ui.get_viewport().push_input(release, true)
+
 ## "Choose one or more" modes hang off the card as one callout; picks stay local until Confirm,
 ## then the bridge feeds every pick to Forge's one-at-a-time mode prompts.
 func concord() -> bool:
+	return await _concord(false)
+
+func concord_counters() -> bool:
+	return await _concord(true)
+
+## concord-popup: the same choice as concord-counters through the generic popup instead of the tether.
+func concord_popup() -> bool:
+	return await _concord(true, true)
+
+func _concord(pick_counter: bool, popup: bool = false) -> bool:
+	ui.interaction_panel.tethers_enabled = not popup
 	for index in range(40):
 		if not await wait_ready(): return false
 		if not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false): break
 		if not await step(): return false
 	if not check(not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].get("modeChoice", false), "Concord must ask for all its modes at once: " + str(ui.snapshot.asks)): return false
+	for index in range(5): await ui.get_tree().process_frame
 	var callout: Control = ui.interaction_panel.callout
-	if not check(callout.visible and not ui.modal.visible, "The modes must attach to the card, not open a popup"): return false
-	if not check(callout.mode_buttons.size() == 3 and callout.yes_button.disabled, "Three modes, nothing confirmable before a pick"): return false
+	if popup:
+		if not check(not callout.visible and ui.modal.visible and is_instance_valid(ui.modal_panel), "With tethers off, the modes open the generic popup"): return false
+	else:
+		if not check(callout.visible and not ui.modal.visible, "The modes must attach to the card, not open a popup"): return false
+		if not check(callout.mode_buttons.size() == 3 and callout.yes_button.disabled, "Three modes, nothing confirmable before a pick"): return false
 	var hand_before: int = zone("Hand").size()
-	callout.mode_buttons[1].pressed.emit()
-	callout.mode_buttons[2].pressed.emit()
-	await capture("modes")
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	var counters_before := counter(bears, "P1P1")
+	var ask_id := int(ui.snapshot.asks[0].id)
+	var modes: Array = ui.snapshot.asks[0].options
+	var selected_effect := "counter" if pick_counter else "draw a card"
+	var picked: Array = []
+	ui.adapter.sent_requests = []
+	for fragment in ["spirit", selected_effect]:
+		var index := modes.find_custom(func(mode): return str(mode.label).to_lower().contains(fragment))
+		if not check(index >= 0, "Forge offers the %s mode" % fragment): return false
+		picked.append(index)
+		if popup: ui.modal_panel._toggle(index)
+		else: callout.mode_buttons[index].pressed.emit()
+	await capture("modes-popup" if popup else "modes")
 	if not await wait_ready(): return false
-	if not check(ui.snapshot.asks.size() == 1 and ui.snapshot.asks[0].get("modeChoice", false), "Picking modes must not answer Forge"): return false
-	callout.yes_button.pressed.emit()
+	if not check(ui.snapshot.asks.size() == 1 and ui.snapshot.asks[0].get("modeChoice", false) and ui.adapter.sent_requests.is_empty(), "Picking modes must not answer Forge"): return false
+	if popup: ui.modal_panel._submit()
+	else: callout.yes_button.pressed.emit()
+	if not await wait_ready(): return false
+	# The wire: one answer to this ask naming exactly the picked modes, whichever presentation sent it.
+	var answers: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "answer" and int(request.get("id", -1)) == ask_id)
+	var sent: Array = (answers[0].value if not answers.is_empty() and answers[0].value is Array else []).map(func(value): return int(value))
+	sent.sort()
+	picked.sort()
+	if not check(answers.size() == 1 and sent == picked, "One answer with modes %s, got %s" % [picked, answers]): return false
 	for index in range(40):
 		if not await wait_ready(): return false
-		if zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")): break
+		if zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")) and ui.snapshot.stack.is_empty(): break
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets":
+			if not check(pick_counter, "The unselected counter mode cannot ask for a target"): return false
+			if not await select_named("Grizzly Bears"): return false
+			continue
 		if not await step(): return false
-	if not check(zone("Battlefield").any(func(card): return str(card.name).contains("Spirit")), "Both picked modes must resolve: a Spirit token"): return false
-	return check(zone("Hand").size() > hand_before, "… and a drawn card")
+	if not check(zone("Battlefield").filter(func(card): return str(card.name).contains("Spirit")).size() == 1, "The Spirit mode creates exactly one token"): return false
+	return check(zone("Hand").size() == hand_before + (0 if pick_counter else 1)
+		and counter(find_card("Grizzly Bears", "Battlefield"), "P1P1") == counters_before + (1 if pick_counter else 0),
+		"Only the chosen draw or counter mode takes effect")
+
+func fiery_confluence() -> bool:
+	if not await tap("Mountain", 4) or not await cast("Fiery Confluence"): return false
+	for fragment in ["damage to each opponent", "damage to each opponent", "destroy target artifact"]:
+		if not await pass_until(func(): return not ui.snapshot.asks.is_empty()): return check(false, "Forge offers each of the three selections separately")
+		var ask: Dictionary = ui.snapshot.asks[0]
+		if not check(not ask.get("modeChoice", false), "Repeatable modes use Forge's individual choices"): return false
+		if not await _select_mode_control(ask, fragment): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets"): return check(false, "The chosen destroy mode asks for an artifact")
+	if not await select_named("Sol Ring"): return false
+	if not await settle(): return false
+	return check(ui.snapshot.players[1].life == 36 and ui.snapshot.players[2].life == 36
+		and ui.snapshot.players[1].zones.Graveyard.any(func(card): return card.name == "Sol Ring"),
+		"Both repeats deal two damage to each opponent, and the third mode destroys Sol Ring")
+
+func _select_mode_control(ask: Dictionary, fragment: String) -> bool:
+	var modes: Array = ask.options
+	var index := modes.find_custom(func(mode): return str(mode.label).to_lower().contains(fragment))
+	if not check(index >= 0, "The current choice offers %s" % fragment): return false
+	var tether: Control = ui.interaction_panel.callout
+	if tether.visible and int(tether.mode_ask.get("id", -1)) == int(ask.id):
+		tether.mode_buttons[index].pressed.emit()
+		tether.yes_button.pressed.emit()
+	elif ui.modal.visible and is_instance_valid(ui.modal_panel):
+		ui.modal_panel.option_buttons[index].pressed.emit()
+		ui.modal_panel.confirm_button.pressed.emit()
+	else:
+		return check(false, "The current choice has an active mode control")
+	return await wait_ready()
+
+func season_pawprints() -> bool:
+	if not await tap("Island", 6) or not await cast("Season of Weaving"): return false
+	var remaining_choices := [3, 2, 1]
+	var selected := ["return each", "draw a card", "draw a card"]
+	for i in range(selected.size()):
+		if not await pass_until(func(): return not ui.snapshot.asks.is_empty()): return check(false, "Forge asks for the next affordable choice")
+		var ask: Dictionary = ui.snapshot.asks[0]
+		if not check(ask.options.size() == remaining_choices[i], "Forge filters modes as the five-pawprint budget is spent"): return false
+		if not await _select_mode_control(ask, selected[i]): return false
+	if not await pass_until(func(): return not find_card("Season of Weaving", "Graveyard").is_empty(), 60):
+		return check(false, "Spending all five pawprints ends the chooser and resolves the spell")
+	return check(not find_card("Grizzly Bears", "Hand").is_empty() and zone("Hand").size() == 3
+		and not zone("Battlefield").any(func(card): return card.get("token", false)), "Forge returns the Bears, draws twice, and never applies the unselected copy mode")
+
+func zero_modes() -> bool:
+	if not await tap("Forest", 2) or not await cast("Call Damage Control"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty()): return check(false, "Call Damage Control offers its mode choices")
+	var ask: Dictionary = ui.snapshot.asks[0]
+	if not check(ask.get("modeChoice", false) and int(ask.min) == 0, "Forge permits choosing zero modes"): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not tether.no_button.disabled and tether.no_button.visible, "The mode tether offers the empty choice"): return false
+	await capture("choose-none")
+	tether.no_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 28):
+		return check(false, "Choosing zero modes finishes the mode decision: " + str(ui.snapshot.asks))
+	if not await settle(): return false
+	return check(find_card("Grizzly Bears", "Graveyard").get("name", "") == "Grizzly Bears"
+		and find_card("Island", "Graveyard").get("name", "") == "Island"
+		and not find_card("Call Damage Control", "Graveyard").is_empty(), "The spell resolves after zero choices, returning no cards")
 
 ## Only threats with an answer in hand: the wipe waits, View battlefield lets you cast Heroic
 ## Intervention on top of it, and your creatures survive while everyone else's die.
@@ -1318,14 +1642,47 @@ func gearhulk() -> bool:
 	var tether: Control = panel.callout
 	if not check(panel.target_tether and tether.visible and not panel.panel.visible and tether.mode_buttons.size() == 2, "The target choice is a tether with both opponents"): return false
 	if not check(tether.line.text.contains("draw three cards"), "It shows the effect's text: " + tether.line.text): return false
-	tether.mode_buttons[0].pressed.emit()
+	var players: Array = ui.snapshot.prompt.get("entities", []).filter(func(entity): return entity.get("kind", "") == "player")
+	var row := players.map(func(entity): return int(entity.id)).find(2)
+	if not check(row >= 0, "The tether lists the second opponent: " + str(players)): return false
+	ui.adapter.sent_requests = []
+	tether.mode_buttons[row].pressed.emit()
 	for index in range(10): await ui.get_tree().process_frame
-	if not check(panel.target_staged.size() == 1 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Picking stages the opponent locally"): return false
+	if not check(ui.adapter.sent_requests.is_empty() and panel.target_staged.size() == 1 and ui.snapshot.prompt.get("chosen", []).is_empty(), "Picking stages the opponent locally"): return false
 	await ui.get_tree().create_timer(0.3).timeout
 	await capture("gearhulk")
 	tether.yes_button.pressed.emit()
 	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") != "InputSelectTargets"): return check(false, "Confirm sends the target")
-	return check(ui.snapshot.stack.is_empty() or ui.snapshot.stack.any(func(item): return item.get("targets", []).any(func(target): return str(target.get("name", "")).begins_with("AI 1"))), "The trigger targets the picked opponent: " + JSON.stringify(ui.snapshot.stack).left(300))
+	return _gearhulk_outcome()
+
+## The same "target opponent" through the tether's player rows (gearhulk) and the rail's player
+## buttons (gearhulk-rail): both pick the second opponent, send one player action for that seat and
+## put the trigger on Forge's stack targeting that player.
+func gearhulk_rail() -> bool:
+	ui.interaction_panel.tethers_enabled = false
+	if not await tap("Mountain", 6) or not await cast("Combustible Gearhulk"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets"): return check(false, "The Gearhulk trigger must ask for a target")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	var players: Array = ui.snapshot.prompt.get("entities", []).filter(func(entity): return entity.get("kind", "") == "player")
+	var row := players.map(func(entity): return int(entity.id)).find(2)
+	if not check(not panel.target_tether and panel.panel.visible and players.size() == 2 and row >= 0 and panel.choices.get_child_count() == 2, "With tethers off, the rail offers both opponents as buttons: " + str(players)): return false
+	await capture("gearhulk-rail")
+	ui.adapter.sent_requests = []
+	panel.choices.get_child(row).pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") != "InputSelectTargets"): return check(false, "The rail sends the target")
+	if not check(not panel.confirm_button.visible or panel.confirm_button.disabled or ui.snapshot.prompt.get("inputKind", "") != "InputSelectTargets", "One opponent finishes the choice"): return false
+	return _gearhulk_outcome()
+
+## Shared by both Gearhulk runs: one player pick for seat 2 on the wire, and Forge's trigger targets it.
+func _gearhulk_outcome() -> bool:
+	var picks: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "action" and request.get("action", "") in ["card", "player"])
+	var second := int(ui.snapshot.players[2].get("engineId", -1))
+	if not check(picks.size() == 1 and picks[0].action == "player" and int(picks[0].id) == second, "Sent exactly one player pick for the second opponent (engine %d): %s" % [second, picks]): return false
+	var name := str(ui.snapshot.players[2].name)
+	return check(ui.snapshot.log.any(func(entry): return entry.begins_with("Add To Stack:") and entry.contains("Combustible Gearhulk") and entry.contains(name))
+		or ui.snapshot.stack.any(func(item): return item.get("targets", []).any(func(target): return str(target.get("name", "")) == name)),
+		"Forge's trigger targets %s: %s / %s" % [name, ui.snapshot.log.slice(0, 6), JSON.stringify(ui.snapshot.stack).left(200)])
 
 ## Shivan Gorge's two abilities tether as rows that keep their text and draw costs as mana symbols.
 func shivan_gorge() -> bool:
@@ -1361,6 +1718,30 @@ func constrictor() -> bool:
 ## Scry shows only the cards you look at, face up, on a tether: Temple of Malice's scry 1 sends
 ## Lightning Bolt to the bottom; Preordain's scry 2 then offers the next two (proving it), keeps the
 ## Bears on top and bottoms the Wurm, so its draw is the Bears. Hidden library cards never appear.
+func scry_order() -> bool:
+	if not await tap("Island", 4) or not await cast("Foresee"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Foresee opens a scry decision")
+	var ask: Dictionary = ui.snapshot.asks[0]
+	var shown: Array = ask.options.map(func(option): return option.card.name)
+	if not check(shown == ["Lightning Bolt", "Grizzly Bears", "Craw Wurm", "Serra Angel"], "Foresee offers the top four cards in order and leaves the fifth hidden"): return false
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and not ui.modal.visible, "Library placement uses the existing tether"): return false
+	tether.scry_toggles[2].pressed.emit()
+	tether.scry_toggles[3].pressed.emit()
+	tether.scry_order.move(1, 0)
+	tether.scry_bottom_order.move(1, 0)
+	await capture("split-order")
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty()): return false
+	var drawn: Array = zone("Hand").filter(func(card): return card.name in ["Lightning Bolt", "Grizzly Bears", "Craw Wurm", "Serra Angel"]).map(func(card): return card.name)
+	if not check(drawn == ["Grizzly Bears", "Lightning Bolt"], "Foresee draws the reordered top two cards: " + str(drawn)): return false
+	if not await tap("Island") or not await cast("Index"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "order"): return check(false, "Index exposes the remaining library order")
+	var remaining: Array = ui.snapshot.asks[0].options.map(func(option): return option.card.name)
+	if not check(remaining == ["Forest", "Serra Angel", "Craw Wurm"], "Index sees the previously hidden Forest, then the newly ordered bottom cards: " + str(remaining)): return false
+	submit_choice()
+	return await settle()
+
 func scry() -> bool:
 	var tether: Control = ui.interaction_panel.callout
 	ui._click_card(find_card("Temple of Malice").id)
@@ -1387,6 +1768,19 @@ func scry() -> bool:
 	tether.yes_button.pressed.emit()
 	if not await pass_until(func(): return ui.snapshot.asks.is_empty() and ui.snapshot.stack.is_empty() and zone("Hand").any(func(card): return card.name == "Grizzly Bears")): return check(false, "Preordain should draw the kept Grizzly Bears: " + str(zone("Hand").map(func(card): return card.name)))
 	return true
+
+func scry_whole_library() -> bool:
+	if not await tap("Island") or not await cast("Preordain"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty() and ui.snapshot.asks[0].kind == "scry"): return check(false, "Preordain asks to scry")
+	var tether: Control = ui.interaction_panel.callout
+	if not check(tether.visible and tether.scry_toggles.size() == 2 and ui.snapshot.players[0].libraryCount == 2, "Both remaining cards are offered"): return false
+	tether.scry_toggles[0].pressed.emit()
+	tether.scry_toggles[1].pressed.emit()
+	tether.scry_bottom_order.move(1, 0)
+	tether.yes_button.pressed.emit()
+	if not await pass_until(func(): return not find_card("Preordain", "Graveyard").is_empty(), 40): return false
+	return check(not find_card("Craw Wurm", "Hand").is_empty() and ui.snapshot.log.any(func(entry): return entry.contains("scried 2 card(s) to the bottom")),
+		"Forge draws the first reordered card and records both cards as sent to the bottom: " + str(ui.snapshot.log.slice(0, 10)))
 ## Plainscycling Angel of the Ruins: the library search is linked to your graveyard (the Angel went
 ## there to pay for the cycle), and picking a Plains puts it in your hand.
 func plainscycling() -> bool:
@@ -1532,30 +1926,172 @@ func _heritage(use: bool) -> bool:
 		ui._choose_player(1)
 		if not await wait_ready(): return false
 	ui._intent("ok")
-	if not await pass_until(func(): return ui.snapshot.prompt.get("optionalTrigger", false), 60): return check(false, "Duelist's Heritage's target prompt is marked optional: " + str(ui.snapshot.prompt.get("inputKind", "")))
-	for index in range(10): await ui.get_tree().process_frame
+	var heritage_id := int(find_card("Duelist's Heritage", "Battlefield").id)
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and int(ui.snapshot.prompt.get("cardId", -1)) == heritage_id, 60): return check(false, "Heritage first asks for an attacking creature")
 	var panel: Control = ui.interaction_panel
-	if not check(panel.optional_gate and panel.callout.visible and panel.callout.line.text.to_lower().contains("double strike") and panel.target_staged.is_empty(), "A yes/no tether comes first: " + panel.callout.line.text): return false
-	ui._click_card(find_card("Craw Wurm", "Battlefield").id)
-	for index in range(5): await ui.get_tree().process_frame
-	if not check(panel.target_staged.is_empty(), "Table clicks don't stage a target before the yes/no"): return false
-	await capture("ask")
-	if use:
-		panel.callout.yes_button.pressed.emit()
-		for index in range(10): await ui.get_tree().process_frame
-		if not check(panel.target_tether and not panel.optional_gate, "Yes opens the target tether"): return false
-		if not await select_named("Craw Wurm"): return false
-	else:
-		panel.callout.no_button.pressed.emit()
-	var saw_confirm := [false]
-	if not await pass_until(func():
-		if ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and ui.interaction_panel.callout.visible: saw_confirm[0] = true
-		return ui.snapshot.stack.is_empty() and ui.snapshot.log.any(func(line): return str(line).contains("Duelist's Heritage")) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "The trigger resolves without further questions")
-	if not check(not saw_confirm[0], "Forge's own \"use it?\" never shows"): return false
+	if not check(panel.target_tether and panel.callout.visible and panel.target_staged.is_empty(), "The target tether waits for the player's own pick"): return false
+	await capture("target")
+	if not await select_named("Craw Wurm"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputConfirm" and int(ui.snapshot.prompt.get("cardId", -1)) == heritage_id, 80): return check(false, "Heritage asks Yes or No when it resolves")
+	await capture("use")
+	if not check(panel.callout.visible and not panel.target_tether and not panel.callout.no_button.disabled
+			and panel.callout.line.text.to_lower().contains("craw wurm"), "The Yes/No tether names the targeted attacker and lets the player decline: " + str(ui.snapshot.prompt) + " / " + panel.callout.line.text): return false
+	var button: Button = panel.callout.yes_button if use else panel.callout.no_button
+	button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "The trigger finishes after the player's answer")
 	var wurm := find_card("Craw Wurm", "Battlefield")
 	var bears := find_card("Grizzly Bears", "Battlefield")
+	var target := "targeting [Craw Wurm (%d)]" % int(wurm.id)
+	if not check(ui.snapshot.log.any(func(entry): return entry.begins_with("Add To Stack:") and entry.contains("Duelist's Heritage") and entry.contains(target)), "Forge puts Heritage on the stack targeting the Wurm's exact instance"): return false
 	var strikers := [wurm, bears].filter(func(card): return card.get("keywords", []).has("DOUBLE_STRIKE")).map(func(card): return card.name)
 	return check(strikers == (["Craw Wurm"] if use else []), "Double strike went to %s" % [strikers])
+func no_legal_blocks() -> bool:
+	var prompt: Dictionary = ui.snapshot.prompt
+	if not check(prompt.get("noLegalBlocks", false) and ui.interaction_panel.panel.visible, "Forge pauses the attack at the no-blockers decision"): return false
+	if not check(ui.interaction_panel.confirm_button.text == "Continue without blockers", "The combat rail offers a clear way to continue"): return false
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	if not check(str(prompt.get("cantBlock", {}).get(str(bears.id), "")).contains("flying"), "The Bears' block restriction explains flying"): return false
+	await capture("no-blockers")
+	if not check(int(find_card("Jace Beleren", "Battlefield").get("counters", {}).get("LOYALTY", 0)) == 5 and ui.snapshot.prompt.get("noLegalBlocks", false), "Combat waits before damage"): return false
+	ui.interaction_panel.confirm_button.pressed.emit()
+	return check(await pass_until(func(): return int(find_card("Jace Beleren", "Battlefield").get("counters", {}).get("LOYALTY", 0)) == 1, 80), "The unblocked Serra Angel deals four damage to Jace after confirmation")
+
+func play_siege_dragons() -> bool:
+	if not await tap("Plains", 4) or not await cast("Citadel Siege"): return false
+	if not await pass_until(func(): return not ui.snapshot.asks.is_empty(), 80): return false
+	return await choose_named("Dragons")
+
+## The same real target decision through the tether (siege-targets) and through the generic rail
+## (siege-targets-rail): both must send Forge the same Bears instance and leave the same board.
+func siege_targets() -> bool:
+	return await _siege_targets(false)
+
+func siege_targets_rail() -> bool:
+	return await _siege_targets(true)
+
+func _siege_targets(rail: bool) -> bool:
+	ui.interaction_panel.tethers_enabled = not rail
+	if not await play_siege_dragons(): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 160): return check(false, "No target prompt for the shrouded creature, then a choice between two Bears")
+	for index in range(5): await ui.get_tree().process_frame
+	var bears: Array = ui.snapshot.players[2].zones.Battlefield.filter(func(card): return card.name == "Grizzly Bears")
+	bears.sort_custom(func(a, b): return int(a.counters.P1P1) < int(b.counters.P1P1))
+	var chosen := int(bears[1].id)
+	var other := int(bears[0].id)
+	# Forge's side of the decision: exactly the second opponent's two Bears, nothing picked yet.
+	var offered: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
+	offered.sort()
+	var expected := [chosen, other]
+	expected.sort()
+	if not check(int(ui.snapshot.game.activePlayer) == int(ui.snapshot.players[2].id) and offered == expected and ui.snapshot.prompt.get("chosen", []).is_empty(), "Forge offers only the second opponent's two Bears: " + str(offered)): return false
+	var panel: Control = ui.interaction_panel
+	if rail:
+		if not check(not panel.target_tether and panel.panel.visible and not panel.callout.visible, "With tethers off, the generic rail takes the target decision"): return false
+	elif not check(panel.target_tether and panel.callout.visible, "The tether takes the target decision"): return false
+	await capture("rail" if rail else "tether")
+	ui.adapter.sent_requests = []
+	var view: Control = ui.cards[chosen]
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = view.get_global_transform_with_canvas() * (view.size * 0.5)
+	click.global_position = click.position
+	ui.get_viewport().push_input(click, true)
+	click.pressed = false
+	ui.get_viewport().push_input(click, true)
+	if rail:
+		if not check(ui.target_staged.is_empty(), "The rail stages nothing locally"): return false
+	else:
+		if not check(ui.target_staged.map(func(target): return int(target.id)) == [chosen] and ui.adapter.sent_requests.is_empty(), "The battlefield click stages the intended Bears instance without sending"): return false
+		panel.callout.yes_button.pressed.emit()
+	if not await pass_until(func(): return not ui.snapshot.stack.is_empty() and ui.snapshot.stack[0].get("sourceName", "") == "Citadel Siege", 40): return check(false, "The chosen target puts the Siege trigger on the stack")
+	# The wire: one card action naming the chosen instance, whichever presentation sent it.
+	var picks: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "action" and request.get("action", "") in ["card", "player"])
+	var actions: Array = ui.adapter.sent_requests.map(func(request): return str(request.get("action", request.get("type", ""))))
+	if not check(picks.size() == 1 and int(picks[0].get("id", -1)) == chosen, "Sent exactly one pick for the chosen Bears: " + str(actions) + " " + str(picks)): return false
+	if not check(ui.snapshot.stack[0].targets.map(func(target): return int(target.id)) == [chosen], "Forge's Siege trigger targets the same instance"): return false
+	# Siege taps at the beginning of combat; the AI may attack with the other Bears in the same update,
+	# so judge each by why it is tapped: Siege's target never attacks, the other only taps by attacking.
+	var bear := func(id: int) -> Dictionary:
+		var found: Array = ui.snapshot.players[2].zones.Battlefield.filter(func(card): return int(card.id) == id)
+		return found[0] if not found.is_empty() else {}
+	var attacked := func(id: int) -> bool: return ui.snapshot.log.any(func(entry): return str(entry).begins_with("Combat:") and str(entry).contains("(%d)" % id))
+	if not await pass_until(func(): return bear.call(chosen).get("tapped", false) or bear.call(other).get("tapped", false), 60): return check(false, "Siege taps a Bears: " + str(ui.snapshot.log.slice(0, 8)))
+	return check(bear.call(chosen).get("tapped", false) and not attacked.call(chosen) and (not bear.call(other).get("tapped", true) or attacked.call(other)),
+		"Forge taps only the selected Bears: chosen=%s other=%s log=%s" % [bear.call(chosen).get("tapped"), bear.call(other).get("tapped"), ui.snapshot.log.slice(0, 8)])
+
+## A permanent's ability whose legal targets are off the table (cards in a graveyard): the tether
+## declines at once and the generic card window takes it. Picking the second of two
+## identical Bears sends that exact instance, and Forge exiles it and leaves the other.
+func ooze_graveyard_target() -> bool:
+	ui.adapter.sent_requests = []
+	ui._click_card(find_card("Scavenging Ooze", "Battlefield").id)
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 40): return check(false, "Ooze asks for a graveyard target: " + str(ui.snapshot.prompt))
+	for index in range(5): await ui.get_tree().process_frame
+	var graveyard: Array = ui.snapshot.players[1].zones.Graveyard.filter(func(card): return card.name == "Grizzly Bears")
+	if not check(graveyard.size() == 2, "Two Bears in AI 1's graveyard"): return false
+	var chosen := int(graveyard[1].id)
+	var other := int(graveyard[0].id)
+	var offered: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
+	if not check(offered.has(chosen) and offered.has(other), "Forge offers both graveyard Bears: " + str(offered)): return false
+	var panel: Control = ui.interaction_panel
+	# The generic floor for targets off the table is the card window, opened straight away.
+	if not check(not panel.target_tether and not panel.callout.visible and ui.modal.visible and ui.modal_panel is SelectionDialog, "No tether: the card window takes the decision: tether=%s callout=%s rail=%s modal=%s" % [panel.target_tether, panel.callout.visible, panel.panel.visible, (ui.modal_panel.get_script().resource_path.get_file() if ui.modal.visible and is_instance_valid(ui.modal_panel) else "none")]): return false
+	await capture("browser")
+	ui.adapter.sent_requests = []
+	var dialog = ui.modal_panel
+	# Target windows list each instance; click the row for the chosen copy.
+	var row := -1
+	for index in range(dialog.options.size()):
+		if int(dialog.options[index].get("id", -1)) == chosen: row = index
+	if not check(row >= 0, "The window lists the chosen Bears instance: " + str(dialog.options.map(func(option): return [option.get("name", ""), option.get("id", -1)]))): return false
+	dialog.option_buttons[row].pressed.emit()
+	if not await wait_ready(): return false
+	if is_instance_valid(dialog) and dialog is SelectionDialog and ui.modal.visible and not dialog.confirm_button.disabled: dialog.confirm_button.pressed.emit()
+	if not await pass_until(func(): return str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputPayMana"), 30): return check(false, "Forge asks for {G} after the target")
+	if ui.modal.visible and ui.modal_panel is ManaPaymentDialog: ui.modal_panel.sources_button.pressed.emit()
+	if not await tap("Forest"): return false
+	if not await pass_until(func(): return ui.snapshot.log.any(func(entry): return entry.begins_with("Resolve Stack: Scavenging Ooze")), 60): return check(false, "The Ooze ability resolves: " + str(ui.snapshot.prompt))
+	var picks: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "action" and request.get("action", "") == "card" and offered.has(int(request.get("id", -1))))
+	if not check(picks.size() == 1, "One target pick sent: " + str(ui.adapter.sent_requests.map(func(request): return [request.get("action", request.get("type", "")), request.get("id", -1)]))): return false
+	var sent := int(picks[0].id)
+	var left: Array = ui.snapshot.players[1].zones.Graveyard.map(func(card): return int(card.id))
+	var exiled: Array = ui.snapshot.players[1].zones.Exile.map(func(card): return int(card.id))
+	return check(sent == chosen and exiled == [chosen] and left == [other], "Forge exiles exactly the chosen Bears instance: sent=%d chosen=%d graveyard=%s exile=%s" % [sent, chosen, left, exiled])
+
+func siege_ward() -> bool:
+	if not await play_siege_dragons(): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 120): return check(false, "Dragons asks before targeting the sole creature")
+	if not check(ui.interaction_panel.target_tether and ui.snapshot.prompt.selectable.size() == 1, "The existing tether offers the sole legal target"): return false
+	await capture("sole-target")
+	if not check(ui.snapshot.prompt.get("chosen", []).is_empty() and ui.snapshot.stack.is_empty(), "Forge waits before ward goes on the stack"): return false
+	if not await select_named("Stella Lee, Wild Card"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputPayManaOfCostPayment", 120): return false
+	if not check(ui.modal.visible and ui.modal_panel is ManaPaymentDialog, "Ward opens the existing payment popup"): return false
+	await capture("ward")
+	if not check(ui.modal_panel.cancel_button.text == "Skip ward payment", "Ward payment explains what is being declined"): return false
+	var explanation: String = ui.snapshot.prompt.get("wardContext", "")
+	if not check(explanation.contains("Citadel Siege") and explanation.contains("Stella Lee") and explanation.contains("counters it"), "Ward names the source, target and consequence"): return false
+	var first_resolutions: int = ui.snapshot.log.filter(func(entry): return entry.begins_with("Resolve Stack: Citadel Siege")).size()
+	ui.modal_panel.sources_button.pressed.emit()
+	if not await tap("Plains"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("wardMana", "") == "{3}", 30):
+		return check(false, "After paying one mana, Forge reports exactly three still due: " + str(ui.snapshot.prompt.get("wardMana", "")))
+	if not check(ui.modal.visible and ui.modal_panel is ManaPaymentDialog and not ui.modal_panel.cancel_button.disabled, "The player can still skip after partial payment"): return false
+	await capture("partial-ward")
+	ui.modal_panel.cancel_button.pressed.emit()
+	if not await pass_until(func(): return int(ui.snapshot.game.activePlayer) == int(ui.snapshot.players[2].id) and ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 160): return check(false, "Dragons offers a target again on the next opponent's turn")
+	if not check(ui.snapshot.log.filter(func(entry): return entry.begins_with("Resolve Stack: Citadel Siege")).size() <= first_resolutions, "Skipping ward prevents the first Siege trigger from resolving"): return false
+	if not await select_named("Stella Lee, Wild Card"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputPayManaOfCostPayment", 120): return check(false, "The second ward payment follows target confirmation")
+	for index in range(4):
+		if ui.modal.visible and ui.modal_panel is ManaPaymentDialog: ui.modal_panel.sources_button.pressed.emit()
+		if not await tap("Plains"): return false
+	return check(await pass_until(func():
+		var second: Dictionary = ui.snapshot.players[2].zones.Battlefield.filter(func(card): return card.name == "Stella Lee, Wild Card")[0]
+		return second.tapped and not ui.snapshot.log.any(func(entry): return entry.begins_with("Combat:") and entry.contains("Stella Lee") and entry.contains("(%s)" % second.id))
+	, 80), "Paid ward lets Siege tap the second Stella before she can attack")
+
 func skate() -> bool:
 	if not await tap("Island", 5) or not await cast("Deepglow Skate"): return false
 	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 100): return check(false, "Deepglow Skate's trigger asks for targets")
@@ -1571,15 +2107,159 @@ func skate() -> bool:
 	if not check(not ui.target_committing and ui.target_staged.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", "A refused pick ends the send and is unmarked"): return false
 	if not await wait_ready(): return false # The refusal resyncs the table first.
 	for index in range(10): await ui.get_tree().process_frame
+	ui.adapter.sent_requests = []
 	for name in ["Grizzly Bears", "Jace Beleren"]:
 		ui._click_card(find_card(name, "Battlefield").id)
 		for index in range(5): await ui.get_tree().process_frame
 	if not check(ui.interaction_panel.target_staged.size() == 2, "Both permanents are staged"): return false
 	ui.interaction_panel.callout.yes_button.pressed.emit()
 	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "Confirm sends both targets and the trigger resolves: " + str(ui.snapshot.prompt.get("chosen", [])))
+	return _skate_outcome([int(find_card("Grizzly Bears", "Battlefield").id), int(find_card("Jace Beleren", "Battlefield").id)])
+
+## Deepglow Skate's two targets through the rail (skate-rail; the tether run is skate): each click
+## is its own pick on the wire, and Forge doubles the same two permanents' counters.
+func skate_rail() -> bool:
+	ui.interaction_panel.tethers_enabled = false
+	if not await tap("Island", 5) or not await cast("Deepglow Skate"): return false
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 100): return check(false, "Deepglow Skate's trigger asks for targets")
+	for index in range(10): await ui.get_tree().process_frame
+	var panel: Control = ui.interaction_panel
+	if not check(not panel.target_tether and panel.panel.visible, "With tethers off, the rail takes the targets"): return false
+	var wanted := [int(find_card("Grizzly Bears", "Battlefield").id), int(find_card("Jace Beleren", "Battlefield").id)]
+	ui.adapter.sent_requests = []
+	for id in wanted:
+		ui._click_card(id)
+		if not await wait_ready(): return false
+	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and not panel.confirm_button.disabled: panel.confirm_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.stack.is_empty() and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 80): return check(false, "The rail's picks resolve the trigger: " + str(ui.snapshot.prompt.get("chosen", [])))
+	return _skate_outcome(wanted)
+
+## Shared by both Skate runs: the two picks on the wire in order, and both counters doubled.
+func _skate_outcome(wanted: Array) -> bool:
+	var picks: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "action" and request.get("action", "") in ["card", "player"]).map(func(request): return int(request.get("id", -1)))
+	if not check(picks == wanted, "Sent exactly the two picks %s, got %s" % [wanted, picks]): return false
 	var bears := int(find_card("Grizzly Bears", "Battlefield").get("counters", {}).get("P1P1", 0))
 	var jace := int(find_card("Jace Beleren", "Battlefield").get("counters", {}).get("LOYALTY", 0))
 	return check(bears == 4 and jace == 6, "Counters doubled: Bears %d (want 4), Jace %d (want 6)" % [bears, jace])
+
+## A real input replacement during a staged send. Standard Bearer makes Forge offer only Flagbearers
+## first; picking one ends that input and Forge asks again for the rest. Staging both Bearers and
+## confirming sends the first; the second, still queued, must never reach the replacement input.
+## The player then picks it again through the ordinary control and the ability resolves on both.
+func flagbearer_replaced() -> bool:
+	var invoker := int(find_card("Bane's Invoker", "Battlefield").id)
+	ui._click_card(invoker)
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets", 40): return check(false, "Bane's Invoker asks for targets: " + str(ui.snapshot.prompt))
+	for index in range(10): await ui.get_tree().process_frame
+	var bearers: Array = ui.snapshot.players[1].zones.Battlefield.filter(func(card): return card.name == "Standard Bearer").map(func(card): return int(card.id))
+	var first_input = ui.snapshot.prompt.get("inputId", -1)
+	var offered: Array = ui.snapshot.prompt.selectable.map(func(id): return int(id))
+	offered.sort()
+	bearers.sort()
+	print("SCENARIO flagbearer first input: ", first_input, " offered=", offered, " min/max=", ui.snapshot.prompt.get("selMin"), "/", ui.snapshot.prompt.get("selMax"), " tether=", ui.interaction_panel.target_tether)
+	if not check(offered == bearers and int(ui.snapshot.prompt.get("selMax", 0)) >= 2, "Forge first offers only the two Flagbearers, up to two"): return false
+	if not check(ui.interaction_panel.target_tether, "The targets are a tether off Bane's Invoker"): return false
+	# They start as one ×2 pile. A real click on the pile stages one copy, which leaves the pile;
+	# a second click on what is left stages the other.
+	if not check(ui.cards[bearers[0]].position.distance_to(ui.cards[bearers[1]].position) < ui.cards[bearers[0]].size.x * 0.5, "The two Bearers start as one pile"): return false
+	for round in range(2):
+		var left: Array = bearers.filter(func(id): return not ui.target_staged.any(func(target): return int(target.id) == id))
+		click_view(left[0])
+		for index in range(10): await ui.get_tree().process_frame
+		if not check(ui.target_staged.size() == round + 1, "Click %d on the pile stages one more Bearer: %s" % [round + 1, ui.target_staged]): return false
+	var staged: Array = ui.target_staged.map(func(target): return int(target.id))
+	staged.sort()
+	if not check(staged == bearers, "Both Bearers are staged locally"): return false
+	if not check(ui.cards[bearers[0]].position.distance_to(ui.cards[bearers[1]].position) >= ui.cards[bearers[0]].size.x * 0.9, "Staged copies leave the pile"): return false
+	if not check(bearers.all(func(id): return int(ui.cards[id].data.get("stackCount", 1)) == 1), "Split copies show no pile badge: " + str(bearers.map(func(id): return ui.cards[id].data.get("stackCount", 1)))): return false
+	bearers = ui.target_staged.map(func(target): return int(target.id)) # Send order.
+	await capture("staged")
+	ui.adapter.sent_requests = []
+	ui.interaction_panel.callout.yes_button.pressed.emit()
+	if not await pass_until(func(): return ui.snapshot.prompt.get("inputId", -1) != first_input, 40): return check(false, "Forge replaces the input after the first Bearer: " + str(ui.snapshot.prompt))
+	# Give a stale queued pick every chance to go out.
+	await ui.get_tree().create_timer(2.5).timeout
+	if not await wait_ready(): return false
+	var picks: Array = ui.adapter.sent_requests.filter(func(request): return request.get("type", "") == "action" and request.get("action", "") in ["card", "player", "ok"]).map(func(request): return [request.action, int(request.get("id", -1))])
+	var prompt: Dictionary = ui.snapshot.prompt
+	print("SCENARIO flagbearer replacement: ", prompt.get("inputKind", ""), " input=", prompt.get("inputId", -1), " chosen=", prompt.get("chosen", []), " offered=", prompt.get("selectable", []), " sent=", picks)
+	if not check(picks == [["card", bearers[0]]], "Only the first Bearer was sent; the queued one never reached the new input: " + str(picks)): return false
+	if not check(prompt.get("inputKind", "") == "InputSelectTargets" and prompt.get("chosen", []).has("card:%d" % bearers[0]) and not prompt.get("chosen", []).has("card:%d" % bearers[1]), "The replacement input holds only the accepted Bearer"): return false
+	if not check(not ui.target_committing and ui.target_staged.is_empty(), "The stale send ended and nothing stays staged"): return false
+	if not check(ui.cards[bearers[0]].position.distance_to(ui.cards[bearers[1]].position) >= ui.cards[bearers[0]].size.x * 0.9, "The accepted Bearer stays out of the pile, so the other is clickable"): return false
+	if not check(prompt.get("selectable", []).map(func(id): return int(id)).has(bearers[1]), "The second Bearer is still a legal pick"): return false
+	await capture("replaced")
+	# The player picks it again through whatever control now shows the question.
+	if not await select_named_id(bearers[1]): return false
+	if not await pass_until(func(): return str(ui.snapshot.prompt.get("inputKind", "")).begins_with("InputPayMana"), 40): return check(false, "Forge asks for the cost after targets: " + str(ui.snapshot.prompt))
+	if ui.modal.visible and ui.modal_panel is ManaPaymentDialog: ui.modal_panel.sources_button.pressed.emit()
+	if not await tap("Plains", 8): return false
+	if not await pass_until(func(): return ui.snapshot.log.any(func(entry): return entry.begins_with("Resolve Stack: Bane's Invoker")), 80): return check(false, "The ability resolves")
+	var pumped: Array = ui.snapshot.players[1].zones.Battlefield.filter(func(card): return bearers.has(int(card.id)) and int(card.get("power", 0)) == 3).map(func(card): return int(card.id))
+	pumped.sort()
+	bearers.sort()
+	return check(pumped == bearers and int(find_card("Grizzly Bears", "Battlefield").get("power", 0)) == 2, "Both Bearers got +2/+2 and nothing else did: " + str(pumped))
+
+## Waits frame by frame (no passing, unlike pass_until) until the test holds or the time runs out.
+func wait_for(test: Callable, seconds: float) -> bool:
+	var until := Time.get_ticks_msec() + int(seconds * 1000)
+	while Time.get_ticks_msec() < until:
+		if test.call(): return true
+		await ui.get_tree().process_frame
+	return false
+
+## A real left click at the middle of this card's view, through the viewport.
+func click_view(id: int) -> void:
+	var view: Control = ui.cards[id]
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = view.get_global_transform_with_canvas() * (view.size * 0.5)
+	click.global_position = click.position
+	ui.get_viewport().push_input(click, true)
+	click.pressed = false
+	ui.get_viewport().push_input(click, true)
+
+## Picks one exact instance on the current target question with a real click, through the tether or the rail.
+func select_named_id(id: int) -> bool:
+	for index in range(10): await ui.get_tree().process_frame
+	if not check(ui.snapshot.prompt.get("selectable", []).map(func(value): return int(value)).has(id), "Instance %d is a legal target" % id): return false
+	click_view(id)
+	for index in range(5): await ui.get_tree().process_frame
+	if ui.interaction_panel.target_tether:
+		if not check(not ui.interaction_panel.callout.yes_button.disabled, "The tether's Confirm enables once the target is staged"): return false
+		ui.interaction_panel.callout.yes_button.pressed.emit()
+	if not await wait_ready(): return false
+	if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.panel.visible and not ui.interaction_panel.confirm_button.disabled:
+		ui.interaction_panel.confirm_button.pressed.emit()
+	return await wait_ready()
+
+func optional_target() -> bool:
+	ui.adapter.auto_resolve_all = true
+	ui._click_card(find_card("Yawgmoth, Thran Physician", "Battlefield").id)
+	for index in range(40):
+		if not await wait_ready(): return false
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets": break
+		if not await step(): return false
+	var prompt: Dictionary = ui.snapshot.prompt
+	var tether: Control = ui.interaction_panel.callout
+	var opponents: Array = ui.snapshot.players[1].zones.Battlefield
+	var wurm: Dictionary = opponents.filter(func(card): return card.name == "Craw Wurm")[0]
+	if not check(prompt.get("inputKind", "") == "InputSelectTargets" and int(prompt.selMin) == 0
+		and prompt.selectable.any(func(id): return int(id) == int(wurm.id))
+		and ui.interaction_panel.target_tether and not tether.yes_button.disabled, "Yawgmoth offers an explicit empty target choice: " + str({
+			"input": prompt.get("inputKind"), "min": prompt.get("selMin"), "selectable": prompt.get("selectable"),
+			"wurm": wurm.id, "tether": ui.interaction_panel.target_tether, "disabled": tether.yes_button.disabled,
+			"log": ui.snapshot.log.slice(0, 5),
+		})): return false
+	await ui.get_tree().create_timer(0.3).timeout
+	if not check(ui.snapshot.prompt.get("inputId", -1) == prompt.get("inputId", -2), "Auto-resolve leaves the target decision to the player"): return false
+	tether.yes_button.pressed.emit()
+	if not await settle(): return false
+	return check(ui.snapshot.players[0].life == 39 and not find_card("Island", "Hand").is_empty()
+		and not find_card("Grizzly Bears", "Graveyard").is_empty()
+		and ui.cards.has(int(wurm.id)) and counter(ui.cards[int(wurm.id)].data, "M1M1") == 0,
+		"The empty target still spends the cost and draws, without putting a counter on the Wurm")
 
 ## Chaos Warp puts Outpost Siege onto the battlefield: its "Khans or Dragons" choice shows the
 ## Siege (not a blank card) and what each mode does, and picking Dragons lands the Siege.
@@ -1643,3 +2323,75 @@ func guard() -> bool:
 	bears[0].pressed.emit()
 	if not await pass_until(func(): return ui.snapshot.players[1].zones.Battlefield.any(func(card): return card.name == "Grizzly Bears" and int(card.get("counters", {}).get("M1M1", 0)) == 1) or ui.snapshot.players[1].zones.Graveyard.any(func(card): return card.name == "Grizzly Bears"), 100): return check(false, "The fallback's pick reaches Forge")
 	return check(not guard_view.box.visible, "The fallback closes once answered")
+
+
+## Card-shape sweep (tools/shape-sweep.mjs boards): cast the one card in hand and answer every
+## question through the table's own controls, the way a player would (step(): tethers, popups,
+## the rail). Fails if nothing on screen can answer Forge, the stuck guard steps in, or the card
+## never resolves. Which choice is made doesn't matter; that every question is answerable does.
+func shape_probe() -> bool:
+	var hand: Array = zone("Hand")
+	if not check(hand.size() == 1, "A shape board holds one card in hand"): return false
+	var card: Dictionary = hand[0]
+	print("SHAPE card: ", card.name)
+	ui._click_card(int(card.id))
+	var cast := false
+	for index in range(90):
+		if not await wait_ready(): return false
+		var state: Dictionary = ui.snapshot
+		if not ui.decision_guard.last_report.is_empty():
+			return check(false, "SHAPE %s: the stuck guard had to step in (%s). Report: %s" % [card.name, str(state.prompt.get("inputKind", "")), ui.decision_guard.last_report])
+		var in_hand: bool = zone("Hand").any(func(entry): return int(entry.id) == int(card.id))
+		if not in_hand: cast = true
+		var idle: bool = state.asks.is_empty() and state.prompt.get("inputKind", "") == "InputPassPriority"
+		if idle and in_hand and not cast and index > 2:
+			print("SHAPE skipped: ", card.name, " can't be cast on this board")
+			return true
+		if idle and cast and state.stack.is_empty():
+			print("SHAPE resolved: ", card.name)
+			await capture("resolved")
+			return true
+		if idle and not state.stack.is_empty():
+			# Our spell (or a trigger) is waiting to resolve: pass priority like the Resolve button.
+			if ui.incoming_effect.showing(): ui.incoming_effect.resolve_button.pressed.emit()
+			else: ui._intent("ok")
+			continue
+		if ui.snapshot.prompt.get("inputKind", "") == "InputSelectTargets" and ui.interaction_panel.target_tether:
+			# Stage the first legal target (or player) on the tether, then Confirm, as a player would.
+			var legal: Array = state.prompt.get("selectable", [])
+			var players: Array = state.prompt.get("entities", []).filter(func(entity): return entity.get("kind", "") == "player")
+			if ui.interaction_panel.target_staged.is_empty() and int(state.prompt.get("selMin", 1)) > 0:
+				if not legal.is_empty(): ui._click_card(int(legal[0]))
+				elif not players.is_empty(): ui.interaction_panel.callout.mode_buttons[0].pressed.emit()
+				for frame in range(5): await ui.get_tree().process_frame
+			if not ui.interaction_panel.callout.yes_button.disabled:
+				ui.interaction_panel.callout.yes_button.pressed.emit()
+				continue
+		var kind := str(state.prompt.get("inputKind", ""))
+		if kind.begins_with("InputPayMana") and state.asks.is_empty():
+			# Pay like a player: click the floating mana symbols, else tap a land.
+			var pool: Dictionary = state.players[0].get("mana", {})
+			var keys: Array = preload("res://scripts/ui/ManaCounter.gd").KEYS
+			var paid := false
+			for key in pool:
+				if int(pool[key]) > 0 and keys.has(key):
+					ui._use_mana(keys.find(key))
+					paid = true
+					break
+			if not paid:
+				var lands: Array = zone("Battlefield").filter(func(entry): return str(entry.get("typeLine", "")).contains("Land") and not entry.get("tapped", false))
+				if lands.is_empty(): return check(false, "SHAPE %s: nothing left to pay with" % card.name)
+				ui._click_card(int(lands[0].id))
+			continue
+		if kind.begins_with("InputSelect") and state.asks.is_empty() and not ui.modal.visible and not ui.interaction_panel.target_tether and not state.prompt.get("okEnabled", false):
+			# A required pick from the table (a spell's target from the rail): click the first legal card.
+			var chosen: Array = state.prompt.get("chosen", [])
+			var open_picks: Array = state.prompt.get("selectable", []).filter(func(id): return not chosen.has("card:" + str(int(id))) and ui.cards.has(int(id)) and ui.cards[int(id)].is_visible_in_tree())
+			if not open_picks.is_empty():
+				ui._click_card(int(open_picks[0]))
+				continue
+		if not await step():
+			await capture("stuck")
+			return check(false, "SHAPE %s: no control on screen answers %s" % [card.name, JSON.stringify(state.prompt).left(300)])
+	await capture("timeout")
+	return check(false, "SHAPE %s never resolved: %s asks=%s stack=%s" % [card.name, str(ui.snapshot.prompt.get("inputKind", "")), ui.snapshot.asks.map(func(ask): return ask.kind), ui.snapshot.stack.size()])

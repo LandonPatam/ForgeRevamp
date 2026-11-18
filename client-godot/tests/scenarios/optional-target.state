@@ -1,0 +1,13 @@
+# Activate Yawgmoth's draw ability, choose No target and sacrifice Grizzly Bears. You still draw, and Craw Wurm stays unchanged.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Yawgmoth, Thran Physician;Grizzly Bears;Forest
+p0library=Island;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Craw Wurm
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

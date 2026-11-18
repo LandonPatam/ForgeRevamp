@@ -1,0 +1,13 @@
+# Activate Scavenging Ooze, exile the second of two Grizzly Bears in AI 1's graveyard, then tap a Forest to pay. Its targets are off the table, so the card window takes the decision instead of a tether.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest;Scavenging Ooze
+p0library=Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp;Swamp
+p1life=40
+p1graveyard=Grizzly Bears;Grizzly Bears
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

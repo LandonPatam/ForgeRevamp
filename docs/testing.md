@@ -42,6 +42,11 @@ Don't rerun the whole suite after every edit. When one check fails, rerun just t
 
 `ui` with no names runs the whole headless smoke suite, and `visual` with no names runs every rendered check. Leave those to `all`.
 
+The online check also runs a prepared two-human game to verify trigger order,
+private scry and decisions pending at reconnect. To run just those checks, use
+`node bridge/tools/online-decisions-check.mjs`. It accepts a separate bridge
+build directory as its first argument.
+
 ## UI sandbox (try a change by hand)
 
 For UI work, open the real table directly on a prepared board instead of playing a game to reach it:
@@ -56,7 +61,7 @@ node client-godot/tools/sandbox.mjs decisions --shot # screenshot to client-godo
 - It starts a real `BridgeMain` with `--test-state`, clicks through startup (notices, Keep, starting player) and stops on your priority in the board's phase. From there every decision is yours and Forge is the rules authority.
 - Saving a `.gd`/`.tscn`/`.tres`/`.gdshader` relaunches only the window. The engine keeps running, so the new code opens on the same board as you left it. Saving the board file restarts the board. In the terminal: `r` relaunch window, `b` restart board, `q` quit. Closing the window also quits.
 - Boards: `client-godot/tests/sandbox/` holds UI playgrounds (`busy-table`, `decisions`, `wide-combat`, `empty`). Every `tests/scenarios/` board works too. A sandbox board with the same name wins. The first `#` line is the description shown in the list; lines starting with `#` are comments. Copy `empty.state` to make a new one; the launcher strips blank lines (Forge's parser rejects them).
-- Options: `--opponents=1..3`, `--deck=<tests/*.dck>` (commander/library fixture), `--size=WxH`, `--no-watch`.
+- Options: `--opponents=1..3`, `--deck=<tests/*.dck>` (commander/library fixture), `--size=WxH`, `--no-watch`, `--bridge-build=<directory>` (a separate bridge build containing `classes` and `lib`).
 - Logs: `client-godot/artifacts/sandbox-bridge.log` and `sandbox-godot.log`. Script errors and unknown card names are echoed in the terminal.
 - Agents present every UI change through the sandbox (procedure in `AGENTS.md`, "Presenting a UI/table change"): a board that shows it, a `--shot` they looked at first, then the exact command, the steps to reach the change and what to expect. Example: `node client-godot/tools/sandbox.mjs discard`, "tap a Mountain, cast Faithless Looting, then click two hand cards". Sandbox boards have no driver and are not part of `check.mjs`; boards under `tests/scenarios/` do have one.
 

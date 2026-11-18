@@ -39,4 +39,4 @@ A **tether** (the user's word) is a decision shown as a small terminal box joine
 - One-card pick among table cards by an effect: `InputSelectCards/EntitiesFromList`, min = max = 1 (Izzet Boilerworks). Picks among revealed/library cards keep the search window.
 - Targets of a trigger/ability from a permanent: `InputSelectTargets` (Gearhulk, Constrictor, Hammer of Nazahn). Spells cast from hand keep the rail.
 - Scry: bridge `scry` ask (`manipulateCardList`), only the looked-at cards.
-- "You may have target…" triggers (Duelist's Heritage): `InputSelectTargets` with `optionalTrigger`. A yes/no tether comes first (`InteractionPanel.optional_gate`); Yes opens the target tether, No stages any legal target quietly; `Main._run_optional_trigger` answers Forge's later "Use triggered ability?" from that answer, so it never shows.
+- "You may have target…" triggers (Duelist's Heritage) use the normal target tether. If Forge asks whether to apply the effect on resolution, the source card's Yes/No tether shows the chosen target and submits the player's answer to that input.

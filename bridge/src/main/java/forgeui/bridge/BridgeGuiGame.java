@@ -79,6 +79,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
             // Solo against bots: skip the actionable scan in phases passed anyway (forge-patches/
             // phase-scan.patch). Online keeps it, where its result also decides some stops.
             human.setSkipScanOnSkippedPhases(() -> !onlineMatch);
+            human.setConfirmForcedDecisions(true);
             installModeChooser(human);
         }
         super.setOriginalGameController(player, controller);
@@ -88,9 +89,13 @@ final class BridgeGuiGame extends AbstractGuiGame {
             // Invalidate snapshots at the actual input transition, including when
             // a seat goes idle while another human or bot continues the turn.
             human.getInputQueue().addObserver((queue, value) -> listener.stateChanged());
+            game = human.getGame();
             listener.gameInitialized(human.getGame());
         }
     }
+
+    /** The live game, kept after this seat's controller stops taking input (a lost seat still reads it). */
+    volatile forge.game.Game game;
 
     interface Listener {
         void stateChanged();
@@ -111,6 +116,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     final JsonObject prompt = new JsonObject();
     private forge.gamemodes.match.input.Input promptInput;
+    private long promptInputId;
 
     forge.gamemodes.match.input.Input currentInput() {
         return getGameController() instanceof PlayerControllerHuman human
@@ -789,7 +795,9 @@ final class BridgeGuiGame extends AbstractGuiGame {
             metadata.addProperty("modeChoice", true);
             String range = low == high ? String.valueOf(high) : low + " to " + high;
             List<Integer> picked = choose(message, "Choose " + range + " modes", low, high, options(choices, null), null, metadata);
-            if (picked.size() < Math.max(low, 1)) return null;
+            if (picked.size() < low) return null;
+            // An empty answer ends Forge's mode loop. Null falls through to another chooser.
+            if (picked.isEmpty()) return new ArrayList<>();
             for (int i : picked) modeQueue.add((SpellAbilityView) choices.get(i));
             modeQueueActive = true;
             modesLeft = high;
@@ -922,6 +930,21 @@ final class BridgeGuiGame extends AbstractGuiGame {
             result.addAll(rest);
             return result;
         }
+        var ends = chooseLibraryEnds(title, movable, toTop, toBottom);
+        List<CardView> rest = new ArrayList<>(all);
+        rest.removeAll(movable);
+        List<CardView> result = new ArrayList<>(ends.top());
+        result.addAll(rest);
+        result.addAll(ends.bottom());
+        return result;
+    }
+
+    @Override
+    public LibraryEnds chooseLibraryEnds(String title, Iterable<CardView> revealed, boolean toTop, boolean toBottom) {
+        if (!toTop && !toBottom) return null;
+        List<CardView> movable = new ArrayList<>();
+        revealed.forEach(movable::add);
+        if (movable.isEmpty()) return new LibraryEnds(List.of(), List.of());
         JsonObject a = newAsk("scry", title, title);
         a.addProperty("canTop", toTop);
         a.addProperty("canBottom", toBottom);
@@ -949,13 +972,8 @@ final class BridgeGuiGame extends AbstractGuiGame {
                 }
             }
         }
-        for (CardView card : movable) if (!top.contains(card) && !bottom.contains(card)) top.add(card);
-        List<CardView> rest = new ArrayList<>(all);
-        rest.removeAll(movable);
-        List<CardView> result = new ArrayList<>(top);
-        result.addAll(rest);
-        result.addAll(bottom);
-        return result;
+        for (CardView card : movable) if (!top.contains(card) && !bottom.contains(card)) (toTop ? top : bottom).add(card);
+        return new LibraryEnds(top, bottom);
     }
 
     private Map<Object, Integer> distribute(String title, String message, List<?> keys, List<String> labels, int amount, boolean atLeastOne) {
@@ -1279,7 +1297,12 @@ final class BridgeGuiGame extends AbstractGuiGame {
 
     private void setButtons(String label1, String label2, boolean enable1, boolean enable2) {
         synchronized (prompt) {
-            promptInput = currentInput();
+            var input = currentInput();
+            if (promptInput != input) {
+                promptInput = input;
+                if (input != null) prompt.addProperty("inputId", ++promptInputId);
+                else prompt.remove("inputId");
+            }
             prompt.addProperty("okLabel", label1);
             prompt.addProperty("cancelLabel", label2);
             prompt.addProperty("okEnabled", enable1);
