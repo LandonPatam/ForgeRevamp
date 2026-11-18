@@ -591,6 +591,9 @@ func _build_shell() -> void:
 	table_fx.card_view = func(id: int): return cards.get(id)
 	table_fx.portrait_view = func(seat: int): return hud_values[seat].portrait if hud_values.has(seat) else null
 	table_fx.zone_point = _fx_zone_point
+	table_fx.mana_point = func(key: String):
+		var slot: int = ManaCounter.KEYS.find(key)
+		return mana_buttons[slot].get_global_rect().get_center() if slot >= 0 and slot < mana_buttons.size() and mana_buttons[slot].is_visible_in_tree() else Vector2.INF
 	table_fx.stack_point = func(id: int):
 		var entry = stack_box.get("entries").get(id) if stack_box.get("entries") != null else null
 		return entry.get_global_rect().get_center() if is_instance_valid(entry) and entry.is_visible_in_tree() and entry.size.x > 0 else Vector2.INF

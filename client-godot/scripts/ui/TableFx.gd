@@ -6,6 +6,7 @@ extends Control
 ## Each snapshot's new happenings form one beat; beats queue briefly and speed up instead of
 ## falling behind.
 const Terminal = preload("res://scripts/ui/TerminalStyle.gd")
+const Mana = preload("res://scripts/ui/ManaCounter.gd")
 
 ## Duration factor from Table settings: 0 = animations off, 0.6 Fast, 1 Normal, 1.35 Cinematic.
 static var speed := 1.0
@@ -23,6 +24,7 @@ var card_view: Callable      ## id -> CardView on the table, or null
 var portrait_view: Callable  ## seat -> PlayerAvatar, or null
 var zone_point: Callable     ## (seat, zone) -> global point a departing card travels to
 var stack_point: Callable    ## stack item id -> global point of its stack feed entry, or INF
+var mana_point: Callable     ## mana key (W U B R G C) -> global point of your pool button, or INF
 
 var primed := false
 var last_fx_id := 0
@@ -39,6 +41,14 @@ var stack_cache: Dictionary = {}
 ## Live lock-on brackets for what the stack is aiming at: [{kind, id, color}].
 var lock_targets: Array = []
 var player_engine: Dictionary = {}  ## engine player id -> seat
+## The previous snapshot, reduced to what board-life effects compare: card id -> {seat, zone,
+## counters, power, toughness, tapped}, seat -> life, and your mana pool.
+var previous_cards: Dictionary = {}
+var previous_life: Dictionary = {}
+var previous_mana: Dictionary = {}
+## The last labels shown (damage numbers, counters, life), newest last: for checks and reports.
+var shown_labels: Array = []
+var played: Dictionary = {}
 var clock := 0.0
 var rng := RandomNumberGenerator.new()
 
@@ -61,6 +71,9 @@ func reset() -> void:
 	offset_tweens.clear()
 	stack_cache.clear()
 	lock_targets.clear()
+	previous_cards.clear()
+	previous_life.clear()
+	previous_mana.clear()
 	primed = false
 	last_fx_id = 0
 	next_free = 0.0
@@ -121,6 +134,8 @@ func present(snapshot: Dictionary) -> void:
 		player_engine[int(snapshot.players[seat].get("engineId", seat))] = seat
 	var stack: Array = snapshot.get("stack", [])
 	var casts: Array = stack.filter(func(item): return primed and not stack_cache.has(int(item.id)))
+	var changes: Dictionary = _board_changes(snapshot) if primed else {}
+	_remember_board(snapshot)
 	_remember_stack(stack)
 	if not primed:
 		primed = true
@@ -131,9 +146,67 @@ func present(snapshot: Dictionary) -> void:
 		queue_redraw()
 		return
 	_aim_locks(stack)
-	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty():
+	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty() and changes.is_empty():
 		return
-	_play_beat(snapshot, attacks, blocks, fresh, casts)
+	_play_beat(snapshot, attacks, blocks, fresh, casts, changes)
+
+func _board_cards(snapshot: Dictionary) -> Dictionary:
+	var result := {}
+	for seat in range(snapshot.get("players", []).size()):
+		var zones: Dictionary = snapshot.players[seat].get("zones", {})
+		for zone in zones:
+			for card in zones[zone]:
+				result[int(card.id)] = {"seat": seat, "zone": zone, "counters": card.get("counters", {}).duplicate(), "power": card.get("power", null), "toughness": card.get("toughness", null),
+					"tapped": card.get("tapped", false), "token": card.get("token", false), "land": str(card.get("typeLine", "")).contains("Land")}
+	return result
+
+func _remember_board(snapshot: Dictionary) -> void:
+	previous_cards = _board_cards(snapshot)
+	previous_life.clear()
+	for seat in range(snapshot.get("players", []).size()): previous_life[seat] = int(snapshot.players[seat].get("life", 0))
+	previous_mana = snapshot.players[0].get("mana", {}).duplicate() if not snapshot.get("players", []).is_empty() else {}
+
+## What changed on the board since the previous snapshot: permanents that entered (and from
+## where), counter and power/toughness changes, life changes and your mana. Empty when nothing did.
+func _board_changes(snapshot: Dictionary) -> Dictionary:
+	if previous_cards.is_empty() or snapshot.get("players", []).is_empty(): return {}
+	var now := _board_cards(snapshot)
+	var entered: Array = []
+	var counters: Array = []
+	var stats: Array = []
+	var tapped_lands: Array = []
+	for id in now:
+		var card: Dictionary = now[id]
+		if card.zone != "Battlefield": continue
+		var before: Dictionary = previous_cards.get(id, {})
+		if before.is_empty() or before.zone != "Battlefield":
+			entered.append({"id": id, "seat": card.seat, "token": card.token, "land": card.land, "from": before.get("zone", ""), "fromSeat": int(before.get("seat", card.seat))})
+			continue
+		if card.seat == 0 and card.land and card.tapped and not before.tapped: tapped_lands.append(id)
+		var deltas := {}
+		for key in card.counters.keys() + before.counters.keys():
+			var delta := int(card.counters.get(key, 0)) - int(before.counters.get(key, 0))
+			if delta != 0: deltas[key] = delta
+		if not deltas.is_empty():
+			counters.append({"id": id, "deltas": deltas})
+		elif card.power != null and before.power != null and (card.power != before.power or card.toughness != before.toughness):
+			stats.append({"id": id, "power": int(card.power) - int(before.power), "toughness": int(card.toughness) - int(before.toughness)})
+	var life: Array = []
+	for seat in range(snapshot.players.size()):
+		var delta := int(snapshot.players[seat].get("life", 0)) - int(previous_life.get(seat, snapshot.players[seat].get("life", 0)))
+		if delta != 0: life.append({"seat": seat, "delta": delta})
+	var mana := {}
+	var pool: Dictionary = snapshot.players[0].get("mana", {})
+	for key in Mana.KEYS:
+		var delta := int(pool.get(key, 0)) - int(previous_mana.get(key, 0))
+		if delta != 0: mana[key] = delta
+	var result := {}
+	if not entered.is_empty(): result.entered = entered
+	if not counters.is_empty(): result.counters = counters
+	if not stats.is_empty(): result.stats = stats
+	if not life.is_empty(): result.life = life
+	if not mana.is_empty() or not tapped_lands.is_empty(): result.mana = {"pool": mana, "lands": tapped_lands}
+	return result
 
 ## Card color of a stack item from its mana cost: one color, a blend for gold, gray for none.
 static func spell_color(item: Dictionary) -> Color:
@@ -198,10 +271,15 @@ func _release_departures() -> void:
 			ghosts.erase(id)
 	pending_departures.clear()
 
+## Every drawn effect goes through here; `played` counts kinds for checks and reports.
+func _add(item: Dictionary) -> void:
+	items.append(item)
+	played[item.kind] = int(played.get(item.kind, 0)) + 1
+
 func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
-func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Array, casts: Array = []) -> void:
+func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Array, casts: Array = [], changes: Dictionary = {}) -> void:
 	var now := _now()
 	var start := maxf(now, next_free)
 	var pace := speed
@@ -278,7 +356,192 @@ func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Arra
 			_leave(id, leave_at, pace)
 			length = maxf(length, leave_at - at + 0.62 * pace)
 	pending_departures.clear()
+	if not changes.is_empty():
+		length = maxf(length, _board_life(changes, fresh, casts, at, impact_at, pace))
 	next_free = now + at + length * 0.85
+
+## Phase 3: the board coming alive. Returns how long its effects run.
+func _board_life(changes: Dictionary, fresh: Array, casts: Array, at: float, impact_at: float, pace: float) -> float:
+	var length := 0.0
+	# The card whose resolution caused this beat, for tokens and counters it made.
+	# Only when exactly one item resolved and it is not itself entering the table.
+	var cause: Control = null
+	var resolved: Array = fresh.filter(func(event): return event.get("kind", "") == "resolve")
+	var entering: Array = changes.get("entered", []).map(func(entry): return int(entry.id))
+	if resolved.size() == 1:
+		var source := int(stack_cache.get(int(resolved[0].stackId), {}).get("source", -1))
+		if not entering.has(source): cause = view_for(source)
+	var token_index := 0
+	for entry in changes.get("entered", []):
+		var view := view_for(int(entry.id))
+		if view == null: continue
+		if entry.token:
+			var delay := at + minf(0.6, token_index * 0.04) * pace
+			token_index += 1
+			_print_token(view, delay, pace, cause)
+			length = maxf(length, delay - at + 0.5 * pace)
+			continue
+		if int(entry.seat) == 0 and entry.from in ["Hand", "Stack", ""]: continue # Your own plays already travel.
+		var origin := _entry_origin(entry)
+		if not origin.is_finite(): continue
+		if int(entry.seat) != 0 and not entry.land:
+			_showcase(view, origin, at, pace)
+			length = maxf(length, 0.9 * pace)
+		else:
+			_slide_in(view, origin, at, 0.32 * pace)
+			length = maxf(length, 0.36 * pace)
+	var damaged := {}
+	for event in fresh:
+		if event.get("kind", "") == "damage" and event.get("targetKind", "") == "card": damaged[int(event.targetId)] = true
+	for entry in changes.get("counters", []):
+		var view := view_for(int(entry.id))
+		if view == null: continue
+		var parts: Array = []
+		var gained := false
+		for key in entry.deltas:
+			var delta: int = entry.deltas[key]
+			if delta < 0 and str(key).to_upper() in ["LOYALTY", "DEFENSE"] and damaged.has(int(entry.id)): continue # Combat damage already showed it.
+			parts.append(counter_label(str(key), delta))
+			gained = gained or delta > 0
+		if parts.is_empty(): continue
+		var color := TEAL if gained else HIT
+		if cause != null and cause != view: _link(_center(cause), _center(view), impact_at, color, 0.35 * pace)
+		_pulse_ring(_center(view), impact_at, color, 0.3 * pace)
+		_number(", ".join(parts), _center(view) + Vector2(0, view.size.y * 0.25), impact_at, color, 18, pace, true)
+		length = maxf(length, impact_at - at + 0.9 * pace)
+	# Three or more cards changing alike is an anthem or a sweeper: one quiet pulse each, no numbers.
+	var groups := {}
+	for entry in changes.get("stats", []):
+		var key := "%d/%d" % [entry.power, entry.toughness]
+		if not groups.has(key): groups[key] = []
+		groups[key].append(entry)
+	for key in groups:
+		var members: Array = groups[key]
+		for index in range(members.size()):
+			var entry: Dictionary = members[index]
+			var view := view_for(int(entry.id))
+			if view == null: continue
+			var up: bool = entry.power + entry.toughness >= 0
+			var color := POISON if up else HIT
+			if members.size() >= 3:
+				_pulse_ring(_center(view), impact_at + index * 0.03 * pace, color, 0.32 * pace)
+			else:
+				_pulse_ring(_center(view), impact_at, color, 0.3 * pace)
+				_number("%s%d/%s%d" % ["+" if entry.power >= 0 else "-", absi(entry.power), "+" if entry.toughness >= 0 else "-", absi(entry.toughness)], _center(view) + Vector2(view.size.x * 0.22, view.size.y * 0.3), impact_at, color, 20, pace, true)
+		length = maxf(length, impact_at - at + 0.9 * pace)
+	_life_changes(changes.get("life", []), fresh, impact_at, pace)
+	if changes.has("life"): length = maxf(length, impact_at - at + 0.9 * pace)
+	if changes.has("mana") and speed >= 1.0:
+		length = maxf(length, _mana_flow(changes.mana, casts, at, pace))
+	return length
+
+## Where an entering permanent comes from: the stack entry it resolved from, the zone icon it
+## left (graveyard, exile, command zone), or its controller's portrait for a hidden hand.
+func _entry_origin(entry: Dictionary) -> Vector2:
+	for id in stack_cache:
+		if int(stack_cache[id].get("source", -1)) == int(entry.id) and stack_cache[id].has("point"): return stack_cache[id].point
+	if entry.from in ["Graveyard", "Exile", "Command", "Library"] and zone_point.is_valid():
+		var point: Vector2 = zone_point.call(int(entry.fromSeat), str(entry.from))
+		if point.is_finite(): return point
+	var avatar = portrait_view.call(int(entry.seat)) if portrait_view.is_valid() else null
+	return avatar.get_global_rect().get_center() if is_instance_valid(avatar) else Vector2.INF
+
+## Lands and your own returns: the card slides in from where it came along an arc.
+func _slide_in(view: Control, origin: Vector2, delay: float, length: float) -> void:
+	var start := origin - _center(view)
+	view.fx_offset = start
+	var bend := start * 0.5 + Vector2(0, -minf(80.0, start.length() * 0.25))
+	var tween := _offset_tween(view)
+	if delay > 0.0: tween.tween_interval(delay)
+	tween.tween_method(func(t: float): view.fx_offset = _bezier(start, bend, Vector2.ZERO, t), 0.0, 1.0, maxf(length, 0.05)).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+## An opponent's play: it comes out of where it was cast, shows large for a moment so you can
+## read it, then settles into its place.
+func _showcase(view: Control, origin: Vector2, delay: float, pace: float) -> void:
+	view.fx_alpha = 0.0
+	var life := 0.9 * pace
+	_add({"kind": "showcase", "view": view, "from": origin, "start": clock + delay, "life": life})
+	var reveal := view.create_tween()
+	reveal.tween_interval(delay + life)
+	reveal.tween_callback(func(): view.fx_alpha = 1.0)
+	set_process(true)
+
+## A token prints itself in like a terminal: outline first, then its face line by line.
+func _print_token(view: Control, delay: float, pace: float, cause: Control) -> void:
+	view.fx_alpha = 0.0
+	var life := 0.45 * pace
+	_add({"kind": "print", "view": view, "start": clock + delay, "life": life})
+	var reveal := view.create_tween()
+	reveal.tween_interval(delay + life)
+	reveal.tween_callback(func(): view.fx_alpha = 1.0)
+	if cause != null and cause != view:
+		_link(_center(cause), _center(view), delay, TEAL, 0.35 * pace)
+		_pulse_ring(_center(cause), delay, TEAL, 0.3 * pace)
+	set_process(true)
+
+func _link(from: Vector2, to: Vector2, delay: float, color: Color, length: float) -> void:
+	_add({"kind": "bolt", "from": from, "to": to, "bend": (from + to) * 0.5 + Vector2(0, -40), "start": clock + delay, "life": length, "color": color, "fizzle": true})
+	set_process(true)
+
+## Life that changed without damage: gains rise in teal, losses in violet, and a drain draws a
+## line from each player who lost to each who gained.
+func _life_changes(life: Array, fresh: Array, delay: float, pace: float) -> void:
+	var damage := {}
+	for event in fresh:
+		if event.get("kind", "") == "damage" and event.get("targetKind", "") == "player" and not event.get("infect", false):
+			damage[int(event.get("targetSeat", -1))] = int(damage.get(int(event.get("targetSeat", -1)), 0)) + int(event.amount)
+	var gained: Array = []
+	var lost: Array = []
+	for entry in life:
+		var rest: int = entry.delta + int(damage.get(int(entry.seat), 0))
+		if rest == 0: continue
+		var avatar = portrait_view.call(int(entry.seat)) if portrait_view.is_valid() else null
+		if not is_instance_valid(avatar): continue
+		var rect: Rect2 = avatar.get_global_rect()
+		var color := TEAL if rest > 0 else VIOLET
+		_number(("+%d" if rest > 0 else "-%d") % absi(rest), rect.get_center() + Vector2(-rect.size.x * 0.5 - 6, -6), delay, color, 30, pace)
+		_pulse_ring(rect.get_center(), delay, color, 0.3 * pace)
+		(gained if rest > 0 else lost).append(rect.get_center())
+	for from in lost:
+		for to in gained: _link(from, to, maxf(0.0, delay - 0.3 * pace), VIOLET, 0.3 * pace)
+
+## Your mana: a symbol flies from each land you tapped to its pool slot, or straight into the
+## spell you are casting when it was spent at once; spent pool mana flies into that spell.
+func _mana_flow(mana: Dictionary, casts: Array, at: float, pace: float) -> float:
+	var target := Vector2.INF
+	for item in casts:
+		if int(player_engine.get(int(item.get("controller", -1)), -1)) == 0 and stack_point.is_valid():
+			target = stack_point.call(int(item.id))
+	var gains: Dictionary = {}
+	for key in mana.pool:
+		if int(mana.pool[key]) > 0: gains[key] = int(mana.pool[key])
+	var index := 0
+	for id in mana.lands:
+		var land := view_for(int(id))
+		if land == null: continue
+		var key := ""
+		for candidate in gains:
+			if gains[candidate] > 0:
+				key = candidate
+				gains[candidate] -= 1
+				break
+		var goal: Vector2 = mana_point.call(key) if key != "" and mana_point.is_valid() else target
+		if not goal.is_finite(): continue
+		_mana_symbol(_center(land), goal, key, at + index * 0.05 * pace, 0.4 * pace)
+		index += 1
+	if target.is_finite():
+		for key in mana.pool:
+			var spent := -int(mana.pool[key])
+			for count in range(mini(spent, 5)):
+				var from: Vector2 = mana_point.call(key) if mana_point.is_valid() else Vector2.INF
+				if not from.is_finite(): break
+				_mana_symbol(from, target, key, at + index * 0.05 * pace, 0.4 * pace)
+				index += 1
+	return 0.45 * pace + index * 0.05 * pace
+
+func _mana_symbol(from: Vector2, to: Vector2, key: String, delay: float, length: float) -> void:
+	_add({"kind": "mana", "from": from, "to": to, "bend": (from + to) * 0.5 + Vector2(0, -60), "key": key, "start": clock + delay, "life": length})
+	set_process(true)
 
 func _center(view: Control) -> Vector2:
 	return view.get_global_transform() * (view.size * 0.5)
@@ -408,13 +671,13 @@ func _fly(tween: Tween, view: Control, start: Vector2, goal: Vector2, length: fl
 
 ## A spell or ability going onto the stack: a spark from its caster or source into its entry.
 func _cast_spark(origin: Vector2, stack_id: int, delay: float, color: Color, length: float) -> void:
-	items.append({"kind": "spark", "from": origin, "stack": stack_id, "start": clock + delay, "life": length, "color": color})
+	_add({"kind": "spark", "from": origin, "stack": stack_id, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
 
 ## A resolving spell's effect travelling from its stack entry to one target, styled by color.
 func _projectile(origin: Vector2, aim: Vector2, delay: float, color: Color, length: float, fizzle: bool) -> void:
 	var lift := Vector2(0, -minf(160.0, origin.distance_to(aim) * 0.28))
-	items.append({"kind": "bolt", "from": origin, "to": aim, "bend": (origin + aim) * 0.5 + lift, "start": clock + delay, "life": length, "color": color, "fizzle": fizzle})
+	_add({"kind": "bolt", "from": origin, "to": aim, "bend": (origin + aim) * 0.5 + lift, "start": clock + delay, "life": length, "color": color, "fizzle": fizzle})
 	if fizzle:
 		_number("FIZZLE", aim + Vector2(0, -10), delay + length, color, 20, 1.0, true)
 	else:
@@ -423,26 +686,36 @@ func _projectile(origin: Vector2, aim: Vector2, delay: float, color: Color, leng
 
 ## A countered spell: its stack entry is struck through and breaks into glyphs.
 func _shatter(at: Vector2, delay: float, pace: float) -> void:
-	items.append({"kind": "strike", "at": at, "start": clock + delay, "life": 0.5 * maxf(pace, 0.6), "color": HIT})
+	_add({"kind": "strike", "at": at, "start": clock + delay, "life": 0.5 * maxf(pace, 0.6), "color": HIT})
 	get_tree().create_timer(maxf(delay + 0.12 * pace, 0.01)).timeout.connect(func(): _burst(at, Vector2(200, 40), HIT, Vector2(0, 60), 14, pace))
 	_number("COUNTERED", at + Vector2(0, -6), delay, HIT, 20, pace, true)
 
 func _flash(view: Control, delay: float, color: Color, length: float) -> void:
-	items.append({"kind": "flash", "view": view, "start": clock + delay, "life": length, "color": color})
+	_add({"kind": "flash", "view": view, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
 
 func _pulse_ring(at: Vector2, delay: float, color: Color, length: float) -> void:
-	items.append({"kind": "ring", "at": at, "start": clock + delay, "life": length, "color": color})
+	_add({"kind": "ring", "at": at, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
 
+## "+1/+1 ×2", "-1/-1", "LOYALTY +2": Forge's counter names in the words printed on cards.
+static func counter_label(key: String, delta: int) -> String:
+	var printed := {"P1P1": "+1/+1", "M1M1": "-1/-1"}
+	if printed.has(key.to_upper()):
+		var text: String = printed[key.to_upper()] if delta > 0 else "-" + printed[key.to_upper()].trim_prefix("+").trim_prefix("-")
+		return text + (" ×%d" % absi(delta) if absi(delta) > 1 else "")
+	return "%s %s%d" % [key.to_upper(), "+" if delta > 0 else "-", absi(delta)]
+
 func _number(text: String, at: Vector2, delay: float, color: Color, font_size: int, pace: float, plate := false) -> void:
-	items.append({"kind": "number", "text": text, "at": at, "start": clock + delay, "life": 0.95 * maxf(pace, 0.6), "color": color, "size": font_size, "plate": plate})
+	shown_labels.append(text)
+	if shown_labels.size() > 24: shown_labels.pop_front()
+	_add({"kind": "number", "text": text, "at": at, "start": clock + delay, "life": 0.95 * maxf(pace, 0.6), "color": color, "size": font_size, "plate": plate})
 	set_process(true)
 
 func _burst(at: Vector2, area: Vector2, color: Color, drift: Vector2, count: int, pace: float) -> void:
 	for i in range(count):
 		var spot := at + Vector2(rng.randf_range(-0.4, 0.4) * area.x, rng.randf_range(-0.45, 0.45) * area.y)
-		items.append({"kind": "glyph", "at": spot, "drift": drift * rng.randf_range(0.55, 1.0) + Vector2(rng.randf_range(-24, 24), rng.randf_range(-30, 10)),
+		_add({"kind": "glyph", "at": spot, "drift": drift * rng.randf_range(0.55, 1.0) + Vector2(rng.randf_range(-24, 24), rng.randf_range(-30, 10)),
 			"text": GLYPHS[rng.randi_range(0, GLYPHS.length() - 1)], "start": clock + rng.randf() * 0.08, "life": rng.randf_range(0.45, 0.7) * maxf(pace, 0.6), "color": color})
 	set_process(true)
 
@@ -512,6 +785,52 @@ func _draw() -> void:
 					for index in range(4):
 						var spark := head + Vector2(sin(clock * 37.0 + index * 2.1), cos(clock * 29.0 + index * 1.7)) * 9.0
 						draw_circle(to_local * spark, 2.0, Color(1.0, 0.85, 0.4, 0.9))
+			"showcase":
+				var view: Control = item.view
+				if not is_instance_valid(view) or not view.is_inside_tree(): continue
+				var face: Vector2 = view.visual.size
+				var goal := _center(view)
+				var area := get_global_rect()
+				var big := 1.7
+				var hold := goal + (area.get_center() - goal) * 0.35
+				hold.x = clampf(hold.x, area.position.x + face.x * big * 0.5 + 16, area.end.x - face.x * big * 0.5 - 16)
+				hold.y = clampf(hold.y, area.position.y + face.y * big * 0.5 + 16, area.end.y - face.y * big * 0.5 - 16)
+				var spot := hold
+				var k := big
+				if t < 0.22:
+					var u := 1.0 - pow(1.0 - t / 0.22, 3)
+					spot = _bezier(item.from, (item.from + hold) * 0.5 + Vector2(0, -60), hold, u)
+					k = lerpf(0.35, big, u)
+				elif t > 0.62:
+					var u := (t - 0.62) / 0.38
+					u = u * u * (3.0 - 2.0 * u)
+					spot = hold.lerp(goal, u)
+					k = lerpf(big, 1.0, u)
+				draw_texture_rect(view.surface.get_texture(), Rect2(to_local * spot - face * k * 0.5, face * k), false)
+			"print":
+				var view: Control = item.view
+				if not is_instance_valid(view) or not view.is_inside_tree(): continue
+				var face: Vector2 = view.visual.size
+				var corner: Vector2 = to_local * _center(view) - face * 0.5
+				var outline := TEAL
+				outline.a = minf(1.0, t * 4.0) * (1.0 - maxf(0.0, t - 0.8) / 0.2)
+				draw_rect(Rect2(corner, face).grow(-face.x * 0.05), outline, false, 1.5)
+				var shown := clampf((t - 0.15) / 0.85, 0.0, 1.0)
+				var source: Vector2 = Vector2(view.surface.size)
+				if shown > 0.0:
+					draw_texture_rect_region(view.surface.get_texture(), Rect2(corner, Vector2(face.x, face.y * shown)), Rect2(Vector2.ZERO, Vector2(source.x, source.y * shown)))
+					var scan := TEAL
+					scan.a = 0.9 * (1.0 - shown * 0.5)
+					draw_line(corner + Vector2(face.x * 0.05, face.y * shown), corner + Vector2(face.x * 0.95, face.y * shown), scan, 2.0, true)
+			"mana":
+				var u := 1.0 - pow(1.0 - t, 2)
+				var at_point: Vector2 = to_local * _bezier(item.from, item.bend, item.to, u)
+				var slot := Mana.KEYS.find(item.key)
+				var fill: Color = Mana.FILLS[slot] if slot >= 0 else Color("d0c6bb")
+				var fade := 1.0 - maxf(0.0, t - 0.8) / 0.2
+				draw_circle(at_point, 11.0, Color(0.05, 0.07, 0.07, 0.85 * fade))
+				var glyph := String.chr(Mana.GLYPHS[slot]) if slot >= 0 else String.chr(Mana.GLYPHS[5])
+				draw_string(Mana.ICON_FONT, at_point + Vector2(-9, 7), glyph, HORIZONTAL_ALIGNMENT_CENTER, 18, 18, Color(fill, fade))
 			"strike":
 				var cut: Color = item.color
 				cut.a = 1.0 - t

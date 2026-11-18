@@ -430,7 +430,50 @@ func spell_fx() -> bool:
 	if not check(saw_shatter and saw_bolt, "The table shattered the countered entry (%s) and flew the other spell to its target (%s)" % [saw_shatter, saw_bolt]): return false
 	await ui.get_tree().create_timer(1.5).timeout
 	await capture("settled")
-	return check(fx.ghosts.is_empty() and fx.lock_targets.is_empty(), "Every effect and lock ends once the stack is empty")
+	await wait_for(func(): return ui.snapshot.stack.is_empty(), 10.0)
+	await ui.get_tree().create_timer(1.0).timeout
+	return check(fx.ghosts.is_empty() and fx.lock_targets.is_empty(), "Every effect and lock ends once the stack is empty: ghosts=%s locks=%s stack=%s" % [fx.ghosts.keys(), fx.lock_targets, ui.snapshot.stack.size()])
+
+## Board-life animations from Forge's real resolution: an opponent's creature shown large, tokens
+## printing in, a counter and a pump label, a drain line with rolling HP, and your mana symbol.
+func board_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var fx: Control = ui.table_fx
+	if not await wait_for(func(): return ui.snapshot.stack.size() == 5 and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 20.0): return check(false, "AI 1's five spells wait on the stack: " + str(ui.snapshot.stack.size()))
+	fx.present(ui.snapshot) # Animations were switched on after this board's last snapshot.
+	var seen := {}
+	var texts: Array = []
+	if ui.incoming_effect.showing(): ui.incoming_effect.respond()
+	if not await wait_ready() or not await tap("Forest"): return false
+	var captured := {}
+	for index in range(900):
+		await ui.get_tree().process_frame
+		for item in fx.items:
+			if item.kind in ["showcase", "print", "mana", "bolt"] and fx.clock >= item.start: seen[item.kind] = true
+			if item.kind == "number" and fx.clock >= item.start and not texts.has(item.text): texts.append(item.text)
+		for kind in ["mana", "showcase", "print"]:
+			if seen.has(kind) and not captured.has(kind):
+				captured[kind] = true
+				await ui.get_tree().create_timer(0.2).timeout
+				await capture(kind)
+		if ui.snapshot.stack.is_empty() and seen.size() >= 4 and index > 60: break
+		if index % 8 == 0 and ui.snapshot.get("connectionReady", false) and ui.snapshot.asks.is_empty():
+			if ui.incoming_effect.showing(): ui.incoming_effect.resolve_button.pressed.emit()
+			elif ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority" and not ui.snapshot.stack.is_empty(): ui._intent("ok")
+	texts = fx.shown_labels.duplicate()
+	for kind in fx.played: seen[kind] = true
+	print("SCENARIO board fx: seen=", seen.keys(), " labels=", texts)
+	print("SCENARIO giant: ", JSON.stringify(ui.snapshot.players[1].zones.Battlefield.filter(func(card): return card.name == "Hill Giant")).left(600), " graveyard=", ui.snapshot.players[1].zones.Graveyard.map(func(card): return card.name))
+	await capture("labels")
+	if not check(seen.has("mana"), "Tapping your Forest flies a mana symbol"): return false
+	if not check(seen.has("showcase"), "AI 1's Grizzly Bears shows large before it settles"): return false
+	if not check(seen.has("print"), "Raise the Alarm's Soldiers print in"): return false
+	if not check(texts.has("+1/+1") and texts.has("+3/+3"), "The counter and the pump get labels: " + str(texts)): return false
+	if not check(texts.has("+3") and texts.has("-3"), "The drain shows AI 1 gaining 3 and you losing 3: " + str(texts)): return false
+	await ui.get_tree().create_timer(1.5).timeout
+	var hidden: Array = ui.cards.values().filter(func(view): return view.fx_alpha < 1.0)
+	return check(hidden.is_empty() and int(round(ui.hud_values[0].portrait.shown_life)) == int(ui.snapshot.players[0].life), "Every card is fully shown again and the HP digits settled on the real total")
 
 func equipment() -> bool:
 	var host := find_card("Grizzly Bears", "Battlefield")

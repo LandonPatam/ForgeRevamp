@@ -8,6 +8,12 @@ var damage_flash := 0.0
 var portrait: Texture2D
 var terminal_font: SystemFont
 var portrait_only := false
+## The life the digits show: rolls from the old total to the new one when animations are on.
+var shown_life := 0.0:
+	set(value):
+		shown_life = value
+		queue_redraw()
+var life_roll: Tween
 ## Presentation-only jolt when this player is hit (TableFx).
 var shake := Vector2.ZERO:
 	set(value):
@@ -23,6 +29,15 @@ func _ready() -> void:
 func set_player(value: Dictionary, active: bool) -> void:
 	if not player.is_empty() and player.life != value.life:
 		damage_flash = 1.0
+		var fx_speed: float = preload("res://scripts/ui/TableFx.gd").speed
+		if life_roll != null: life_roll.kill()
+		if fx_speed > 0.0 and is_inside_tree():
+			life_roll = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			life_roll.tween_property(self, "shown_life", float(value.life), minf(0.7, 0.25 + 0.04 * absi(int(value.life) - int(player.life))) * fx_speed)
+		else:
+			shown_life = float(value.life)
+	elif player.is_empty():
+		shown_life = float(value.life)
 	player = value.duplicate(true)
 	portrait = preload("res://scripts/ui/Portraits.gd").texture(player)
 	priority = active
@@ -71,7 +86,7 @@ func _draw() -> void:
 		led.a = 0.8 + sin(clock * 2) * 0.15
 		draw_circle(Vector2(121, 12), 4, Color(led, led.a * 0.14))
 	draw_circle(Vector2(121, 12), 2, led)
-	_draw_digits(str(player.life), Rect2(59, 20, 67, 29), ink)
+	_draw_digits(str(int(round(shown_life))), Rect2(59, 20, 67, 29), ink)
 	if has_focus(): draw_rect(Rect2(0, 0, 136, 58), ink, false, 1)
 	draw_set_transform(Vector2.ZERO)
 

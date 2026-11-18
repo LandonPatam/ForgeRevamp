@@ -59,6 +59,13 @@ var fx_offset := Vector2.ZERO:
 	set(value):
 		fx_offset = value
 		_apply_fx_offset()
+## Presentation-only opacity of the drawn card while an effect draws it elsewhere (an
+## opponent's play shown large, a token printing in). Never affects the hit area.
+var fx_alpha := 1.0:
+	set(value):
+		fx_alpha = value
+		for layer in [visual, trait_layer, stats_layer]:
+			if layer != null: layer.modulate.a = value
 ## A hit's shake, added on top of any strike in progress.
 var fx_shake := Vector2.ZERO:
 	set(value):

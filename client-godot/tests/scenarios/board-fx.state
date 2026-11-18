@@ -1,0 +1,14 @@
+# Board-life animations: AI 1's Grizzly Bears, Raise the Alarm, Battlegrowth and Giant Growth on its Hill Giant, and Sovereign's Bite at you wait on the stack. Tap a Forest (a mana symbol flies to your pool), then let each resolve: the Bears shows large and settles, Soldiers print in, the Giant's counter and pump pop, and the drain draws a line from you to AI 1 while both HP displays roll.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Forest;Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Hill Giant|Id:5;Mountain
+p1putonstack=Grizzly Bears;Raise the Alarm;Battlegrowth->5;Giant Growth->5;Sovereign's Bite->human
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

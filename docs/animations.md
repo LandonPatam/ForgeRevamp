@@ -48,15 +48,19 @@ Phase 2 (targeted spells and abilities) is done:
 - **Fizzle:** a thin gray comet ends in FIZZLE. **Countered:** the stack entry is struck through and breaks into glyphs under COUNTERED. Words sit on an opaque plate so they never overlap other text.
 - A card that both strikes and is hit plays both: hits shake through a separate `fx_shake` channel.
 
-Next phases (planned):
+Phase 3 (board life) is done. It works only from snapshot diffs, so the bridge sends nothing new:
 
-1. **Board life:**
-   - Opponents' plays come out of their portrait.
-   - Tokens print themselves in.
-   - Counter badges pop, and power/toughness flashes on a pump.
-   - Life gain rises in teal, and drain draws a line from its source.
-   - Tapping for mana sends a symbol to the pool.
-2. **Polish:**
+- **Opponents' plays:** a nonland permanent flies out of where it came from: its stack entry, its graveyard/exile/command icon, or the caster's portrait. It shows at 1.7× for a moment so you can read it, then settles into its slot. The card's own layers stay hidden (`CardView.fx_alpha`) while the copy is drawn.
+- **Lands, and your own returns** from the graveyard, exile or command zone, slide in along an arc. Your plays from hand keep their existing motion.
+- **Tokens** print in: an outline first, then the face line by line under a teal scanline, staggered 40 ms apart and capped at 0.6 s. When exactly one item resolved (and it isn't itself entering), a line runs from it and it pulses.
+- **Counters** get a plated label in printed wording ("+1/+1", "-1/-1 ×2", "LOYALTY +2"). Gains are teal, losses red. Loyalty already shown as combat damage isn't repeated.
+- **Power/toughness changes** get a "+3/+3" label. When three or more cards change alike (anthems, sweepers), each gets one quiet staggered pulse and no numbers.
+- **Life:** the HP digits roll to the new total. Life that changed without damage gets a teal "+N" or violet "-N". A drain draws a line from each player who lost to each who gained.
+- **Mana**, your seat only, Normal and Cinematic: a mana symbol flies from each land you tap to its pool slot. If the mana was spent at once, it flies into the spell you're casting, and spent pool mana flies there too.
+
+Next phase (planned):
+
+1. **Polish:**
    - Board-wipe sweeps with staggered deaths.
    - A turn banner.
    - Optional sound hooks.
@@ -66,4 +70,5 @@ Next phases (planned):
 
 - `node client-godot/tools/check.mjs scenario combat-fx --render`. In this real-engine block, the bridge must send each hit, and the table must play the strike, the numbers and the Ogre's exit, then settle clean. Captures: `-impact`, `-leaving`, `-settled`.
 - `check.mjs scenario spell-fx --render`: AI 1's Bolt (at your Bears) and Shock (at you); the brackets lock on, Counterspell's target is reported `countered` and shatters, the other spell is reported `resolve` and flies to its target. Captures: `-lock`, `-projectile`, `-settled`.
-- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx` or `spell-fx`.
+- `check.mjs scenario board-fx --render`: AI 1 resolves a creature, tokens, a counter, a pump and a drain while you tap a Forest. Each effect must play: `played` and `shown_labels` on TableFx record them. Captures: `-mana`, `-showcase`, `-print`, `-labels`.
+- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx`, `spell-fx` or `board-fx`.
