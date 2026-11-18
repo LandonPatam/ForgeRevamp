@@ -237,6 +237,12 @@ func run(table: Control) -> void:
 	ui.density_slider.value = 0
 	var exported: Dictionary = await call_api("export", {"deck": ui.draft})
 	if not check(exported.text.contains("[metadata]") and exported.text.contains("[Commander]"), "Native export"): return
+	var listed: Dictionary = await call_api("export", {"deck": ui.draft, "format": "text"})
+	var printed := RegEx.create_from_string("^\\d+ .+ \\([A-Za-z0-9]+\\)( \\S+)?$")
+	var card_lines: Array = Array(str(listed.text).replace("\r", "").split("\n")).filter(func(line): return not line.is_empty() and line[0].is_valid_int())
+	if not check(not card_lines.is_empty() and card_lines.all(func(line): return printed.search(line) != null), "The text export names each entry's printing: " + str(listed.text).left(300)): return
+	var listed_import: Dictionary = await call_api("import", {"text": listed.text})
+	if not check(not listed_import.has("error") and listed_import.warnings.is_empty(), "The printed text export imports back without warnings: " + str(listed_import.get("warnings", listed_import.get("error", "")))): return
 	var native_import: Dictionary = await call_api("import", {"text": saved})
 	if not check(not native_import.has("error") and native_import.count == 3 and native_import.warnings.is_empty(), "Native .dck import preserves the exact deck"): return
 	ui.overlay.hide()

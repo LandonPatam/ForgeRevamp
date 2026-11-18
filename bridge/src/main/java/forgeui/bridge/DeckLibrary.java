@@ -418,13 +418,43 @@ final class DeckLibrary {
     private JsonObject export(JsonObject request) throws Exception {
         Deck deck = fromDraft(request.getAsJsonObject("deck"));
         JsonObject result = new JsonObject();
-        if (string(request, "format", "dck").equals("text")) result.addProperty("text", deck.generateTextExport());
+        if (string(request, "format", "dck").equals("text")) result.addProperty("text", textExport(deck));
         else {
             Path temp = Files.createTempFile("forgeui-export-", ".dck");
             try { DeckSerializer.writeDeck(deck, temp.toFile()); result.addProperty("text", Files.readString(temp)); }
             finally { Files.deleteIfExists(temp); }
         }
         return result;
+    }
+
+    /** Forge's text export, but each line keeps its printing in the MTG Arena form Forge's own
+     *  importer reads back ("1 Sol Ring (C21) 263"); copies of one card in different printings
+     *  stay separate lines. */
+    static String textExport(Deck deck) {
+        final String nl = System.lineSeparator();
+        StringBuilder text = new StringBuilder();
+        String name = deck.getName();
+        if (name != null && !name.isEmpty() && !name.startsWith("[Commander") && !name.contains("Commander")) text.append("Deck: ").append(name).append(nl).append(nl);
+        for (forge.deck.DeckSection section : forge.deck.DeckSection.values()) {
+            forge.deck.CardPool pool = deck.get(section);
+            if (pool == null || pool.isEmpty()) continue;
+            text.append(section).append(": ").append(nl);
+            java.util.TreeMap<String, Integer> lines = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (java.util.Map.Entry<PaperCard, Integer> entry : pool) {
+                PaperCard card = entry.getKey();
+                String line = card.getName();
+                String edition = card.getEdition();
+                if (edition != null && !edition.isEmpty() && !edition.equals(forge.card.CardEdition.UNKNOWN_CODE)) {
+                    line += " (" + edition + ")";
+                    String number = card.getCollectorNumber();
+                    if (number != null && !number.isEmpty() && !number.equals(forge.item.IPaperCard.NO_COLLECTOR_NUMBER)) line += " " + number;
+                }
+                lines.merge(line, entry.getValue(), Integer::sum);
+            }
+            for (var line : lines.entrySet()) text.append(line.getValue()).append(" ").append(line.getKey()).append(nl);
+            text.append(nl);
+        }
+        return text.toString();
     }
 
     private JsonObject image(JsonObject request) throws Exception {
