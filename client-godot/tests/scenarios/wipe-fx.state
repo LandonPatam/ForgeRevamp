@@ -1,0 +1,15 @@
+# Board-wipe sweep and turn banner: AI 1's Wrath of God waits on the stack over five creatures. Press I accept: a red scan line crosses the table from AI 1's side and each creature breaks apart as it passes. Then press Space to pass the turn: a TURN banner slides across the top.
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears;Hill Giant;Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Gray Ogre;Raging Goblin;Plains
+p1putonstack=Wrath of God
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=White Knight
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

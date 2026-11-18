@@ -19,6 +19,12 @@ const VIOLET := Color("b48cff")
 const GLYPHS := "#%&$@*+=/\\|01<>[]{}"
 ## A queued beat never waits longer than this; later beats overlap and run faster instead.
 const MAX_BACKLOG := 0.9
+## Performance caps: past these, cosmetic particles are dropped (numbers and exits never are).
+const MAX_ITEMS := 360
+const MAX_GLYPHS := 220
+## Three or more permanents leaving in one beat read as a sweep across the table.
+const SWEEP_MIN := 3
+const SWEEP_SECONDS := 0.6
 
 var card_view: Callable      ## id -> CardView on the table, or null
 var portrait_view: Callable  ## seat -> PlayerAvatar, or null
@@ -49,6 +55,14 @@ var previous_mana: Dictionary = {}
 ## The last labels shown (damage numbers, counters, life), newest last: for checks and reports.
 var shown_labels: Array = []
 var played: Dictionary = {}
+## Worst cost of this director's own work in microseconds, for performance checks.
+var cost := {"draw": 0, "present": 0}
+## Turn banner: the last turn/active seat shown, so reconnects and snapshots never repeat it.
+var banner_key := ""
+var turn_name: Callable  ## seat -> display name
+var banner_point: Callable  ## -> global top-center point for the turn banner
+var table_rect: Callable  ## -> global rect of the table itself (not the rail)
+var flash_box := StyleBoxFlat.new()
 var clock := 0.0
 var rng := RandomNumberGenerator.new()
 
@@ -74,6 +88,7 @@ func reset() -> void:
 	previous_cards.clear()
 	previous_life.clear()
 	previous_mana.clear()
+	banner_key = ""
 	primed = false
 	last_fx_id = 0
 	next_free = 0.0
@@ -106,6 +121,11 @@ func view_for(id: int) -> Control:
 
 ## Called after each snapshot's layout, so card positions are current.
 func present(snapshot: Dictionary) -> void:
+	var began := Time.get_ticks_usec()
+	_present(snapshot)
+	cost.present = maxi(cost.present, Time.get_ticks_usec() - began)
+
+func _present(snapshot: Dictionary) -> void:
 	var fx: Array = snapshot.get("fx", [])
 	var newest := last_fx_id
 	for event in fx: newest = maxi(newest, int(event.get("id", 0)))
@@ -135,6 +155,9 @@ func present(snapshot: Dictionary) -> void:
 	var stack: Array = snapshot.get("stack", [])
 	var casts: Array = stack.filter(func(item): return primed and not stack_cache.has(int(item.id)))
 	var changes: Dictionary = _board_changes(snapshot) if primed else {}
+	var turn_key := "%s/%s" % [snapshot.get("game", {}).get("turn", ""), snapshot.get("game", {}).get("activePlayer", "")]
+	var new_turn := primed and banner_key != "" and turn_key != banner_key
+	banner_key = turn_key
 	_remember_board(snapshot)
 	_remember_stack(stack)
 	if not primed:
@@ -146,6 +169,7 @@ func present(snapshot: Dictionary) -> void:
 		queue_redraw()
 		return
 	_aim_locks(stack)
+	if new_turn and speed >= 1.0: _turn_banner(snapshot)
 	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty() and changes.is_empty():
 		return
 	_play_beat(snapshot, attacks, blocks, fresh, casts, changes)
@@ -273,6 +297,7 @@ func _release_departures() -> void:
 
 ## Every drawn effect goes through here; `played` counts kinds for checks and reports.
 func _add(item: Dictionary) -> void:
+	if items.size() >= MAX_ITEMS and item.kind in ["glyph", "ring", "spark", "mana"]: return
 	items.append(item)
 	played[item.kind] = int(played.get(item.kind, 0)) + 1
 
@@ -351,8 +376,22 @@ func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Arra
 		if _impact(event, impact_at, pace): hits += 1
 	var leave_at := impact_at + (0.3 * pace if hits > 0 else 0.0)
 	if hits > 0: length = maxf(length, impact_at - at + 0.3 * pace)
-	for id in pending_departures:
-		if ghosts.has(id):
+	var leaving: Array = pending_departures.filter(func(id): return ghosts.has(id) and is_instance_valid(ghosts[id].view))
+	if leaving.size() >= SWEEP_MIN:
+		# A board wipe: a scan line crosses the table from the caster's side and each permanent
+		# breaks apart as it passes, instead of everything vanishing at once.
+		var area: Rect2 = table_rect.call() if table_rect.is_valid() else get_global_rect()
+		var from_x := _sweep_origin(fresh, area)
+		var to_x := area.end.x if from_x < area.get_center().x else area.position.x
+		_add({"kind": "sweep", "from": from_x, "to": to_x, "top": area.position.y, "bottom": area.end.y, "start": clock + leave_at, "life": SWEEP_SECONDS * pace, "color": HIT})
+		set_process(true)
+		for id in leaving:
+			var x := _center(ghosts[id].view).x
+			var reach := clampf(absf(x - from_x) / maxf(1.0, absf(to_x - from_x)), 0.0, 1.0)
+			_leave(id, leave_at + reach * SWEEP_SECONDS * pace, pace)
+		length = maxf(length, leave_at - at + (SWEEP_SECONDS + 0.62) * pace)
+	else:
+		for id in leaving:
 			_leave(id, leave_at, pace)
 			length = maxf(length, leave_at - at + 0.62 * pace)
 	pending_departures.clear()
@@ -434,6 +473,28 @@ func _board_life(changes: Dictionary, fresh: Array, casts: Array, at: float, imp
 	if changes.has("mana") and speed >= 1.0:
 		length = maxf(length, _mana_flow(changes.mana, casts, at, pace))
 	return length
+
+## The sweep starts on the side of whoever resolved the wipe (their portrait), else the left.
+func _sweep_origin(fresh: Array, area: Rect2) -> float:
+	for event in fresh:
+		if event.get("kind", "") != "resolve": continue
+		var seat := int(player_engine.get(int(stack_cache.get(int(event.stackId), {}).get("controller", -1)), -1))
+		var avatar = portrait_view.call(seat) if seat >= 0 and portrait_view.is_valid() else null
+		if is_instance_valid(avatar):
+			return area.position.x if avatar.get_global_rect().get_center().x < area.get_center().x else area.end.x
+	return area.position.x
+
+## A new turn: a terminal strip slides across the top of the table naming whose turn it is, and
+## the active portrait pulses once. It sits above the opponents' fields, never over a decision.
+func _turn_banner(snapshot: Dictionary) -> void:
+	var seat := int(snapshot.get("game", {}).get("activePlayer", -1))
+	var name: String = turn_name.call(seat) if turn_name.is_valid() else ""
+	if name.is_empty() and seat >= 0 and seat < snapshot.get("players", []).size(): name = str(snapshot.players[seat].get("name", ""))
+	var text := "TURN %s  —  %s" % [str(snapshot.get("game", {}).get("turn", "")), ("YOUR TURN" if seat == 0 else name.to_upper())]
+	_add({"kind": "banner", "text": text, "start": clock, "life": 1.5 * speed, "color": VIOLET})
+	var avatar = portrait_view.call(seat) if portrait_view.is_valid() else null
+	if is_instance_valid(avatar): _pulse_ring(avatar.get_global_rect().get_center(), 0.15, VIOLET, 0.45 * speed)
+	set_process(true)
 
 ## Where an entering permanent comes from: the stack entry it resolved from, the zone icon it
 ## left (graveyard, exile, command zone), or its controller's portrait for a hidden hand.
@@ -714,6 +775,8 @@ func _number(text: String, at: Vector2, delay: float, color: Color, font_size: i
 	set_process(true)
 
 func _burst(at: Vector2, area: Vector2, color: Color, drift: Vector2, count: int, pace: float) -> void:
+	var glyphs: int = items.reduce(func(total, item): return total + (1 if item.kind == "glyph" else 0), 0)
+	count = mini(count, maxi(0, MAX_GLYPHS - glyphs))
 	for i in range(count):
 		var spot := at + Vector2(rng.randf_range(-0.4, 0.4) * area.x, rng.randf_range(-0.45, 0.45) * area.y)
 		_add({"kind": "glyph", "at": spot, "drift": drift * rng.randf_range(0.55, 1.0) + Vector2(rng.randf_range(-24, 24), rng.randf_range(-30, 10)),
@@ -727,6 +790,11 @@ func _process(delta: float) -> void:
 	if items.is_empty() and lock_targets.is_empty(): set_process(false)
 
 func _draw() -> void:
+	var began := Time.get_ticks_usec()
+	_draw_effects()
+	cost.draw = maxi(cost.draw, Time.get_ticks_usec() - began)
+
+func _draw_effects() -> void:
 	var to_local := get_global_transform().affine_inverse()
 	var font := Terminal.font()
 	for lock in lock_targets:
@@ -741,11 +809,10 @@ func _draw() -> void:
 				var tint: Color = item.color
 				tint.a = 0.55 * (1.0 - t)
 				draw_set_transform_matrix(to_local * view.get_global_transform() * Transform2D(0, (view.fx_offset + view.fx_shake).rotated(-view.rotation)))
-				var box := StyleBoxFlat.new()
-				box.bg_color = tint
-				box.set_corner_radius_all(int(maxf(4.0, view.size.x * 0.06)))
-				box.anti_aliasing = true
-				draw_style_box(box, Rect2(Vector2.ZERO, view.size))
+				flash_box.bg_color = tint
+				flash_box.set_corner_radius_all(int(maxf(4.0, view.size.x * 0.06)))
+				flash_box.anti_aliasing = true
+				draw_style_box(flash_box, Rect2(Vector2.ZERO, view.size))
 				draw_set_transform_matrix(Transform2D.IDENTITY)
 			"ring":
 				var ring: Color = item.color
@@ -832,6 +899,38 @@ func _draw() -> void:
 				draw_circle(at_point, 11.0, Color(0.05, 0.07, 0.07, 0.85 * fade))
 				var glyph := String.chr(Mana.GLYPHS[slot]) if slot >= 0 else String.chr(Mana.GLYPHS[5])
 				draw_string(Mana.ICON_FONT, at_point + Vector2(-9, 7), glyph, HORIZONTAL_ALIGNMENT_CENTER, 18, 18, Color(fill, fade))
+			"sweep":
+				# Linear, like each permanent's exit timing, so cards break as the line reaches them.
+				var x: float = lerpf(item.from, item.to, t)
+				var top: Vector2 = to_local * Vector2(x, item.top)
+				var bottom: Vector2 = to_local * Vector2(x, item.bottom)
+				var edge: Color = item.color
+				var direction := signf(item.to - item.from)
+				var fade := 1.0 - maxf(0.0, t - 0.85) / 0.15
+				for band in range(8):
+					var trail := edge
+					trail.a = 0.26 * (1.0 - band / 8.0) * fade
+					draw_line(top - Vector2(direction * band * 9.0, 0), bottom - Vector2(direction * band * 9.0, 0), trail, 9.0)
+				edge.a = fade
+				draw_line(top, bottom, edge.lerp(Color.WHITE, 0.5), 4.0, true)
+			"banner":
+				var area := get_global_rect()
+				var size_now := 22
+				var width := font.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now).x + 48.0
+				var slide := 1.0 - pow(1.0 - minf(1.0, t / 0.2), 3)
+				var leave := maxf(0.0, (t - 0.82) / 0.18)
+				leave = leave * leave
+				# Centered on the open strip just below the table divider: clear of the opponents'
+				# panels, the pass notice above the divider, and every decision.
+				var anchor: Vector2 = banner_point.call() if banner_point.is_valid() else Vector2(area.get_center().x, area.position.y + 22.0)
+				var rest := anchor.x - width * 0.5
+				var x: float = lerpf(area.position.x - width, rest, slide) + leave * (area.end.x - rest)
+				var strip := Rect2(to_local * Vector2(x, anchor.y), Vector2(width, 40))
+				var alpha := 1.0 - leave
+				draw_rect(strip, Color(0.04, 0.05, 0.07, 0.92 * alpha))
+				draw_rect(Rect2(strip.position, Vector2(4, strip.size.y)), Color(item.color, alpha))
+				draw_rect(strip, Color(item.color, 0.7 * alpha), false, 1.5)
+				draw_string(font, strip.position + Vector2(24, 28), item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now, Color(item.color.lerp(Color.WHITE, 0.3), alpha))
 			"strike":
 				var cut: Color = item.color
 				cut.a = 1.0 - t

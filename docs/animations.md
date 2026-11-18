@@ -58,17 +58,22 @@ Phase 3 (board life) is done. It works only from snapshot diffs, so the bridge s
 - **Life:** the HP digits roll to the new total. Life that changed without damage gets a teal "+N" or violet "-N". A drain draws a line from each player who lost to each who gained.
 - **Mana**, your seat only, Normal and Cinematic: a mana symbol flies from each land you tap to its pool slot. If the mana was spent at once, it flies into the spell you're casting, and spent pool mana flies there too.
 
-Next phase (planned):
+Phase 4 (polish) is done, without sounds as decided:
 
-1. **Polish:**
-   - Board-wipe sweeps with staggered deaths.
-   - A turn banner.
-   - Optional sound hooks.
-   - A performance pass, then Mac and two-seat online checks.
+- **Board wipes:** when three or more permanents leave in one beat, a red scan line crosses the table (the table area only, not the rail). It starts from the side of the player who resolved the wipe. Each permanent breaks apart as the line reaches it; both move at a steady pace so they stay in step.
+- **Turn banner:** each new turn slides a terminal strip in, "TURN 6 — AI 1" (or YOUR TURN), on the open strip just below the table divider. That spot is clear of the opponents' panels, the pass notice and every decision. The active portrait pulses once. It plays once per turn, never on a reconnect's first snapshot, and is skipped at Fast speed.
+- **Performance:**
+  - The director's own work is timed in `cost` (worst draw and snapshot diff, in µs). On the real-engine effect scenarios it peaks around 1.3 ms of drawing and 0.4 ms of diffing.
+  - Past 360 drawn items, cosmetic particles are dropped (numbers and exits never are), and glyph bursts are capped at 220.
+  - The flash style box is reused.
+  - Once every effect ends, the director stops processing (asserted by `wipe-fx`).
+
+Remaining: the Mac run of the effect scenarios and sandbox boards, then two-seat online checks.
 
 ## Checks
 
 - `node client-godot/tools/check.mjs scenario combat-fx --render`. In this real-engine block, the bridge must send each hit, and the table must play the strike, the numbers and the Ogre's exit, then settle clean. Captures: `-impact`, `-leaving`, `-settled`.
 - `check.mjs scenario spell-fx --render`: AI 1's Bolt (at your Bears) and Shock (at you); the brackets lock on, Counterspell's target is reported `countered` and shatters, the other spell is reported `resolve` and flies to its target. Captures: `-lock`, `-projectile`, `-settled`.
 - `check.mjs scenario board-fx --render`: AI 1 resolves a creature, tokens, a counter, a pump and a drain while you tap a Forest. Each effect must play: `played` and `shown_labels` on TableFx record them. Captures: `-mana`, `-showcase`, `-print`, `-labels`.
-- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx`, `spell-fx` or `board-fx`.
+- `check.mjs scenario wipe-fx --render`: Wrath of God over five creatures plays one sweep with staggered exits. Passing the turn plays the banner exactly once, and the director then goes idle. Captures: `-sweep`, `-banner`.
+- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx`, `spell-fx`, `board-fx` or `wipe-fx`.

@@ -463,7 +463,7 @@ func board_fx() -> bool:
 			elif ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority" and not ui.snapshot.stack.is_empty(): ui._intent("ok")
 	texts = fx.shown_labels.duplicate()
 	for kind in fx.played: seen[kind] = true
-	print("SCENARIO board fx: seen=", seen.keys(), " labels=", texts)
+	print("SCENARIO board fx: seen=", seen.keys(), " labels=", texts, " director draw %.2f ms, snapshot diff %.2f ms" % [fx.cost.draw / 1000.0, fx.cost.present / 1000.0])
 	print("SCENARIO giant: ", JSON.stringify(ui.snapshot.players[1].zones.Battlefield.filter(func(card): return card.name == "Hill Giant")).left(600), " graveyard=", ui.snapshot.players[1].zones.Graveyard.map(func(card): return card.name))
 	await capture("labels")
 	if not check(seen.has("mana"), "Tapping your Forest flies a mana symbol"): return false
@@ -474,6 +474,38 @@ func board_fx() -> bool:
 	await ui.get_tree().create_timer(1.5).timeout
 	var hidden: Array = ui.cards.values().filter(func(view): return view.fx_alpha < 1.0)
 	return check(hidden.is_empty() and int(round(ui.hud_values[0].portrait.shown_life)) == int(ui.snapshot.players[0].life), "Every card is fully shown again and the HP digits settled on the real total")
+
+## Board-wipe sweep and turn banner on a real engine: Wrath of God over five creatures plays one
+## scan line with staggered exits, and passing the turn slides a TURN banner in once.
+func wipe_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var fx: Control = ui.table_fx
+	if not await wait_for(func(): return not ui.snapshot.stack.is_empty() and ui.incoming_effect.showing(), 20.0): return check(false, "Wrath of God waits on you")
+	fx.present(ui.snapshot) # Animations were switched on after this board's last snapshot.
+	ui.incoming_effect.resolve_button.pressed.emit()
+	var captured := false
+	var worst := 0.0
+	for index in range(600):
+		await ui.get_tree().process_frame
+		worst = maxf(worst, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		if not captured and fx.items.any(func(item): return item.kind == "sweep" and fx.clock > item.start + item.life * 0.25):
+			captured = true
+			await capture("sweep")
+		if fx.played.has("sweep") and fx.ghosts.is_empty() and index > 30: break
+	print("SCENARIO wipe fx: worst process frame %.1f ms; director draw %.2f ms, snapshot diff %.2f ms" % [worst, fx.cost.draw / 1000.0, fx.cost.present / 1000.0])
+	if not check(fx.played.has("sweep"), "The wipe plays one sweep across the table: " + str(fx.played)): return false
+	var creatures: Array = []
+	for player in ui.snapshot.players: creatures.append_array(player.zones.Battlefield.filter(func(card): return "Creature" in str(card.get("typeLine", ""))))
+	if not check(creatures.is_empty(), "Every creature died: " + str(creatures.map(func(card): return card.name))): return false
+	var turn := int(ui.snapshot.game.turn)
+	ui._pass_turn()
+	if not await pass_until(func(): return int(ui.snapshot.game.turn) > turn, 300): return check(false, "The turn passes")
+	for index in range(12): await ui.get_tree().process_frame
+	await capture("banner")
+	if not check(int(fx.played.get("banner", 0)) == 1, "A new turn slides the banner in exactly once: " + str(fx.played)): return false
+	await ui.get_tree().create_timer(2.0).timeout
+	return check(fx.items.is_empty() and not fx.is_processing(), "Once every effect ends the director stops running (no idle cost): %d items, processing=%s" % [fx.items.size(), fx.is_processing()])
 
 func equipment() -> bool:
 	var host := find_card("Grizzly Bears", "Battlefield")
