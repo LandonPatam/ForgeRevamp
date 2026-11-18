@@ -33,7 +33,7 @@ var stats_on_face := true
 static func counter_label(code: String) -> String:
 	var pattern := RegEx.new()
 	pattern.compile("^([PM])(\\d+)([PM])(\\d+)$")
-	var found := pattern.search(code)
+	var found := pattern.search(code.to_upper().replace("/", "").replace(" ", ""))
 	if found != null:
 		return ("+" if found.get_string(1) == "P" else "-") + found.get_string(2) + "/" + ("+" if found.get_string(3) == "P" else "-") + found.get_string(4)
 	return code.replace("_", " ").capitalize()

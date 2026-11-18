@@ -698,13 +698,14 @@ func _pulse_ring(at: Vector2, delay: float, color: Color, length: float) -> void
 	_add({"kind": "ring", "at": at, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
 
-## "+1/+1 ×2", "-1/-1", "LOYALTY +2": Forge's counter names in the words printed on cards.
+## A counter change in the words printed on cards, matching the card's own badge: "+1/+1",
+## "+1/+1 ×2", "-1/-1", "Loyalty +2"; a removed counter reads "+1/+1 −1".
 static func counter_label(key: String, delta: int) -> String:
-	var printed := {"P1P1": "+1/+1", "M1M1": "-1/-1"}
-	if printed.has(key.to_upper()):
-		var text: String = printed[key.to_upper()] if delta > 0 else "-" + printed[key.to_upper()].trim_prefix("+").trim_prefix("-")
-		return text + (" ×%d" % absi(delta) if absi(delta) > 1 else "")
-	return "%s %s%d" % [key.to_upper(), "+" if delta > 0 else "-", absi(delta)]
+	var name: String = preload("res://scripts/ui/CardFace.gd").counter_label(key)
+	if name.begins_with("+") or name.begins_with("-"):
+		if delta > 0: return name + (" ×%d" % delta if delta > 1 else "")
+		return "%s −%d" % [name, -delta]
+	return "%s %s%d" % [name, "+" if delta > 0 else "−", absi(delta)]
 
 func _number(text: String, at: Vector2, delay: float, color: Color, font_size: int, pace: float, plate := false) -> void:
 	shown_labels.append(text)

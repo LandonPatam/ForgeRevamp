@@ -2,6 +2,11 @@ extends RefCounted
 
 func run(ui: Control, directory: String = "") -> void:
 	const Option = preload("res://scripts/ui/ManaOption.gd")
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	for key in ["P1P1", "p1p1", "P1/P1"]:
+		assert(Fx.counter_label(key, 1) == "+1/+1", "Counter animations print +1/+1 for " + key + ": " + Fx.counter_label(key, 1))
+	assert(Fx.counter_label("P1P1", 2) == "+1/+1 ×2" and Fx.counter_label("P1P1", -1) == "+1/+1 −1" and Fx.counter_label("M1M1", 1) == "-1/-1")
+	assert(Fx.counter_label("LOYALTY", 2) == "Loyalty +2", Fx.counter_label("LOYALTY", 2))
 	assert(Option.colors_for("Green") == [4] and Option.colors_for("Black") == [2])
 	assert(Option.colors_for("Add {W}, {U}, or {G}.") == [0, 1, 4])
 	assert(Option.colors_for("Destroy target green creature").is_empty(), "Rules text must not become a mana choice")
