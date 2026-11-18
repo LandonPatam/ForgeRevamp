@@ -52,6 +52,13 @@ const READY_GLOW := Color("3fe6d4")
 const PICK_DISCARD := Color("ff3b3b")
 var surface: SubViewport
 var visual: TextureRect
+var visual_base := Vector2.ZERO
+## Presentation-only displacement in table (global) pixels for strikes, recoils and shakes.
+## It moves the drawn card, its traits and stats, never the layout position or hit area.
+var fx_offset := Vector2.ZERO:
+	set(value):
+		fx_offset = value
+		_apply_fx_offset()
 var table_angle := true
 var hand_mode := false
 var base_rotation := 0.0
@@ -288,10 +295,21 @@ func _arrange() -> void:
 	if visual != null:
 		var ratio := size / Vector2(144, 202)
 		if inspection: ratio = Vector2.ONE * minf(ratio.x, ratio.y)
-		visual.position = (size - Vector2(144, 202) * ratio) * 0.5 - Vector2(8, 8) * ratio
+		visual_base = (size - Vector2(144, 202) * ratio) * 0.5 - Vector2(8, 8) * ratio
 		visual.size = Vector2(160, 218) * ratio
+		_apply_fx_offset()
 		visual.material.set_shader_parameter("surface_size", visual.size)
 		visual.material.set_shader_parameter("tilt", 0.0)
+
+func _apply_fx_offset() -> void:
+	if visual == null: return
+	var local := Vector2.ZERO
+	if fx_offset != Vector2.ZERO:
+		var factor := scale.x if absf(scale.x) > 0.01 else 1.0
+		local = fx_offset.rotated(-rotation) / factor
+	visual.position = visual_base + local
+	trait_layer.position = local
+	stats_layer.position = local
 
 func set_selected(value: bool) -> void:
 	if selected == value:

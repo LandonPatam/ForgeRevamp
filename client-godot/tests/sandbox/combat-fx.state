@@ -1,0 +1,15 @@
+# Combat animations: attack with everything (Bot 1 blocks some), then pass the turn and let the bots swing back. Bolt, Swords and Unsummon show burn, exile and bounce.
+activeplayer=p0
+activephase=MAIN1
+turn=6
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears;Craw Wurm;Elvish Warrior;Kalonian Tusker;Typhoid Rats;Mountain;Mountain;Plains;Island;Island
+p0hand=Lightning Bolt;Swords to Plowshares;Unsummon
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Hill Giant;Llanowar Elves;Wall of Wood;Serra Angel;Forest;Forest
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2battlefield=Gray Ogre;Raging Goblin;White Knight;Mountain
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains

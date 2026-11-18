@@ -113,6 +113,8 @@ final class BridgeGuiGame extends AbstractGuiGame {
     private volatile forge.game.spellability.SpellAbility revealedEffect;
     private volatile JsonArray effectReveal = new JsonArray();
     final TargetedEffectHistory targetedEffects = new TargetedEffectHistory();
+    /** Damage and other public happenings the client animates. */
+    final TableFx tableFx = new TableFx();
 
     final JsonObject prompt = new JsonObject();
     private forge.gamemodes.match.input.Input promptInput;
@@ -1386,6 +1388,7 @@ final class BridgeGuiGame extends AbstractGuiGame {
     @Override public void setPlayerAvatar(LobbyPlayer player, IHasIcon ihi) { }
 
     void trackDrawEvent(GameEvent event) {
+        tableFx.record(event, game);
         CardView candidate = takebackCast;
         if (candidate != null) {
             boolean ownCast = event instanceof forge.game.event.GameEventSpellAbilityCast cast

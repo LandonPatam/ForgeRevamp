@@ -8,6 +8,11 @@ var damage_flash := 0.0
 var portrait: Texture2D
 var terminal_font: SystemFont
 var portrait_only := false
+## Presentation-only jolt when this player is hit (TableFx).
+var shake := Vector2.ZERO:
+	set(value):
+		shake = value
+		queue_redraw()
 
 func _ready() -> void:
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -36,7 +41,7 @@ func _draw() -> void:
 		return
 	if portrait_only:
 		var side := maxf(1, minf(size.x, size.y) - 8)
-		var face := Rect2((size - Vector2.ONE * side) * 0.5, Vector2.ONE * side)
+		var face := Rect2((size - Vector2.ONE * side) * 0.5 + shake, Vector2.ONE * side)
 		draw_style_box(P.box(Color("11191b"), Color("538c91"), 3, 0), face.grow(2))
 		if portrait != null:
 			draw_texture_rect(portrait, face, false)
@@ -44,7 +49,7 @@ func _draw() -> void:
 			draw_string(terminal_font, face.position + Vector2(0, side * 0.5 + 11), player.get("initials", "P"), HORIZONTAL_ALIGNMENT_CENTER, side, 30, Color("a6dfdf"))
 		return
 	var factor := minf(size.x / 136.0, size.y / 62.0)
-	var origin := (size - Vector2(136, 62) * factor) * 0.5
+	var origin := (size - Vector2(136, 62) * factor) * 0.5 + shake
 	draw_set_transform(origin, 0, Vector2.ONE * factor)
 	var ink := Color("65e0d5").lerp(Color("ff765e"), damage_flash)
 	var edge := Color("a78bd4") if priority else Color("697474")

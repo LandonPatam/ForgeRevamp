@@ -40,7 +40,7 @@ func prepared() -> bool:
 	while Time.get_ticks_msec() < deadline:
 		if not await wait_ready(): return false
 		var state: Dictionary = ui.snapshot
-		if scenario in ["blocking", "combat-reasons", "maze", "no-legal-blocks"] and state.prompt.get("inputKind", "") == "InputBlock": return true
+		if scenario in ["blocking", "combat-reasons", "maze", "no-legal-blocks", "combat-fx"] and state.prompt.get("inputKind", "") == "InputBlock": return true
 		# A board whose stack resolves straight into your choice (Manifold Insights) is ready at that choice;
 		# the scenario driver answers it.
 		if int(state.game.turn) >= 5 and str(state.prompt.get("inputKind", "")).begins_with("InputSelect") and state.asks.is_empty() and not (ui.modal.visible and is_instance_valid(ui.modal_panel) and ui.modal_panel.get_script() != null and ui.modal_panel.get_script().resource_path.ends_with("CoinTossPanel.gd")): return true
@@ -49,7 +49,7 @@ func prepared() -> bool:
 			ui.coin_toss_seen[int(ui.modal_panel.toss_id)] = true
 			ui._close_modal()
 			ui._present_card_selection() # A choice already waiting behind the coin (Manifold Insights) opens now.
-		if scenario not in ["blocking", "combat-reasons", "maze", "no-legal-blocks"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
+		if scenario not in ["blocking", "combat-reasons", "maze", "no-legal-blocks", "combat-fx"] and int(state.game.turn) >= 5 and state.prompt.get("inputKind", "") == "InputPassPriority":
 			if scenario in ["proliferate", "tokens", "reanimate", "combat"]:
 				if state.game.activePlayer == 0 and state.game.phase == "Main 1": return true
 			else: return true
@@ -343,6 +343,48 @@ func blocking() -> bool:
 	ui._primary_action()
 	if not await wait_ready(): return false
 	return check(ui.snapshot.prompt.get("inputKind", "") != "InputBlock", "A single final OK commits all block assignments")
+
+## Combat animations from Forge's real damage events: blocking Gray Ogre with Hill Giant must
+## send each hit (who, whom, how much) and play the strike, the impacts and the Ogre's exit.
+func combat_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var giant := find_card("Hill Giant", "Battlefield")
+	var ogre_cards: Array = ui.snapshot.players[1].zones.Battlefield.filter(func(card): return card.name == "Gray Ogre")
+	var ogre_entry: Array = ui.snapshot.combat.filter(func(entry): return not ogre_cards.is_empty() and int(ogre_cards[0].id) == int(entry.attacker))
+	if not check(ogre_entry.size() == 1, "Gray Ogre attacks: " + JSON.stringify(ui.snapshot.combat)): return false
+	var jace := find_card("Jace Beleren", "Battlefield")
+	var ogre := int(ogre_entry[0].attacker)
+	ui._click_card(ogre)
+	if not await wait_ready(): return false
+	ui._click_card(giant.id)
+	if not await wait_ready(): return false
+	ui._primary_action()
+	var fx: Control = ui.table_fx
+	var saw_ghost := false
+	var saw_hit := false
+	var saw_strike := false
+	for index in range(400):
+		await ui.get_tree().process_frame
+		if fx.ghosts.has(ogre): saw_ghost = true
+		if fx.items.any(func(item): return item.kind == "number"): saw_hit = true
+		if is_instance_valid(ui.cards.get(giant.id)) and ui.cards[giant.id].fx_offset.length() > 20.0: saw_strike = true
+		if saw_hit and saw_ghost and not saw_strike: continue
+		if saw_hit and saw_ghost and saw_strike: break
+		if index % 6 == 0 and ui.snapshot.get("connectionReady", false) and ui.snapshot.asks.is_empty() and ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority": ui._intent("ok")
+	await ui.get_tree().create_timer(0.08).timeout
+	await capture("impact")
+	await ui.get_tree().create_timer(0.3).timeout
+	await capture("leaving")
+	var hits: Array = ui.snapshot.get("fx", []).filter(func(event): return event.get("kind", "") == "damage")
+	print("SCENARIO fx: ", JSON.stringify(hits))
+	if not check(hits.any(func(event): return int(event.sourceId) == int(giant.id) and int(event.targetId) == ogre and int(event.amount) == 3 and event.combat), "Hill Giant's 3 combat damage to the Ogre is an fx event"): return false
+	if not check(hits.any(func(event): return int(event.sourceId) == ogre and int(event.targetId) == int(giant.id) and int(event.amount) == 2 and event.combat), "The Ogre's 2 damage to the Giant is an fx event"): return false
+	if not check(hits.any(func(event): return int(event.targetId) == int(jace.id) and int(event.amount) == 1 and event.combat), "Raging Goblin's 1 damage to Jace is an fx event"): return false
+	if not check(saw_strike and saw_hit and saw_ghost, "The table played the strike (%s), the damage numbers (%s) and the Ogre's exit (%s)" % [saw_strike, saw_hit, saw_ghost]): return false
+	await ui.get_tree().create_timer(1.5).timeout
+	await capture("settled")
+	return check(fx.ghosts.is_empty() and not ui.cards.has(ogre) and ui.cards[giant.id].fx_offset == Vector2.ZERO, "Every effect ends on the settled board")
 
 func equipment() -> bool:
 	var host := find_card("Grizzly Bears", "Battlefield")

@@ -14,7 +14,7 @@ func run(ui: Control, directory: String = "") -> void:
 	ui._apply_state(fixture)
 	await ui.get_tree().process_frame
 	ui._update_lines()
-	assert(ui.targeting_overlay.lines.any(func(line): return line.size() == 3 and line[2] == Color("80d9ff")), "Authoritative blockers must have visible assignment arrows")
+	assert(ui.targeting_overlay.lines.any(func(line): return line.size() >= 3 and line[2] == Color("80d9ff")), "Authoritative blockers must have visible assignment arrows")
 	var view: Control = ui.cards[creature.id]
 	assert(view.face.data.sick and view.face.data.damage == 2 and view.face.data.counters["+1/+1"] == 2)
 	var stack_button: Button = ui.stack_box.get_child(0)

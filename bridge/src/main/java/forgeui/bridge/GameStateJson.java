@@ -109,6 +109,7 @@ final class GameStateJson {
         CardView takeback = gui.takebackCard();
         if (takeback != null) root.add("takebackCast", card(takeback));
         root.add("targetedEffects", gui.targetedEffects.snapshot());
+        root.add("fx", gui.tableFx.snapshot());
         int autoPassStackId = -1;
         if (gui.getGameController() instanceof PlayerControllerHuman human) {
             var top = human.getGame().getStack().peek();

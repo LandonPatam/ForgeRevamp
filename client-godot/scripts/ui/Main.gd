@@ -30,6 +30,7 @@ const Library = preload("res://scripts/ui/LibraryPile.gd")
 const Avatar = preload("res://scripts/ui/PlayerAvatar.gd")
 const Backdrop = preload("res://scripts/ui/TableBackdrop.gd")
 const Targets = preload("res://scripts/ui/TargetOverlay.gd")
+const Fx = preload("res://scripts/ui/TableFx.gd")
 const Prompt = preload("res://scripts/ui/PromptPanel.gd")
 const Opening = preload("res://scripts/ui/OpeningHand.gd")
 const StackAttention = preload("res://scripts/ui/StackAttention.gd")
@@ -151,7 +152,7 @@ const CARD_BACKS := [
 	{"name": "Gold crest", "region": Rect2(720, 1500, 360, 500)},
 	{"name": "Spiral", "region": Rect2(0, 1500, 360, 500)},
 ]
-var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0, "mana_overlay": 0.0, "playable_glow": 1.0}
+var ui_layout := {"hand_x": 0.0, "hand_show": 0.0, "library_x": 0.0, "library_show": 0.78, "hand_spread": 1.0, "hand_count": 8.0, "hand_angle": 10.0, "pile_spread": 26.0, "pile_tap": 0.0, "hud_x": 0.0, "hud_y": 0.0, "stack_mode": 1.0, "notify_volume": 0.6, "card_back": 0.0, "notify_sound": 0.0, "mana_overlay": 0.0, "playable_glow": 1.0, "animations": 2.0}
 var play_positions: Dictionary = {}
 var pending_returns: Dictionary = {}
 var rail: VBoxContainer
@@ -213,6 +214,8 @@ var inspection_card: Control
 var inspection_traits: VBoxContainer
 var inspection_traits_panel: Panel
 var targeting_overlay: Control
+## Combat strikes, impacts and departures drawn over the table (presentation only).
+var table_fx: Control
 var modal: Control
 var zone_panel: PanelContainer
 var zone_title: Label
@@ -254,6 +257,8 @@ func _ready() -> void:
 			adapter = Live.new()
 			adapter.url = arg.trim_prefix("--live=")
 	verification_mode = Array(OS.get_cmdline_user_args()).any(func(arg): return arg in ["--smoke", "--live-check", "--app-check", "--hand-hover-check", "--layout-loop-check"] or arg.begins_with("--visual-checks=") or arg.begins_with("--capture="))
+	# Checks see the settled table; animation checks turn effects on themselves.
+	if verification_mode: Fx.speed = 0.0
 	_load_table_settings()
 	theme = P.make_theme()
 	table_backdrop = Backdrop.new()
@@ -580,6 +585,13 @@ func _build_shell() -> void:
 	targeting_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	targeting_overlay.z_index = 60
 	add_child(targeting_overlay)
+	table_fx = Fx.new()
+	table_fx.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	table_fx.z_index = 55
+	table_fx.card_view = func(id: int): return cards.get(id)
+	table_fx.portrait_view = func(seat: int): return hud_values[seat].portrait if hud_values.has(seat) else null
+	table_fx.zone_point = _fx_zone_point
+	add_child(table_fx)
 	raised_card = Card.new()
 	raised_card.inspection = true
 	raised_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -752,6 +764,7 @@ func _read_ui_layout(config: ConfigFile) -> void:
 	ui_layout.stack_mode = float(clampi(int(config.get_value("ui", "stack_mode", legacy_mode)), 0, STACK_MODES.size() - 1))
 	ui_layout.mana_overlay = 1.0 if float(config.get_value("ui", "mana_overlay", 0.0)) >= 0.5 else 0.0
 	ui_layout.playable_glow = 1.0 if float(config.get_value("ui", "playable_glow", 1.0)) >= 0.5 else 0.0
+	ui_layout.animations = float(clampi(int(config.get_value("ui", "animations", 2)), 0, Fx.SPEEDS.size() - 1))
 	_apply_table_style()
 
 ## Pushes pile and card-back preferences to the shared layout and library views.
@@ -761,6 +774,7 @@ func _apply_table_style() -> void:
 	var overlays_changed: bool = Card.mana_overlay != (float(ui_layout.mana_overlay) >= 0.5) or Card.playable_glow != (float(ui_layout.playable_glow) >= 0.5)
 	Card.mana_overlay = float(ui_layout.mana_overlay) >= 0.5
 	Card.playable_glow = float(ui_layout.playable_glow) >= 0.5
+	Fx.speed = 0.0 if verification_mode else Fx.SPEEDS[clampi(int(ui_layout.animations), 0, Fx.SPEEDS.size() - 1)]
 	if overlays_changed:
 		for view in cards.values() + zone_views.values() + hand_copies.values():
 			if is_instance_valid(view): view._redraw_layers()
@@ -1032,6 +1046,7 @@ func _apply_state(value: Dictionary) -> void:
 	if targeting and (not _can_attack() or (live and (not snapshot.get("connectionReady", false) or snapshot.prompt.get("inputKind", "") != "InputAttack" or not snapshot.asks.is_empty()))):
 		targeting = false
 	_layout_board()
+	table_fx.present(snapshot)
 	_update_actions()
 	if inspection_card.data.is_empty() and snapshot.players[0].zones.Battlefield.size() > 1:
 		_inspect(snapshot.players[0].zones.Battlefield[1])
@@ -1432,10 +1447,34 @@ func _layout_board() -> void:
 			local_pile_members.erase(id)
 			if snapshot.stack.any(func(item): return item.sourceId == id):
 				_animate_to_stack(retiring)
+			elif retiring.data.get("zone", "") == "Battlefield":
+				var destination := _card_destination(id, int(retiring.data.get("owner", -1)), retiring.data.get("token", false))
+				if not table_fx.depart(retiring, destination[1], destination[0]):
+					retiring.queue_free()
 			else:
 				retiring.queue_free()
 	_update_lines()
 	_layout_inspection()
+
+## Where a card that left the battlefield went: [seat, zone]. A token that is gone ceased to
+## exist ([owner, ""]); any other card not in a visible zone went to a hidden one, shown as its
+## owner's hand.
+func _card_destination(id: int, owner: int, token: bool) -> Array:
+	for p in snapshot.players:
+		for zone in p.zones:
+			if p.zones[zone].any(func(card): return int(card.id) == id): return [int(p.id), zone]
+	return [owner, "" if token else "Hand"]
+
+## The global point a departing card travels to: its zone icon, the local hand or library,
+## or an opponent's portrait for their hidden zones.
+func _fx_zone_point(seat: int, zone: String) -> Vector2:
+	if not hud_values.has(seat): return Vector2.INF
+	var zones: Dictionary = hud_values[seat].zones
+	if zones.has(zone) and zones[zone].is_visible_in_tree(): return zones[zone].get_global_rect().get_center()
+	if seat == 0 and zone == "Hand": return board_scroller.get_global_rect().get_center() * Vector2(1, 0) + Vector2(0, board_scroller.get_global_rect().end.y)
+	if seat == 0 and zone == "Library" and library_pile.is_visible_in_tree(): return library_pile.get_global_rect().get_center()
+	if zone in ["Hand", "Library"]: return hud_values[seat].portrait.get_global_rect().get_center()
+	return Vector2.INF
 
 func _ordered_hand() -> Array:
 	if snapshot.is_empty():
@@ -2467,9 +2506,9 @@ func _update_lines() -> void:
 			if cards.has(int(blocker_id)) and cards.has(int(combat.attacker)):
 				var blocker: Control = cards[int(blocker_id)]
 				var attacker: Control = cards[int(combat.attacker)]
-				lines.append([attacker.get_global_transform() * (attacker.size * 0.5), blocker.get_global_transform() * (blocker.size * 0.5), Color("80d9ff")])
+				lines.append([attacker.get_global_transform() * (attacker.size * 0.5), blocker.get_global_transform() * (blocker.size * 0.5), Color("80d9ff"), "block%d>%d" % [int(blocker_id), int(combat.attacker)]])
 		if combat.get("blockers", []).is_empty() and (not combat.get("blocked", false) or combat.get("trample", false)) and cards.has(combat.attacker) and hud.has(combat.defenderId) and not (targeting and selected.get("id", -1) == combat.attacker):
-			lines.append([(cards[combat.attacker].get_global_transform() * (cards[combat.attacker].size * 0.5)), hud_values[combat.defenderId].portrait.get_global_rect().get_center()])
+			lines.append([(cards[combat.attacker].get_global_transform() * (cards[combat.attacker].size * 0.5)), hud_values[combat.defenderId].portrait.get_global_rect().get_center(), Color("d9b477"), "attack%d" % int(combat.attacker)])
 	targeting_overlay.lines = lines
 
 func _cancel_attack_target() -> void:
@@ -2631,6 +2670,7 @@ func _clear_live_session() -> void:
 	interaction_panel.present({}, true)
 	_close_zone_browser()
 	incoming_effect.reset()
+	table_fx.reset()
 	library_draw_pending = false
 	library_ghost.hide()
 	stack_attention.present({})
@@ -2681,6 +2721,7 @@ func _reset() -> void:
 	_close_zone_browser()
 	_cancel_library_draw_preview()
 	incoming_effect.reset()
+	table_fx.reset()
 	for view in cards.values():
 		view.drop_pointer = Vector2.INF
 	manual_positions.clear()
@@ -3708,6 +3749,29 @@ func _show_table_settings() -> void:
 	column.add_child(stack_box)
 	column.move_child(stack_box, position_in_column)
 	position_in_column += 1
+	var motion_box := VBoxContainer.new()
+	motion_box.add_child(_label("Animations", 14))
+	var motion_row := HBoxContainer.new()
+	motion_row.add_theme_constant_override("separation", 6)
+	var motion_buttons: Array = []
+	for index in range(Fx.SPEED_NAMES.size()):
+		var option := _button(Fx.SPEED_NAMES[index], func(): pass, "Combat strikes, damage numbers and cards leaving the table. Off also suits reduced motion.")
+		option.name = "Animations" + str(index)
+		P.style_popup_button(option)
+		motion_row.add_child(option)
+		motion_buttons.append(option)
+	motion_box.add_child(motion_row)
+	var mark_motion := func():
+		for index in range(motion_buttons.size()):
+			motion_buttons[index].modulate = Color.WHITE if index == int(ui_layout.animations) else Color(1, 1, 1, 0.5)
+	for index in range(motion_buttons.size()):
+		motion_buttons[index].pressed.connect(func():
+			_set_ui_layout("animations", float(index))
+			mark_motion.call())
+	mark_motion.call()
+	column.add_child(motion_box)
+	column.move_child(motion_box, position_in_column)
+	position_in_column += 1
 	var reset := _button("Reset to default", func():
 		for index in range(sliders.size()):
 			sliders[index].value = UI_LAYOUT_SETTINGS[index].default
@@ -3716,8 +3780,10 @@ func _show_table_settings() -> void:
 		_set_ui_layout("stack_mode", 1.0)
 		_set_ui_layout("mana_overlay", 0.0)
 		_set_ui_layout("playable_glow", 1.0)
+		_set_ui_layout("animations", 2.0)
 		mark_toggles.call()
 		mark_stack.call()
+		mark_motion.call()
 		mark_sound.call()
 		mark_back.call())
 	P.style_popup_button(reset)

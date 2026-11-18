@@ -223,7 +223,7 @@ func _ui_state() -> Dictionary:
 		"staged": main.target_staged, "targetCommitting": main.target_committing,
 		"handPick": main.hand_pick_panel.visible, "handPickCommitting": main.hand_pick_committing, "boardChoice": main.board_choice.visible,
 		"incomingEffect": main.incoming_effect.showing(), "openingHand": main.opening_hand.visible, "targetingAttack": main.targeting,
-		"deferredActivation": main.deferred_activation, "optionalDecisions": main.optional_decisions,
+		"deferredActivation": main.deferred_activation,
 		"primary": {"text": main.primary.text, "enabled": not main.primary.disabled, "visible": main.primary.is_visible_in_tree()},
 		"adapterPending": str(main.adapter.get("pending")), "adapterSyncing": main.adapter.get("syncing")}
 

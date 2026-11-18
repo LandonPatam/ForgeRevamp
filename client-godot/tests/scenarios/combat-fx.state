@@ -1,0 +1,13 @@
+# Combat animations on a real engine: Bot 1's Gray Ogre and Raging Goblin attack your Jace. Block the Ogre with Hill Giant and press OK: the Giant strikes, the Ogre breaks apart into Bot 1's graveyard and the Goblin hits Jace.
+activeplayer=p1
+activephase=COMBAT_DECLARE_BLOCKERS
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Hill Giant;Jace Beleren|Id:99|Counters:LOYALTY=5;Forest;Forest
+p0library=Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest;Forest
+p1life=40
+p1battlefield=Gray Ogre|Attacking:99;Raging Goblin|Attacking:99
+p1library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
