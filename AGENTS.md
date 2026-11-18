@@ -133,7 +133,7 @@ Paths below are relative to `client-godot/scripts/` unless stated otherwise.
   2. Fix the bug.
   3. Run only the checks for what you touched, via `node client-godot/tools/check.mjs ui <Name>` / `scenario <name>` / `bridge` / `online`. The runner is quiet; full logs are in `client-godot/artifacts/check-logs/`.
   4. Inspect captures only for visual changes (`visual <Name>`).
-  5. Run `check.mjs all` once before a push, not after every edit. Java checks are unnecessary for frontend-only changes.
+  5. Only run a check if it can give real insight into the changes made. Run `check.mjs all` before a push only when the change touches shared paths that most scenarios use: the bridge decision/protocol, the adapter, or prompt/interaction presentation. Skip it for isolated work such as animations or a single presentation. Java checks are unnecessary for frontend-only changes.
 - UI sandbox: `node client-godot/tools/sandbox.mjs <board>` opens the real table on a prepared board (`tests/sandbox/` playgrounds or any `tests/scenarios/` board) past startup, and relaunches the window on the same live board when sources change; `--mock` for the mock table, `--shot` for a screenshot. Details in `docs/testing.md`.
 - Presenting a UI/table change to the user always goes through the sandbox, so they never have to play a game to reach it:
   1. Pick a board that shows the change at once (`sandbox.mjs` with no arguments lists them). If none does, add one: a playground under `tests/sandbox/`, or, when the change also needs an automated real-engine check, `tests/scenarios/<name>.state` plus its driver (the sandbox opens those too). Start the file with a `#` line saying what to do on it.
