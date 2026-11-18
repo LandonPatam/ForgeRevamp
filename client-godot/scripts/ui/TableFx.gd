@@ -22,6 +22,7 @@ const MAX_BACKLOG := 0.9
 var card_view: Callable      ## id -> CardView on the table, or null
 var portrait_view: Callable  ## seat -> PlayerAvatar, or null
 var zone_point: Callable     ## (seat, zone) -> global point a departing card travels to
+var stack_point: Callable    ## stack item id -> global point of its stack feed entry, or INF
 
 var primed := false
 var last_fx_id := 0
@@ -32,6 +33,12 @@ var pending_departures: Array = []   ## ghost ids that joined since the last bea
 var offset_tweens: Dictionary = {}   ## view instance id -> Tween driving its fx_offset
 var items: Array = []                ## transient drawn effects: numbers, flashes, rings, glyphs
 var next_free := 0.0
+## Stack items as last seen: id -> {targets: [{kind, id}], color, point, controller, source,
+## seen}. Resolve and counter events arrive after an item left the snapshot, so they use this.
+var stack_cache: Dictionary = {}
+## Live lock-on brackets for what the stack is aiming at: [{kind, id, color}].
+var lock_targets: Array = []
+var player_engine: Dictionary = {}  ## engine player id -> seat
 var clock := 0.0
 var rng := RandomNumberGenerator.new()
 
@@ -52,6 +59,8 @@ func reset() -> void:
 	known_attackers.clear()
 	known_blocks.clear()
 	offset_tweens.clear()
+	stack_cache.clear()
+	lock_targets.clear()
 	primed = false
 	last_fx_id = 0
 	next_free = 0.0
@@ -107,15 +116,80 @@ func present(snapshot: Dictionary) -> void:
 	if prompt_kind != "InputBlock": known_blocks = blocks_now
 	var fresh: Array = fx.filter(func(event): return int(event.get("id", 0)) > last_fx_id) if primed else []
 	last_fx_id = newest
+	player_engine.clear()
+	for seat in range(snapshot.get("players", []).size()):
+		player_engine[int(snapshot.players[seat].get("engineId", seat))] = seat
+	var stack: Array = snapshot.get("stack", [])
+	var casts: Array = stack.filter(func(item): return primed and not stack_cache.has(int(item.id)))
+	_remember_stack(stack)
 	if not primed:
 		primed = true
 		return
 	if not enabled():
+		lock_targets.clear()
 		_release_departures()
+		queue_redraw()
 		return
-	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty():
+	_aim_locks(stack)
+	if attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty():
 		return
-	_play_beat(snapshot, attacks, blocks, fresh)
+	_play_beat(snapshot, attacks, blocks, fresh, casts)
+
+## Card color of a stack item from its mana cost: one color, a blend for gold, gray for none.
+static func spell_color(item: Dictionary) -> Color:
+	var cost: String = str(item.get("card", {}).get("manaCost", ""))
+	var palette := {"W": Color("fff1c4"), "U": Color("5aa9ff"), "B": Color("b07cff"), "R": Color("ff6a3d"), "G": Color("6fe07a")}
+	var found: Array = []
+	for letter in ["W", "U", "B", "R", "G"]:
+		if cost.contains(letter): found.append(palette[letter])
+	if found.is_empty(): return Color("c9d6d6")
+	var mixed: Color = found[0]
+	for index in range(1, found.size()): mixed = mixed.lerp(found[index], 1.0 / (index + 1))
+	return mixed
+
+func _remember_stack(stack: Array) -> void:
+	var now := _now()
+	var live := {}
+	for item in stack:
+		var id := int(item.id)
+		live[id] = true
+		var entry: Dictionary = stack_cache.get(id, {})
+		entry.targets = item.get("targets", []).map(func(target): return {"kind": str(target.get("kind", "")), "id": int(target.get("id", -1))})
+		entry.color = spell_color(item)
+		entry.controller = int(item.get("controller", -1))
+		entry.source = int(item.get("sourceId", -1))
+		var point: Vector2 = stack_point.call(id) if stack_point.is_valid() else Vector2.INF
+		if point.is_finite(): entry.point = point
+		entry.seen = now
+		stack_cache[id] = entry
+	for id in stack_cache.keys():
+		if not live.has(id) and now - float(stack_cache[id].seen) > 6.0: stack_cache.erase(id)
+
+func _aim_locks(stack: Array) -> void:
+	lock_targets.clear()
+	for item in stack:
+		for target in item.get("targets", []):
+			lock_targets.append({"kind": str(target.get("kind", "")), "id": int(target.get("id", -1)), "color": spell_color(item)})
+	if not lock_targets.is_empty(): set_process(true)
+	queue_redraw()
+
+## Where a stack target is on screen: a card on the table or a player's portrait.
+func _stack_target_point(target: Dictionary) -> Vector2:
+	if target.kind == "player":
+		var avatar = portrait_view.call(int(player_engine.get(int(target.id), -1))) if portrait_view.is_valid() else null
+		return avatar.get_global_rect().get_center() if is_instance_valid(avatar) else Vector2.INF
+	if target.kind == "card":
+		var view := view_for(int(target.id))
+		return _center(view) if view != null else Vector2.INF
+	return Vector2.INF
+
+func _stack_origin(id: int) -> Vector2:
+	var live: Vector2 = stack_point.call(id) if stack_point.is_valid() else Vector2.INF
+	if live.is_finite(): return live
+	var entry: Dictionary = stack_cache.get(id, {})
+	if entry.has("point"): return entry.point
+	var avatar = portrait_view.call(int(player_engine.get(int(entry.get("controller", -1)), -1))) if portrait_view.is_valid() else null
+	return avatar.get_global_rect().get_center() if is_instance_valid(avatar) else Vector2.INF
 
 func _release_departures() -> void:
 	for id in pending_departures:
@@ -127,7 +201,7 @@ func _release_departures() -> void:
 func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
-func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Array) -> void:
+func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Array, casts: Array = []) -> void:
 	var now := _now()
 	var start := maxf(now, next_free)
 	var pace := speed
@@ -150,7 +224,38 @@ func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Arra
 			_lunge(blocker, _center(attacker), at, 24.0, 0.14 * pace, 0.22 * pace, false)
 			_pulse_ring(_center(blocker), at + 0.12 * pace, TEAL, 0.32 * pace)
 			length = maxf(length, 0.4 * pace)
+	for item in casts:
+		var id := int(item.id)
+		var seat := int(player_engine.get(int(item.get("controller", -1)), -1))
+		var origin := Vector2.INF
+		var source := view_for(int(item.get("sourceId", -1)))
+		if item.get("ability", false) and source != null: origin = _center(source)
+		elif seat > 0 and portrait_view.is_valid() and is_instance_valid(portrait_view.call(seat)): origin = portrait_view.call(seat).get_global_rect().get_center()
+		if not origin.is_finite(): continue # Your own spells already fly from your hand.
+		_cast_spark(origin, id, at, spell_color(item), 0.34 * pace)
+		length = maxf(length, 0.4 * pace)
 	var impact_at := at
+	var flight := 0.0
+	for event in fresh:
+		var kind: String = event.get("kind", "")
+		if kind not in ["resolve", "fizzled", "countered"]: continue
+		var id := int(event.get("stackId", -1))
+		var entry: Dictionary = stack_cache.get(id, {})
+		var origin := _stack_origin(id)
+		if not origin.is_finite(): continue
+		if kind == "countered":
+			_shatter(origin, at, pace)
+			length = maxf(length, 0.6 * pace)
+			continue
+		for target in entry.get("targets", []):
+			var aim := _stack_target_point(target)
+			if not aim.is_finite(): continue
+			var color: Color = Color("8d9a9a") if kind == "fizzled" else entry.get("color", Color.WHITE)
+			_projectile(origin, aim, at, color, 0.3 * pace, kind == "fizzled")
+			flight = 0.3 * pace
+	if flight > 0.0:
+		impact_at = at + flight
+		length = maxf(length, flight + 0.2 * pace)
 	var struck := {}
 	for event in fresh:
 		if event.get("kind", "") != "damage" or not event.get("combat", false): continue
@@ -161,7 +266,7 @@ func _play_beat(snapshot: Dictionary, attacks: Array, blocks: Array, fresh: Arra
 		if view == null or not aim.is_finite(): continue
 		struck[source] = true
 		_lunge(view, aim, at, 96.0, 0.13 * pace, 0.26 * pace, true)
-		impact_at = at + 0.21 * pace
+		impact_at = maxf(impact_at, at + 0.21 * pace)
 	var hits := 0
 	for event in fresh:
 		if event.get("kind", "") != "damage": continue
@@ -234,7 +339,7 @@ func _impact(event: Dictionary, delay: float, pace: float) -> bool:
 		return true
 	var view := view_for(int(event.targetId))
 	if view == null: return false
-	_shake(view, "fx_offset", delay, 0.24 * pace, 6.0)
+	_shake(view, "fx_shake", delay, 0.24 * pace, 6.0)
 	_flash(view, delay, color, 0.3 * pace)
 	var label := text
 	if event.get("deathtouch", false): label += " DEATHTOUCH"
@@ -242,7 +347,7 @@ func _impact(event: Dictionary, delay: float, pace: float) -> bool:
 	return true
 
 func _shake(target: Object, property: String, delay: float, length: float, strength: float) -> void:
-	var tween: Tween = _offset_tween(target) if property == "fx_offset" else target.create_tween()
+	var tween: Tween = target.create_tween()
 	if delay > 0.0: tween.tween_interval(delay)
 	var seed_x := rng.randf() * TAU
 	tween.tween_method(func(t: float):
@@ -301,6 +406,27 @@ func _fly(tween: Tween, view: Control, start: Vector2, goal: Vector2, length: fl
 		view.scale = Vector2.ONE * lerpf(1.0, 0.32, t)
 		view.modulate.a = 1.0 - maxf(0.0, t - 0.55) / 0.45, 0.0, 1.0, maxf(length, 0.05)).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 
+## A spell or ability going onto the stack: a spark from its caster or source into its entry.
+func _cast_spark(origin: Vector2, stack_id: int, delay: float, color: Color, length: float) -> void:
+	items.append({"kind": "spark", "from": origin, "stack": stack_id, "start": clock + delay, "life": length, "color": color})
+	set_process(true)
+
+## A resolving spell's effect travelling from its stack entry to one target, styled by color.
+func _projectile(origin: Vector2, aim: Vector2, delay: float, color: Color, length: float, fizzle: bool) -> void:
+	var lift := Vector2(0, -minf(160.0, origin.distance_to(aim) * 0.28))
+	items.append({"kind": "bolt", "from": origin, "to": aim, "bend": (origin + aim) * 0.5 + lift, "start": clock + delay, "life": length, "color": color, "fizzle": fizzle})
+	if fizzle:
+		_number("FIZZLE", aim + Vector2(0, -10), delay + length, color, 20, 1.0, true)
+	else:
+		_pulse_ring(aim, delay + length, color, 0.3)
+	set_process(true)
+
+## A countered spell: its stack entry is struck through and breaks into glyphs.
+func _shatter(at: Vector2, delay: float, pace: float) -> void:
+	items.append({"kind": "strike", "at": at, "start": clock + delay, "life": 0.5 * maxf(pace, 0.6), "color": HIT})
+	get_tree().create_timer(maxf(delay + 0.12 * pace, 0.01)).timeout.connect(func(): _burst(at, Vector2(200, 40), HIT, Vector2(0, 60), 14, pace))
+	_number("COUNTERED", at + Vector2(0, -6), delay, HIT, 20, pace, true)
+
 func _flash(view: Control, delay: float, color: Color, length: float) -> void:
 	items.append({"kind": "flash", "view": view, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
@@ -309,8 +435,8 @@ func _pulse_ring(at: Vector2, delay: float, color: Color, length: float) -> void
 	items.append({"kind": "ring", "at": at, "start": clock + delay, "life": length, "color": color})
 	set_process(true)
 
-func _number(text: String, at: Vector2, delay: float, color: Color, font_size: int, pace: float) -> void:
-	items.append({"kind": "number", "text": text, "at": at, "start": clock + delay, "life": 0.95 * maxf(pace, 0.6), "color": color, "size": font_size})
+func _number(text: String, at: Vector2, delay: float, color: Color, font_size: int, pace: float, plate := false) -> void:
+	items.append({"kind": "number", "text": text, "at": at, "start": clock + delay, "life": 0.95 * maxf(pace, 0.6), "color": color, "size": font_size, "plate": plate})
 	set_process(true)
 
 func _burst(at: Vector2, area: Vector2, color: Color, drift: Vector2, count: int, pace: float) -> void:
@@ -324,11 +450,13 @@ func _process(delta: float) -> void:
 	clock += delta
 	items = items.filter(func(item): return clock < item.start + item.life)
 	queue_redraw()
-	if items.is_empty(): set_process(false)
+	if items.is_empty() and lock_targets.is_empty(): set_process(false)
 
 func _draw() -> void:
 	var to_local := get_global_transform().affine_inverse()
 	var font := Terminal.font()
+	for lock in lock_targets:
+		_draw_lock(lock, to_local)
 	for item in items:
 		var t: float = (clock - item.start) / item.life
 		if t < 0.0: continue
@@ -338,7 +466,7 @@ func _draw() -> void:
 				if not is_instance_valid(view): continue
 				var tint: Color = item.color
 				tint.a = 0.55 * (1.0 - t)
-				draw_set_transform_matrix(to_local * view.get_global_transform() * Transform2D(0, view.fx_offset.rotated(-view.rotation)))
+				draw_set_transform_matrix(to_local * view.get_global_transform() * Transform2D(0, (view.fx_offset + view.fx_shake).rotated(-view.rotation)))
 				var box := StyleBoxFlat.new()
 				box.bg_color = tint
 				box.set_corner_radius_all(int(maxf(4.0, view.size.x * 0.06)))
@@ -358,10 +486,87 @@ func _draw() -> void:
 				var width := font.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now).x
 				var spot: Vector2 = to_local * (item.at + Vector2(0, -46.0 * rise)) - Vector2(width * 0.5, 0)
 				var shade := Color(0.02, 0.03, 0.03, ink.a * 0.85)
+				if item.get("plate", false):
+					# Words get an opaque terminal plate so they never sit on other text.
+					var plate := Rect2(spot + Vector2(-10, -size_now * 0.9), Vector2(width + 20, size_now * 1.3))
+					draw_rect(plate, Color(0.04, 0.06, 0.06, ink.a))
+					draw_rect(plate, Color(ink, ink.a * 0.8), false, 1.5)
 				draw_string_outline(font, spot, item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now, 6, shade)
 				draw_string(font, spot, item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now, ink)
+			"spark":
+				var goal: Vector2 = stack_point.call(item.stack) if stack_point.is_valid() else Vector2.INF
+				if not goal.is_finite(): goal = item.get("goal", item.from)
+				item.goal = goal
+				var bend: Vector2 = (item.from + goal) * 0.5 + Vector2(0, -80)
+				_draw_trail(item.from, bend, goal, 1.0 - pow(1.0 - t, 3), item.color, to_local, 4.0)
+				if t > 0.85:
+					var ring: Color = item.color
+					ring.a = (1.0 - t) / 0.15
+					draw_arc(to_local * goal, 8.0 + 30.0 * (t - 0.85) / 0.15, 0, TAU, 32, ring, 2.0, true)
+			"bolt":
+				var travel := t * t
+				_draw_trail(item.from, item.bend, item.to, travel, item.color, to_local, 3.0 if item.fizzle else 6.0)
+				if not item.fizzle and item.color.r > 0.9 and item.color.g < 0.6:
+					# Red: sparks fall off the head.
+					var head := _bezier(item.from, item.bend, item.to, travel)
+					for index in range(4):
+						var spark := head + Vector2(sin(clock * 37.0 + index * 2.1), cos(clock * 29.0 + index * 1.7)) * 9.0
+						draw_circle(to_local * spark, 2.0, Color(1.0, 0.85, 0.4, 0.9))
+			"strike":
+				var cut: Color = item.color
+				cut.a = 1.0 - t
+				var reach := minf(1.0, t * 4.0)
+				var left: Vector2 = to_local * (item.at + Vector2(-110, 0))
+				draw_line(left, left + Vector2(220 * reach, 0), cut, 3.0, true)
 			"glyph":
 				var ease_in := t * t
 				var glyph: Color = item.color
 				glyph.a = 1.0 - t
 				draw_string(font, to_local * (item.at + item.drift * ease_in), item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, glyph)
+
+## A comet along a quadratic arc up to `travel` (0..1): fading tail, bright head with a halo.
+func _draw_trail(a: Vector2, bend: Vector2, b: Vector2, travel: float, color: Color, to_local: Transform2D, width: float) -> void:
+	if travel <= 0.0: return
+	var tail := maxf(0.0, travel - 0.3)
+	var points := PackedVector2Array()
+	var colors := PackedColorArray()
+	for index in range(13):
+		var u := lerpf(tail, travel, index / 12.0)
+		points.append(to_local * _bezier(a, bend, b, u))
+		var c := color
+		c.a = float(index) / 12.0
+		colors.append(c)
+	draw_polyline_colors(points, colors, width, true)
+	var head: Vector2 = points[points.size() - 1]
+	var halo := color
+	halo.a = 0.25
+	draw_circle(head, width * 2.2, halo)
+	draw_circle(head, width * 0.9, color.lerp(Color.WHITE, 0.6))
+
+## Corner brackets on something a stack item is aiming at, pulsing in the spell's color.
+func _draw_lock(lock: Dictionary, to_local: Transform2D) -> void:
+	var rect := Rect2()
+	var placed := Transform2D.IDENTITY
+	if lock.kind == "player":
+		var avatar = portrait_view.call(int(player_engine.get(int(lock.id), -1))) if portrait_view.is_valid() else null
+		if not is_instance_valid(avatar) or not avatar.is_visible_in_tree(): return
+		rect = Rect2(Vector2.ZERO, avatar.size)
+		placed = to_local * avatar.get_global_transform()
+	elif lock.kind == "card":
+		var view := view_for(int(lock.id))
+		if view == null: return
+		rect = Rect2(Vector2.ZERO, view.size)
+		placed = to_local * view.get_global_transform()
+	else:
+		return
+	var color: Color = lock.color
+	color.a = 0.55 + 0.35 * sin(clock * 5.0)
+	var box := rect.grow(6.0 + 2.0 * sin(clock * 5.0))
+	var arm := minf(box.size.x, box.size.y) * 0.22
+	draw_set_transform_matrix(placed)
+	for corner in [box.position, Vector2(box.end.x, box.position.y), box.end, Vector2(box.position.x, box.end.y)]:
+		var sx := 1.0 if corner.x <= box.get_center().x else -1.0
+		var sy := 1.0 if corner.y <= box.get_center().y else -1.0
+		draw_line(corner, corner + Vector2(arm * sx, 0), color, 3.0, true)
+		draw_line(corner, corner + Vector2(0, arm * sy), color, 3.0, true)
+	draw_set_transform_matrix(Transform2D.IDENTITY)

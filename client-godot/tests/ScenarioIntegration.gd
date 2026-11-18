@@ -386,6 +386,52 @@ func combat_fx() -> bool:
 	await capture("settled")
 	return check(fx.ghosts.is_empty() and not ui.cards.has(ogre) and ui.cards[giant.id].fx_offset == Vector2.ZERO, "Every effect ends on the settled board")
 
+## Spell animations from Forge's real stack: brackets lock on to what AI 1's Bolt and Shock aim
+## at, Counterspell's answer shatters its stack entry ("countered"), and the other spell's
+## resolution flies a projectile from its stack entry to its target ("resolve").
+func spell_fx() -> bool:
+	const Fx = preload("res://scripts/ui/TableFx.gd")
+	Fx.speed = 1.0
+	var fx: Control = ui.table_fx
+	if not await wait_for(func(): return ui.snapshot.stack.size() == 2 and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority", 20.0): return check(false, "Bolt and Shock wait on the stack")
+	var stack_ids: Array = ui.snapshot.stack.map(func(item): return int(item.id))
+	var bears := find_card("Grizzly Bears", "Battlefield")
+	fx.present(ui.snapshot) # Animations were switched on after this board's last snapshot.
+	for index in range(20): await ui.get_tree().process_frame
+	if not check(fx.lock_targets.any(func(lock): return lock.kind == "card" and int(lock.id) == int(bears.id)) and fx.lock_targets.any(func(lock): return lock.kind == "player"), "Brackets lock on to the Bears and to you: " + str(fx.lock_targets)): return false
+	await capture("lock")
+	ui.incoming_effect.respond()
+	if not await tap("Island", 2) or not await cast("Counterspell"): return false
+	for index in range(10):
+		if not await wait_ready(): return false
+	await ui.get_tree().create_timer(0.5).timeout
+	if not check(ui.response_target.visible, "Counterspell asks which spell to answer"): return false
+	var answered := int(ui.snapshot.asks[0].options[0].stackId)
+	ui.response_target.confirm.pressed.emit()
+	var saw_shatter := false
+	var saw_bolt := false
+	for index in range(600):
+		await ui.get_tree().process_frame
+		if fx.items.any(func(item): return item.kind == "strike"): saw_shatter = true
+		if fx.items.any(func(item): return item.kind == "bolt" and not item.fizzle):
+			if not saw_bolt:
+				saw_bolt = true
+				await ui.get_tree().create_timer(0.24).timeout
+				await capture("projectile")
+		if saw_shatter and saw_bolt: break
+		if index % 6 == 0 and ui.snapshot.get("connectionReady", false) and ui.snapshot.asks.is_empty():
+			if ui.incoming_effect.showing(): ui.incoming_effect.resolve_button.pressed.emit()
+			elif ui.snapshot.prompt.get("okEnabled", false) and ui.snapshot.prompt.get("inputKind", "") == "InputPassPriority" and not ui.snapshot.stack.is_empty(): ui._intent("ok")
+	var events: Array = ui.snapshot.get("fx", []).filter(func(event): return event.get("kind", "") in ["resolve", "countered", "fizzled"])
+	print("SCENARIO spell fx: answered=", answered, " stack=", stack_ids, " ", JSON.stringify(events))
+	if not check(events.any(func(event): return event.kind == "countered" and int(event.stackId) == answered), "The answered spell is reported countered"): return false
+	var other: int = stack_ids.filter(func(id): return id != answered)[0]
+	if not check(events.any(func(event): return event.kind == "resolve" and int(event.stackId) == other), "The other spell is reported resolved"): return false
+	if not check(saw_shatter and saw_bolt, "The table shattered the countered entry (%s) and flew the other spell to its target (%s)" % [saw_shatter, saw_bolt]): return false
+	await ui.get_tree().create_timer(1.5).timeout
+	await capture("settled")
+	return check(fx.ghosts.is_empty() and fx.lock_targets.is_empty(), "Every effect and lock ends once the stack is empty")
+
 func equipment() -> bool:
 	var host := find_card("Grizzly Bears", "Battlefield")
 	var gear := [find_card("Bonesplitter", "Battlefield"), find_card("Basilisk Collar", "Battlefield")]

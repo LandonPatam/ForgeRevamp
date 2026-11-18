@@ -510,6 +510,7 @@ func normalize(raw: Dictionary) -> Dictionary:
 		fx.sourceId = int(fx.get("sourceId", -1))
 		fx.amount = int(fx.get("amount", 0))
 		fx.targetId = int(fx.get("targetId", -1))
+		fx.stackId = int(fx.get("stackId", -1))
 		if fx.get("targetKind", "") == "player": fx.targetSeat = seats.find(fx.targetId)
 	result.targetedEffects = result.get("targetedEffects", [])
 	for effect in result.targetedEffects:

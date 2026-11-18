@@ -18,8 +18,41 @@ final class TableFx {
     /** Attackers already matched to a planeswalker/battle loss in the current damage step. */
     private final java.util.Set<String> credited = new java.util.HashSet<>();
     private long creditedStep = -1;
+    /** Stack items still on the stack, by spell ability: Forge's resolve and removal events name
+     *  the ability, the client knows the stack item. The newest cast resolves first. */
+    private final java.util.Map<Integer, java.util.ArrayDeque<Integer>> openStack = new java.util.HashMap<>();
+    private final java.util.Set<Integer> resolvedStack = new java.util.HashSet<>();
 
     synchronized void record(GameEvent event, forge.game.Game game) {
+        if (event instanceof forge.game.event.GameEventSpellAbilityCast cast && cast.sa() != null && cast.si() != null) {
+            openStack.computeIfAbsent(cast.sa().getId(), id -> new java.util.ArrayDeque<>()).push(cast.si().getId());
+            return;
+        }
+        if (event instanceof forge.game.event.GameEventSpellResolved resolved && resolved.spell() != null) {
+            var open = openStack.get(resolved.spell().getId());
+            if (open == null || open.isEmpty()) return;
+            int stackId = open.peek();
+            resolvedStack.add(stackId);
+            JsonObject fx = new JsonObject();
+            fx.addProperty("kind", resolved.hasFizzled() ? "fizzled" : "resolve");
+            fx.addProperty("stackId", stackId);
+            add(fx);
+            return;
+        }
+        if (event instanceof forge.game.event.GameEventSpellRemovedFromStack removed && removed.sa() != null) {
+            var open = openStack.get(removed.sa().getId());
+            if (open == null || open.isEmpty()) return;
+            int stackId = open.pop();
+            if (open.isEmpty()) openStack.remove(removed.sa().getId());
+            // Left the stack without resolving: countered (or exiled/removed by an effect).
+            if (!resolvedStack.remove(stackId)) {
+                JsonObject fx = new JsonObject();
+                fx.addProperty("kind", "countered");
+                fx.addProperty("stackId", stackId);
+                add(fx);
+            }
+            return;
+        }
         if (event instanceof GameEventCardDamaged damaged && damaged.amount() > 0 && damaged.card() != null) {
             JsonObject fx = damage(damaged.source() == null ? -1 : damaged.source().getId(), damaged.amount());
             fx.addProperty("targetKind", "card");

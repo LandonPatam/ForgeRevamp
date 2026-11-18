@@ -59,6 +59,11 @@ var fx_offset := Vector2.ZERO:
 	set(value):
 		fx_offset = value
 		_apply_fx_offset()
+## A hit's shake, added on top of any strike in progress.
+var fx_shake := Vector2.ZERO:
+	set(value):
+		fx_shake = value
+		_apply_fx_offset()
 var table_angle := true
 var hand_mode := false
 var base_rotation := 0.0
@@ -304,9 +309,10 @@ func _arrange() -> void:
 func _apply_fx_offset() -> void:
 	if visual == null: return
 	var local := Vector2.ZERO
-	if fx_offset != Vector2.ZERO:
+	var moved := fx_offset + fx_shake
+	if moved != Vector2.ZERO:
 		var factor := scale.x if absf(scale.x) > 0.01 else 1.0
-		local = fx_offset.rotated(-rotation) / factor
+		local = moved.rotated(-rotation) / factor
 	visual.position = visual_base + local
 	trait_layer.position = local
 	stats_layer.position = local

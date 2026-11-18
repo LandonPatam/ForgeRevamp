@@ -1,0 +1,15 @@
+# Spell animations on a real engine: AI 1 has Lightning Bolt aimed at your Grizzly Bears and Shock aimed at you. Brackets lock on to both targets. Counter one with Counterspell (it shatters), let the other resolve (a red bolt flies to its target).
+activeplayer=p0
+activephase=MAIN1
+turn=5
+removesummoningsickness=true
+p0life=40
+p0battlefield=Grizzly Bears|Id:1;Island;Island
+p0hand=Counterspell
+p0library=Island;Island;Island;Island;Island;Island;Island;Island;Island;Island
+p1life=40
+p1battlefield=Mountain;Mountain
+p1putonstack=Lightning Bolt->1;Shock->human
+p1library=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+p2life=40
+p2library=Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains;Plains
