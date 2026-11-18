@@ -7,7 +7,7 @@
   - combat strikes, damage numbers and exits
   - cast sparks, lock-on brackets, resolve projectiles, counter marks
   - opponent plays shown large, tokens, counter and pump labels, rolling HP, your mana symbols
-  - board-wipe sweep and turn banner
+  - board-wipe sweep (the turn banner was removed: the user rejected it)
   - endings: the loser's board breaks apart, then OUT, then YOU WIN (gold) / YOU LOSE (purple)
   - Table settings → Animations: Off / Fast / Normal / Cinematic. Checks run with animations off.
 - **Also on this branch:**

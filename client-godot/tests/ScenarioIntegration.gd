@@ -475,8 +475,8 @@ func board_fx() -> bool:
 	var hidden: Array = ui.cards.values().filter(func(view): return view.fx_alpha < 1.0)
 	return check(hidden.is_empty() and int(round(ui.hud_values[0].portrait.shown_life)) == int(ui.snapshot.players[0].life), "Every card is fully shown again and the HP digits settled on the real total")
 
-## Board-wipe sweep and turn banner on a real engine: Wrath of God over five creatures plays one
-## scan line with staggered exits, and passing the turn slides a TURN banner in once.
+## Board-wipe sweep on a real engine: Wrath of God over five creatures plays one scan line with
+## staggered exits; after a turn passes, the director is idle.
 func wipe_fx() -> bool:
 	const Fx = preload("res://scripts/ui/TableFx.gd")
 	Fx.speed = 1.0
@@ -501,9 +501,6 @@ func wipe_fx() -> bool:
 	var turn := int(ui.snapshot.game.turn)
 	ui._pass_turn()
 	if not await pass_until(func(): return int(ui.snapshot.game.turn) > turn, 300): return check(false, "The turn passes")
-	for index in range(12): await ui.get_tree().process_frame
-	await capture("banner")
-	if not check(int(fx.played.get("banner", 0)) == 1, "A new turn slides the banner in exactly once: " + str(fx.played)): return false
 	await ui.get_tree().create_timer(2.0).timeout
 	return check(fx.items.is_empty() and not fx.is_processing(), "Once every effect ends the director stops running (no idle cost): %d items, processing=%s" % [fx.items.size(), fx.is_processing()])
 

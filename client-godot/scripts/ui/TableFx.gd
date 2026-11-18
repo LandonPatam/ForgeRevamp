@@ -62,10 +62,6 @@ var eliminated: Dictionary = {}
 var holding: Dictionary = {}
 ## Worst cost of this director's own work in microseconds, for performance checks.
 var cost := {"draw": 0, "present": 0}
-## Turn banner: the last turn/active seat shown, so reconnects and snapshots never repeat it.
-var banner_key := ""
-var turn_name: Callable  ## seat -> display name
-var banner_point: Callable  ## -> global top-center point for the turn banner
 var table_rect: Callable  ## -> global rect of the table itself (not the rail)
 var flash_box := StyleBoxFlat.new()
 var clock := 0.0
@@ -93,7 +89,6 @@ func reset() -> void:
 	previous_cards.clear()
 	previous_life.clear()
 	previous_mana.clear()
-	banner_key = ""
 	eliminated.clear()
 	for seat in holding.keys(): _finish_elimination(seat)
 	holding.clear()
@@ -163,9 +158,6 @@ func _present(snapshot: Dictionary) -> void:
 	var stack: Array = snapshot.get("stack", [])
 	var casts: Array = stack.filter(func(item): return primed and not stack_cache.has(int(item.id)))
 	var changes: Dictionary = _board_changes(snapshot) if primed else {}
-	var turn_key := "%s/%s" % [snapshot.get("game", {}).get("turn", ""), snapshot.get("game", {}).get("activePlayer", "")]
-	var new_turn := primed and banner_key != "" and turn_key != banner_key
-	banner_key = turn_key
 	_remember_board(snapshot)
 	_remember_stack(stack)
 	var losers: Array = []
@@ -182,7 +174,6 @@ func _present(snapshot: Dictionary) -> void:
 		queue_redraw()
 		return
 	_aim_locks(stack)
-	if new_turn and speed >= 1.0: _turn_banner(snapshot)
 	if not (attacks.is_empty() and blocks.is_empty() and fresh.is_empty() and pending_departures.is_empty() and casts.is_empty() and changes.is_empty()):
 		_play_beat(snapshot, attacks, blocks, fresh, casts, changes)
 	# Who lost goes last: the killing beat (hit, number, HP to 0) plays first, then their board.
@@ -490,7 +481,7 @@ func _board_life(changes: Dictionary, fresh: Array, casts: Array, at: float, imp
 
 ## Whether nothing is playing or about to play: the outcome screen waits for this.
 func settled() -> bool:
-	return not enabled() or (ghosts.is_empty() and holding.is_empty() and _now() >= next_free and not items.any(func(item): return item.kind != "banner"))
+	return not enabled() or (ghosts.is_empty() and holding.is_empty() and _now() >= next_free and items.is_empty())
 
 ## A player is out: after the current beat, every card still on their board breaks into glyphs,
 ## from their portrait outward, then their OUT mark appears. Cards Forge already removed are
@@ -546,18 +537,6 @@ func _sweep_origin(fresh: Array, area: Rect2) -> float:
 		if is_instance_valid(avatar):
 			return area.position.x if avatar.get_global_rect().get_center().x < area.get_center().x else area.end.x
 	return area.position.x
-
-## A new turn: a terminal strip slides across the top of the table naming whose turn it is, and
-## the active portrait pulses once. It sits above the opponents' fields, never over a decision.
-func _turn_banner(snapshot: Dictionary) -> void:
-	var seat := int(snapshot.get("game", {}).get("activePlayer", -1))
-	var name: String = turn_name.call(seat) if turn_name.is_valid() else ""
-	if name.is_empty() and seat >= 0 and seat < snapshot.get("players", []).size(): name = str(snapshot.players[seat].get("name", ""))
-	var text := "TURN %s  —  %s" % [str(snapshot.get("game", {}).get("turn", "")), ("YOUR TURN" if seat == 0 else name.to_upper())]
-	_add({"kind": "banner", "text": text, "start": clock, "life": 1.5 * speed, "color": VIOLET})
-	var avatar = portrait_view.call(seat) if portrait_view.is_valid() else null
-	if is_instance_valid(avatar): _pulse_ring(avatar.get_global_rect().get_center(), 0.15, VIOLET, 0.45 * speed)
-	set_process(true)
 
 ## Where an entering permanent comes from: the stack entry it resolved from, the zone icon it
 ## left (graveyard, exile, command zone), or its controller's portrait for a hidden hand.
@@ -976,24 +955,6 @@ func _draw_effects() -> void:
 					draw_line(top - Vector2(direction * band * 9.0, 0), bottom - Vector2(direction * band * 9.0, 0), trail, 9.0)
 				edge.a = fade
 				draw_line(top, bottom, edge.lerp(Color.WHITE, 0.5), 4.0, true)
-			"banner":
-				var area := get_global_rect()
-				var size_now := 22
-				var width := font.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now).x + 48.0
-				var slide := 1.0 - pow(1.0 - minf(1.0, t / 0.2), 3)
-				var leave := maxf(0.0, (t - 0.82) / 0.18)
-				leave = leave * leave
-				# Centered on the open strip just below the table divider: clear of the opponents'
-				# panels, the pass notice above the divider, and every decision.
-				var anchor: Vector2 = banner_point.call() if banner_point.is_valid() else Vector2(area.get_center().x, area.position.y + 22.0)
-				var rest := anchor.x - width * 0.5
-				var x: float = lerpf(area.position.x - width, rest, slide) + leave * (area.end.x - rest)
-				var strip := Rect2(to_local * Vector2(x, anchor.y), Vector2(width, 40))
-				var alpha := 1.0 - leave
-				draw_rect(strip, Color(0.04, 0.05, 0.07, 0.92 * alpha))
-				draw_rect(Rect2(strip.position, Vector2(4, strip.size.y)), Color(item.color, alpha))
-				draw_rect(strip, Color(item.color, 0.7 * alpha), false, 1.5)
-				draw_string(font, strip.position + Vector2(24, 28), item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_now, Color(item.color.lerp(Color.WHITE, 0.3), alpha))
 			"strike":
 				var cut: Color = item.color
 				cut.a = 1.0 - t

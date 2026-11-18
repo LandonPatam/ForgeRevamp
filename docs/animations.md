@@ -61,7 +61,7 @@ Phase 3 (board life) is done. It works only from snapshot diffs, so the bridge s
 Phase 4 (polish) is done, without sounds as decided:
 
 - **Board wipes:** when three or more permanents leave in one beat, a red scan line crosses the table (the table area only, not the rail). It starts from the side of the player who resolved the wipe. Each permanent breaks apart as the line reaches it; both move at a steady pace so they stay in step.
-- **Turn banner:** each new turn slides a terminal strip in, "TURN 6 — AI 1" (or YOUR TURN), on the open strip just below the table divider. That spot is clear of the opponents' panels, the pass notice and every decision. The active portrait pulses once. It plays once per turn, never on a reconnect's first snapshot, and is skipped at Fast speed.
+- **No turn banner:** a sliding TURN strip was tried and removed at the user's request. The purple active-turn light already shows whose turn it is.
 - **Performance:**
   - The director's own work is timed in `cost` (worst draw and snapshot diff, in µs). On the real-engine effect scenarios it peaks around 1.3 ms of drawing and 0.4 ms of diffing.
   - Past 360 drawn items, cosmetic particles are dropped (numbers and exits never are), and glyph bursts are capped at 220.
@@ -81,7 +81,7 @@ Remaining: the Mac run of the effect scenarios and sandbox boards, then two-seat
 - `node client-godot/tools/check.mjs scenario combat-fx --render`. In this real-engine block, the bridge must send each hit, and the table must play the strike, the numbers and the Ogre's exit, then settle clean. Captures: `-impact`, `-leaving`, `-settled`.
 - `check.mjs scenario spell-fx --render`: AI 1's Bolt (at your Bears) and Shock (at you); the brackets lock on, Counterspell's target is reported `countered` and shatters, the other spell is reported `resolve` and flies to its target. Captures: `-lock`, `-projectile`, `-settled`.
 - `check.mjs scenario board-fx --render`: AI 1 resolves a creature, tokens, a counter, a pump and a drain while you tap a Forest. Each effect must play: `played` and `shown_labels` on TableFx record them. Captures: `-mana`, `-showcase`, `-print`, `-labels`.
-- `check.mjs scenario wipe-fx --render`: Wrath of God over five creatures plays one sweep with staggered exits. Passing the turn plays the banner exactly once, and the director then goes idle. Captures: `-sweep`, `-banner`.
+- `check.mjs scenario wipe-fx --render`: Wrath of God over five creatures plays one sweep with staggered exits. After a turn passes, the director goes idle. Capture: `-sweep`.
 - `check.mjs scenario lose-fx --render` and `win-fx --render`: an AI's Bolt finishes you, and your Flame Rift finishes both opponents.
   - Each loser's board must break apart, and the OUT marks must appear, before the purple YOU LOSE or gold YOU WIN.
   - Without an app host the scenario shows no YOU WIN screen, so `win-fx` checks the table and the gold accent.
