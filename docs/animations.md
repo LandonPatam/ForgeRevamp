@@ -82,4 +82,9 @@ Remaining: the Mac run of the effect scenarios and sandbox boards, then two-seat
 - `check.mjs scenario spell-fx --render`: AI 1's Bolt (at your Bears) and Shock (at you); the brackets lock on, Counterspell's target is reported `countered` and shatters, the other spell is reported `resolve` and flies to its target. Captures: `-lock`, `-projectile`, `-settled`.
 - `check.mjs scenario board-fx --render`: AI 1 resolves a creature, tokens, a counter, a pump and a drain while you tap a Forest. Each effect must play: `played` and `shown_labels` on TableFx record them. Captures: `-mana`, `-showcase`, `-print`, `-labels`.
 - `check.mjs scenario wipe-fx --render`: Wrath of God over five creatures plays one sweep with staggered exits. Passing the turn plays the banner exactly once, and the director then goes idle. Captures: `-sweep`, `-banner`.
-- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx`, `spell-fx`, `board-fx` or `wipe-fx`.
+- `check.mjs scenario lose-fx --render` and `win-fx --render`: an AI's Bolt finishes you, and your Flame Rift finishes both opponents.
+  - Each loser's board must break apart, and the OUT marks must appear, before the purple YOU LOSE or gold YOU WIN.
+  - Without an app host the scenario shows no YOU WIN screen, so `win-fx` checks the table and the gold accent.
+- Animation checks turn effects on themselves (`TableFx.speed = 1.0`). If the board's last snapshot came before that, they call `table_fx.present(ui.snapshot)` once.
+  - Read `played`, `shown_labels` and `cost` rather than polling `items`: saving a capture can outlast a short effect.
+- Sandbox: `node client-godot/tools/sandbox.mjs combat-fx`, `spell-fx`, `board-fx`, `wipe-fx`, `win-fx` or `lose-fx`.

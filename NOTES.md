@@ -1,22 +1,38 @@
-# Session notes - 2026-11-17
+# Session notes - 2026-11-18
 
 ## Current state
 
-- Windows checkout is on `feature/stuck-guard-and-reports` at pushed commit `45eafa9`. Local `main` is `cda06eb`. This session's changes and new fixtures are uncommitted in `D:\ForgeUI`. Inspect Git status before switching or packaging.
-- ForgeUI now confirms a trigger's sole legal creature, pauses for Continue without blockers, explains ward and its remaining mana, and asks for Heritage's target before its Yes/No resolution choice. The existing Godot tethers and combat rail present these decisions.
-- Fixed zero-mode answers, order at both library ends, and whole-library scry counts. Distinct Forge input IDs invalidate staged picks on replacement. Disconnect clears unsent local actions, and Forge's accepted picks remain available through the ordinary controls.
-- Windows targeted checks passed. Coverage includes exact target identity, Heritage Yes/No, mode combinations/repeats/pawprints, both trigger orders, partial ward and cancel, optional targets under Auto-resolve, scry order/privacy, and two-seat ordering and reconnect. The isolated build is `bridge/target/verified-coverage`. See [coverage and remaining plan](docs/interaction-reliability.md).
-- The vendored checkout has the prior patches plus `forced-decisions.patch` and `library-ends.patch` applied locally. See [rebuild and apply order](FORGE_PATCHES.md). Rebuild Forge Game, Forge GUI and the bridge before validating on another machine.
+- **Branch:** Windows is on `feature/combat-animations`, pushed. It builds on the interaction-reliability work (`0ea856f`). Local `main` is still `cda06eb`, so the branch carries everything since then. Nothing is merged.
+- **Table animations, all four phases done** (`ui/TableFx.gd`, bridge `TableFx.java` `fx` stream; see [animations](docs/animations.md)):
+  - combat strikes, damage numbers and exits
+  - cast sparks, lock-on brackets, resolve projectiles, counter marks
+  - opponent plays shown large, tokens, counter and pump labels, rolling HP, your mana symbols
+  - board-wipe sweep and turn banner
+  - endings: the loser's board breaks apart, then OUT, then YOU WIN (gold) / YOU LOSE (purple)
+  - Table settings → Animations: Off / Fast / Normal / Cinematic. Checks run with animations off.
+- **Also on this branch:**
+  - Eliminated opponents are marked (OUT, plus how they went out).
+  - The loss screen says how you died.
+  - The deck text export keeps printings (`1 Sol Ring (C21) 263`).
+  - The editor's file dialogs no longer hide behind the carousel and freeze the app.
+  - The stuck guard no longer crashes on a removed field.
+- **Windows checks passed:**
+  - UI suite (37)
+  - animation scenarios `combat-fx`, `spell-fx`, `board-fx`, `wipe-fx`, `win-fx`, `lose-fx`, plus `blocking`, `combat`, `damage`, `guard`
+  - library check, UI-scale check, bridge checks
+  - Per the testing rule, `check.mjs all` was skipped: the animations are off in checks.
 
 ## Known issues
 
-- The full suite and Mac/live cross-platform validation are pending for these changes. During this session the Windows game held the standard bridge JARs open. The verified build used separate output and did not restart that match.
-- The earlier local shape sweep is separate work. Preserve `client-godot/tools/shape-sweep.mjs`, the `check.mjs shapes` changes, `shape_probe`, and the ignore entry. Keep those hunks out of the reliability commits. Its last recorded full run was 55/72 resolved, 4 uncastable and 13 driver failures. The driver still needs better AI waits, rail player targets and scry answers.
-- Forge's board export omits the stack and triggers in flight. Reproduce mid-trigger F8 reports from an earlier step or recast in the driver. If Maven claims success but Forge throws an unresolved compilation error, check compilation directly as described in [testing.md](docs/testing.md).
+- `blink` is flaky: Lightning Bolt sometimes stays on the stack after OK. It failed the same way with and without these changes.
+- `no-legal-blocks` needs the opt-in `forced-decisions.patch` in the Forge build.
+- Mac validation and two-seat online play are pending for everything on this branch.
+- Card art the bridge sends for a face-down permanent must stay a back. The animation copies reuse each card's cached face, so check this online.
+- The shape sweep (`tools/shape-sweep.mjs`, `check.mjs shapes`) remains separate, unfinished work.
 
 ## Next steps
 
-1. Custom vs generic presentation pairs are done for targets, players, modes, trigger order and library search (see [reliability](docs/interaction-reliability.md); uncommitted). Add a pair for any new presentation.
-2. Interruptions and the Stack responses matrix are covered (`flagbearer-replaced`, `discard-interrupted`, `matrix-*`). Open: a notice-and-pass ability case for the matrix, then the same checks on a two-seat online table.
-3. Add a decision-variant inventory to the precon playtester report and map observed variants to named Godot checks. Keep discovery runs distinct from checks that verify the exact result.
-4. Coordinate the local handoff before publishing. Run `check.mjs all` before a push, review the mixed test-file hunks, and send the exact branch and commit for Mac rebuild and Windows–Mac play in both host directions.
+1. **Mac:** pull `feature/combat-animations`, rebuild the bridge and run the six animation scenarios with `--render`. Look at the captures and play the sandbox boards (`combat-fx`, `spell-fx`, `board-fx`, `wipe-fx`, `win-fx`, `lose-fx`). Push fixes to the same branch.
+2. **Online:** run a two-seat game. Both seats see the same happenings, and nothing reveals hidden cards (face-down plays, hands).
+3. **Merge:** merge into `main` after 1–2 pass, then fix the `blink` race.
+4. **Earlier reliability items:** a notice-and-pass ability case for the stack matrix, and a decision-variant inventory for the playtester.

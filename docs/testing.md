@@ -72,6 +72,9 @@ node client-godot/tools/sandbox.mjs decisions --shot # screenshot to client-godo
 Adding one (no other registration needed):
 
 1. **Board:** `client-godot/tests/scenarios/<name>.state`, in Forge's game-state format. Copy `mind-stone.state`. Useful keys: `activeplayer`, `activephase`, `turn`, `p0battlefield=Card;Card|Id:1;Equipment|AttachedTo:1`, `p0hand`, `p0library`, `p1putonstack`, `removesummoningsickness=true`. p0 is you; p1/p2 are Forge AIs.
+   - `|Attacking` without an id only works 1v1: in the three-player fixture, attack a card (`Attacking:99` on a planeswalker with `Id:99`).
+   - `p0putonstack` resolves while the board loads; put your own spell in `p0hand` and cast it in the driver.
+   - Checks run with table animations off. Animation drivers set `TableFx.speed` themselves; see [animations](animations.md).
 2. **Driver:** add `func <name_with_underscores>() -> bool` to `client-godot/tests/ScenarioIntegration.gd`. The board is already loaded at turn 5 with priority.
    - Act through the same UI paths as a player: `ui._click_card(id)`, `ui.modal_panel.option_buttons[i].pressed.emit()`, `cast(name)`, `tap(name)`, `select_named(name)`, `drop_equipment(a, b)`, `settle()`.
    - Call `wait_ready()` after each action.
